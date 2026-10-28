@@ -74,13 +74,95 @@ const App = {
     studentHwSearchQuery: '',
     studentHwGradeFilter: 'ALL',
 
-    // Cấu hình quyền xem điểm và chế độ ẩn danh
+    // Cấu hình quyền xem điểm, ẩn danh & giám sát chống thoát màn hình khi thi
     settings: {
       allowStudentViewOwnScore: true,    // Cho phép học sinh tra cứu điểm của bản thân
       allowStudentViewClassBoard: true,  // Cho phép học sinh xem bảng điểm/thứ hạng của lớp
       anonymizeOtherStudents: true,      // Ẩn thông tin các bạn khác để bảo vệ sự riêng tư
+      allowStudentViewAnswers: true,     // Cho phép học sinh xem đáp án & lời giải sau khi nộp
+      warnOnExitExam: true,              // Cảnh báo & ghi nhận vi phạm khi thoát ra ngoài lúc đang thi (Điện thoại / App / Web)
     },
+    violationLogs: [],
     studentScoreTab: 'mine',             // 'mine' (Kết quả cá nhân) | 'classBoard' (Bảng xếp hạng lớp)
+  },
+
+  // Ép ô nhập Tài khoản đăng nhập luôn là chữ IN HOA (giữ nguyên vị trí con trỏ khi gõ trên điện thoại)
+  forceUppercaseInput(el) {
+    if (!el || typeof el.value !== 'string') return '';
+    const upper = el.value.toUpperCase();
+    if (el.value !== upper) {
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      el.value = upper;
+      if (typeof start === 'number' && typeof end === 'number' && typeof el.setSelectionRange === 'function') {
+        try { el.setSelectionRange(start, end); } catch (e) {}
+      }
+    }
+    return upper;
+  },
+
+  isExamExitWarningEnabled() {
+    return !(this.state.settings && this.state.settings.warnOnExitExam === false);
+  },
+
+  suppressAntiCheatTemporarily(ms = 1800) {
+    this._suppressLeaveUntil = Date.now() + ms;
+  },
+
+  resetExamMonitorState() {
+    this._examAwayActive = false;
+    this._lastViolationAt = 0;
+    if (this._blurCheckTimer) {
+      clearTimeout(this._blurCheckTimer);
+      this._blurCheckTimer = null;
+    }
+  },
+
+  recordExamLeaveViolation(reason = 'Thoát khỏi màn hình bài thi trên thiết bị') {
+    if (!this.state.activeExam) return false;
+    if (!this.isExamExitWarningEnabled()) return false;
+    if (this._suppressLeaveUntil && Date.now() < this._suppressLeaveUntil) return false;
+    if (this._examAwayActive) return false;
+    if (this._lastViolationAt && (Date.now() - this._lastViolationAt) < 1200) return false;
+
+    this._examAwayActive = true;
+    this._lastViolationAt = Date.now();
+    this.state.tabSwitchesCount = (this.state.tabSwitchesCount || 0) + 1;
+    const timeStr = new Date().toLocaleTimeString('vi-VN');
+    if (!Array.isArray(this.state.violationLogs)) this.state.violationLogs = [];
+    this.state.violationLogs.push({
+      count: this.state.tabSwitchesCount,
+      time: timeStr,
+      reason
+    });
+
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate([200, 100, 200]); } catch (e) {}
+    }
+    if (typeof document !== 'undefined') {
+      this.updateExamHeaderViolationBadge();
+    }
+    return true;
+  },
+
+  handleExamReturnFocus() {
+    if (this._blurCheckTimer) {
+      clearTimeout(this._blurCheckTimer);
+      this._blurCheckTimer = null;
+    }
+    if (!this.state.activeExam) {
+      this._examAwayActive = false;
+      return false;
+    }
+    if (!this._examAwayActive) return false;
+    this._examAwayActive = false;
+    if (this.isExamExitWarningEnabled() && (this.state.tabSwitchesCount || 0) > 0) {
+      if (typeof document !== 'undefined') {
+        this.showAntiCheatWarning();
+      }
+      return true;
+    }
+    return false;
   },
 
   EXAM_CATEGORIES: [
@@ -122,18 +204,18 @@ const App = {
     const list = examsSource || [];
     const curGrade = activeGrade || 'ALL';
     return `
-      <div class="flex flex-wrap items-center gap-1.5">
-        <span class="text-[11px] font-bold text-slate-500 mr-1 inline-flex items-center gap-1">
-          <i class="fa-solid fa-layer-group text-indigo-500"></i><span>Khối lớp:</span>
+      <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap pb-0.5 sm:pb-0">
+        <span class="text-[11px] font-bold text-slate-500 mr-1 inline-flex items-center gap-1 shrink-0">
+          <i class="fa-solid fa-layer-group text-indigo-500"></i><span>Khối:</span>
         </span>
-        <button type="button" onclick="${fnName}('grade', 'ALL')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${curGrade === 'ALL' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}">
-          Tất cả khối (${list.length})
+        <button type="button" onclick="${fnName}('grade', 'ALL')" class="h-8 px-3 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 inline-flex items-center ${curGrade === 'ALL' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}">
+          Tất cả (${list.length})
         </button>
         ${[6, 7, 8, 9, 10, 11, 12].map(g => {
           const cnt = list.filter(e => Number(e.grade || 12) === g).length;
           const active = String(curGrade) === String(g);
           return `
-            <button type="button" onclick="${fnName}('grade', '${g}')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${active ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}">
+            <button type="button" onclick="${fnName}('grade', '${g}')" class="h-8 px-3 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 inline-flex items-center gap-1.5 ${active ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}">
               <span>Khối ${g}</span>
               ${cnt > 0 ? `<span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono ${active ? 'bg-indigo-700 text-white' : 'bg-indigo-50 text-indigo-700'}">${cnt}</span>` : ''}
             </button>
@@ -148,18 +230,18 @@ const App = {
     const curCat = activeCat || 'ALL';
     const inGrade = (examsSource || []).filter(e => gFilter === 'ALL' || String(e.grade || 12) === String(gFilter));
     return `
-      <div class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-200/70">
-        <span class="text-[11px] font-bold text-slate-500 mr-1 inline-flex items-center gap-1">
-          <i class="fa-solid fa-tags text-indigo-500"></i><span>Phân loại${gFilter !== 'ALL' ? ` (Khối ${gFilter})` : ''}:</span>
+      <div class="flex items-center gap-1.5 pt-2 border-t border-slate-200/70 overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap pb-0.5 sm:pb-0">
+        <span class="text-[11px] font-bold text-slate-500 mr-1 inline-flex items-center gap-1 shrink-0">
+          <i class="fa-solid fa-tags text-indigo-500"></i><span>Loại${gFilter !== 'ALL' ? ` (K${gFilter})` : ''}:</span>
         </span>
-        <button type="button" onclick="${fnName}('category', 'ALL')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${curCat === 'ALL' ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}">
-          Tất cả loại (${inGrade.length})
+        <button type="button" onclick="${fnName}('category', 'ALL')" class="h-8 px-3 rounded-xl text-[11px] font-bold transition cursor-pointer shrink-0 inline-flex items-center ${curCat === 'ALL' ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}">
+          Tất cả (${inGrade.length})
         </button>
         ${this.EXAM_CATEGORIES.map(c => {
           const cnt = inGrade.filter(e => (e.category || this.inferExamCategory(e)) === c.id).length;
           const active = curCat === c.id;
           return `
-            <button type="button" onclick="${fnName}('category', '${c.id}')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${active ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}">
+            <button type="button" onclick="${fnName}('category', '${c.id}')" class="h-8 px-3 rounded-xl text-[11px] font-bold transition cursor-pointer shrink-0 inline-flex items-center gap-1.5 ${active ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}">
               <i class="fa-solid ${c.icon} ${active ? 'text-indigo-300' : 'text-slate-400'}"></i>
               <span>${c.label}</span>
               ${cnt > 0 ? `<span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono ${active ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-700'}">${cnt}</span>` : ''}
@@ -207,16 +289,46 @@ const App = {
   },
 
   initGlobalEvents() {
-    // Giám sát rời tab thi & cảnh báo gian lận trực tiếp
+    if (this._globalEventsBound) return;
+    this._globalEventsBound = true;
+
+    // Giám sát thoát màn hình trên điện thoại (App iOS / Android) & chuyển tab trên trình duyệt
     document.addEventListener('visibilitychange', () => {
       if (!App.state.activeExam) return;
       if (document.hidden) {
-        App.state.tabSwitchesCount++;
-        console.warn('Cảnh báo: Thí sinh rời màn hình bài thi! Lần vi phạm thứ: ', App.state.tabSwitchesCount);
+        App.recordExamLeaveViolation('Thoát ra ngoài ứng dụng / chuyển màn hình khi đang thi');
       } else {
-        // Học sinh vừa quay lại màn hình làm bài -> cảnh báo tức thì
-        App.showAntiCheatWarning();
+        App.handleExamReturnFocus();
       }
+    });
+
+    window.addEventListener('pagehide', () => {
+      if (!App.state.activeExam) return;
+      App.recordExamLeaveViolation('Thoát ứng dụng hoặc ẩn màn hình bài thi trên điện thoại');
+    });
+
+    window.addEventListener('pageshow', () => {
+      App.handleExamReturnFocus();
+    });
+
+    window.addEventListener('blur', () => {
+      if (!App.state.activeExam || !App.isExamExitWarningEnabled()) return;
+      if (App._blurCheckTimer) clearTimeout(App._blurCheckTimer);
+      App._blurCheckTimer = setTimeout(() => {
+        if (!App.state.activeExam || !App.isExamExitWarningEnabled()) return;
+        const lostDocFocus = typeof document.hasFocus === 'function' ? !document.hasFocus() : false;
+        if (document.hidden || lostDocFocus) {
+          const recorded = App.recordExamLeaveViolation('Mở đa nhiệm / chuyển sang ứng dụng khác khi đang thi');
+          if (recorded && !document.hidden) {
+            App._examAwayActive = false;
+            App.showAntiCheatWarning();
+          }
+        }
+      }, 180);
+    });
+
+    window.addEventListener('focus', () => {
+      App.handleExamReturnFocus();
     });
 
     // Ngăn chặn vô tình tải lại hoặc đóng tab khi đang thi
@@ -230,34 +342,51 @@ const App = {
   },
 
   showAntiCheatWarning() {
-    if (!this.state.activeExam || this.state.tabSwitchesCount <= 0) return;
+    if (!this.state.activeExam || !this.isExamExitWarningEnabled() || this.state.tabSwitchesCount <= 0) return;
     const existing = document.getElementById('antiCheatModal');
     if (existing) existing.remove();
 
     this.updateExamHeaderViolationBadge();
 
     const count = this.state.tabSwitchesCount;
+    const latestLog = Array.isArray(this.state.violationLogs) && this.state.violationLogs.length
+      ? this.state.violationLogs[this.state.violationLogs.length - 1]
+      : { time: new Date().toLocaleTimeString('vi-VN'), reason: 'Thoát khỏi màn hình bài thi' };
+
     const modal = document.createElement('div');
     modal.id = 'antiCheatModal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-red-950/70 backdrop-blur-sm animate-fade-in';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-red-950/75 backdrop-blur-sm animate-fade-in';
+    modal.style.zIndex = '95';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl text-center space-y-5 border-2 border-red-500">
-        <div class="w-16 h-16 mx-auto rounded-full bg-red-100 text-red-600 flex items-center justify-center text-3xl shadow-inner animate-bounce">
+      <div class="dialog-card bg-white rounded-3xl p-5 sm:p-7 max-w-md w-full shadow-2xl text-center space-y-4 border-2 border-red-500">
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-red-100 text-red-600 flex items-center justify-center text-3xl shadow-inner border border-red-200">
           <i class="fa-solid fa-triangle-exclamation"></i>
         </div>
-        <div>
-          <span class="text-xs font-bold uppercase tracking-wider text-red-600">Giám Sát Khảo Sát Trực Tuyến</span>
-          <h3 class="text-lg font-extrabold text-slate-900 mt-1">CẢNH BÁO RỜI KHỎI BÀI THI!</h3>
-          <p class="text-xs text-slate-600 mt-2 leading-relaxed">
-            Hệ thống phát hiện bạn vừa chuyển tab hoặc rời khỏi giao diện làm bài.
+        <div class="space-y-1.5">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 text-[11px] font-extrabold uppercase tracking-wider">
+            <i class="fa-solid fa-mobile-screen-button"></i><span>Cảnh Báo Quy Chế Phòng Thi</span>
+          </span>
+          <h3 class="text-base sm:text-lg font-extrabold text-slate-900">NHẮC NHỞ VI PHẠM: THOÁT KHỎI MÀN HÌNH THI!</h3>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            Hệ thống phát hiện bạn vừa thoát ra ngoài ứng dụng trên điện thoại hoặc rời khỏi màn hình trong lúc đang làm bài thi.
           </p>
         </div>
-        <div class="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-800">
-          <div>Số lần ghi nhận rời tab: <strong class="text-red-700 text-base font-mono font-bold">${count}</strong> lần</div>
-          <div class="text-[11px] text-red-600 mt-1">Lưu ý: Mọi hành vi rời màn hình đều được lưu vào biên bản nộp bài gửi Thầy/Cô.</div>
+        <div class="bg-red-50 border border-red-200 rounded-2xl p-3.5 text-xs text-red-900 space-y-1.5 text-left">
+          <div class="flex items-center justify-between">
+            <span class="font-semibold text-red-800">Số lần vi phạm đã ghi nhận:</span>
+            <strong id="antiCheatCountValue" class="px-2.5 py-0.5 rounded-lg bg-red-600 text-white text-sm font-mono font-extrabold">${count} lần</strong>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-red-700">
+            <span>Thời điểm phát hiện gần nhất:</span>
+            <strong class="font-mono">${latestLog.time}</strong>
+          </div>
+          <div class="pt-1.5 border-t border-red-200/80 text-[11px] text-red-700 leading-snug">
+            <i class="fa-solid fa-circle-exclamation mr-1"></i>Toàn bộ số lần thoát màn hình được tự động lưu vào biên bản nộp bài gửi Giáo viên. Vui lòng giữ nguyên màn hình thi cho tới khi nộp bài!
+          </div>
         </div>
-        <button onclick="document.getElementById('antiCheatModal').remove();" class="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs shadow-md transition">
-          Tôi Đã Hiểu & Tiếp Tục Làm Bài
+        <button type="button" id="antiCheatAckBtn" onclick="document.getElementById('antiCheatModal')?.remove();" class="ui-btn-lg w-full bg-red-600 hover:bg-red-700 text-white shadow-md">
+          <i class="fa-solid fa-shield-halved"></i>
+          <span>Tôi Đã Hiểu &amp; Quay Lại Làm Bài</span>
         </button>
       </div>
     `;
@@ -266,11 +395,23 @@ const App = {
 
   updateExamHeaderViolationBadge() {
     const badge = document.getElementById('violationHeaderBadge');
-    if (!badge) return;
+    const guardBadge = document.getElementById('examGuardActiveBadge');
+    const mobStuCode = document.getElementById('examHeaderMobStuCode');
     const count = this.state.tabSwitchesCount || 0;
-    if (count > 0) {
-      badge.className = 'flex items-center space-x-1 bg-red-100 border border-red-300 px-2 py-1 rounded-lg text-red-700 font-bold text-xs animate-pulse';
-      badge.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-red-600"></i><span>Rời tab: ${count} lần</span>`;
+    const activeWarn = count > 0 && this.isExamExitWarningEnabled();
+    if (badge) {
+      if (activeWarn) {
+        badge.className = 'inline-flex items-center gap-1 bg-red-100 border border-red-300 px-1.5 sm:px-2 py-0.5 rounded-md text-red-700 font-bold text-[10px] sm:text-[11px] animate-pulse shrink-0 whitespace-nowrap';
+        badge.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-red-600"></i><span>Vi phạm: ${count}</span>`;
+      } else {
+        badge.className = 'hidden';
+      }
+    }
+    if (mobStuCode) {
+      mobStuCode.classList.toggle('hidden', activeWarn);
+    }
+    if (guardBadge) {
+      guardBadge.classList.toggle('hidden', !(this.isExamExitWarningEnabled() && count === 0));
     }
   },
 
@@ -402,17 +543,21 @@ const App = {
     }
     this.state.submissions = subs;
 
-    // Tải cấu hình quyền riêng tư & xem điểm
+    // Tải cấu hình quyền riêng tư, xem điểm & giám sát chống thoát màn hình khi thi
     const defaultSettings = {
       allowStudentViewOwnScore: true,
       allowStudentViewClassBoard: true,
       anonymizeOtherStudents: true,
       allowStudentViewAnswers: true,
+      warnOnExitExam: true,
     };
     const storedSettings = localStorage.getItem('thpt_settings');
     this.state.settings = storedSettings ? { ...defaultSettings, ...JSON.parse(storedSettings) } : defaultSettings;
     if (typeof this.state.settings.allowStudentViewAnswers === 'undefined') {
       this.state.settings.allowStudentViewAnswers = true;
+    }
+    if (typeof this.state.settings.warnOnExitExam === 'undefined') {
+      this.state.settings.warnOnExitExam = true;
     }
 
     this.saveData();
@@ -517,11 +662,11 @@ const App = {
           </div>
           <div class="${cancelText ? 'grid grid-cols-2 gap-2.5' : 'flex'} pt-2">
             ${cancelText ? `
-              <button type="button" id="appDialogCancelBtn" class="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer">
+              <button type="button" id="appDialogCancelBtn" class="ui-btn-lg bg-slate-100 hover:bg-slate-200 text-slate-700">
                 ${cancelText}
               </button>
             ` : ''}
-            <button type="button" id="appDialogConfirmBtn" class="w-full py-2.5 px-4 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md transition inline-flex items-center justify-center gap-1.5 cursor-pointer ${t.btn}">
+            <button type="button" id="appDialogConfirmBtn" class="ui-btn-lg w-full text-white shadow-md ${t.btn}">
               <span>${confirmText}</span>
             </button>
           </div>
@@ -615,8 +760,8 @@ const App = {
 
   loginAdmin(username, password) {
     const adminAcc = this.state.admin || INITIAL_SEED_DATA.admin;
-    const inputUser = String(username || '').trim().toLowerCase();
-    const targetUser = String(adminAcc.username || 'admin').trim().toLowerCase();
+    const inputUser = String(username || '').trim().toUpperCase();
+    const targetUser = String(adminAcc.username || 'ADMIN').trim().toUpperCase();
     if (inputUser === targetUser && password === adminAcc.password) {
       this.state.currentUser = { ...adminAcc, role: 'admin', email: this.ADMIN_RECOVERY_EMAIL };
       sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
@@ -629,6 +774,7 @@ const App = {
 
   logout() {
     this.clearIntervalTimer();
+    this.resetExamMonitorState();
     this.state.currentUser = null;
     this.state.activeExam = null;
     this.state.studentExamSearchQuery = '';
@@ -1154,127 +1300,139 @@ const App = {
     const swatchHex = (this._lastAccentMeta && this._lastAccentMeta.primaryHex) || this.state.accentHex || '#4f46e5';
 
     container.innerHTML = `
-      <div class="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative text-slate-900">
-        <!-- Thanh công cụ Giao diện, Cài App iOS & Bộ màu nhanh ở góc phải -->
-        <div class="fixed top-4 right-4 z-30 flex items-center gap-1.5 sm:gap-2">
-          <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer" title="Quét mã QR & Hướng dẫn tạo App trên iPhone / iPad">
+      <div class="min-h-screen bg-slate-50 flex flex-col justify-center py-6 sm:py-12 sm:px-6 lg:px-8 relative text-slate-900">
+        <!-- Thanh công cụ đồng bộ: gọn gàng trên điện thoại, ghim góc phải trên máy tính -->
+        <div class="w-full max-w-md mx-auto px-4 mb-5 sm:mb-0 sm:w-auto sm:px-0 sm:fixed sm:top-4 sm:right-4 z-30 flex items-center justify-between sm:justify-end gap-2">
+          <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex-1 sm:flex-initial" title="Quét mã QR & Hướng dẫn tạo App trên iPhone / iPad">
             <i class="fa-solid fa-qrcode"></i>
             <span>Tạo App iOS / QR</span>
           </button>
-          <button type="button" id="loginQuickThemeBtn" onclick="App.cycleTheme()" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-sm hover:bg-slate-100 text-xs font-bold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer" title="Chuyển nhanh chế độ Sáng / Dịu mắt / Tối">
+          <button type="button" id="loginQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn bg-white border border-slate-200 shadow-xs hover:bg-slate-100 text-slate-700 px-3" title="Chuyển nhanh chế độ Sáng / Dịu mắt / Tối">
             <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
-            <span class="hidden sm:inline">${thMeta.label}</span>
+            <span>${thMeta.label}</span>
           </button>
-          <button type="button" id="loginThemeBtn" onclick="App.showThemeModal()" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-sm hover:bg-slate-100 text-xs font-bold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer" title="Đổi bộ màu chủ đạo & mức độ tương phản">
+          <button type="button" id="loginThemeBtn" onclick="App.showThemeModal()" class="ui-btn-icon sm:w-auto sm:px-3 bg-white border border-slate-200 shadow-xs hover:bg-slate-100 text-xs font-bold text-slate-700 sm:gap-1.5" title="Đổi bộ màu chủ đạo & mức độ tương phản">
             <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-black/15 shrink-0" style="background:${swatchHex};"></span>
-            <span class="hidden sm:inline">Bộ màu &amp; Tương phản</span>
+            <span class="hidden sm:inline">Bộ màu</span>
           </button>
         </div>
 
         <div class="sm:mx-auto sm:w-full sm:max-w-md text-center px-4">
-          <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 shadow-lg shadow-indigo-500/25 mb-4">
+          <div class="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-indigo-600 shadow-lg shadow-indigo-500/25 mb-3.5">
             <i class="fa-solid fa-graduation-cap text-2xl text-white"></i>
           </div>
-          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+          <h1 class="text-xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
             KHẢO THÍ &amp; LUYỆN ĐỀ TOÁN 6 – 12
           </h1>
-          <p class="mt-2 text-sm font-semibold text-indigo-700">
+          <p class="mt-1.5 text-xs sm:text-sm font-semibold text-indigo-700">
             Kiểm tra định kì (GK1, CK1, GK2, CK2) • Đề thi vào 10 • Thi thử THPT QG
           </p>
         </div>
 
-        <div class="mt-7 sm:mx-auto sm:w-full sm:max-w-md px-4">
-          <div class="bg-white py-8 px-6 shadow-xl rounded-2xl border border-slate-200 sm:px-10">
-            <div class="flex border-b border-slate-200 mb-6">
-              <button id="tabStudentBtn" onclick="App.switchLoginTab('student')" class="flex-1 pb-3 text-center text-sm cursor-pointer ${activeTab === 'student' ? 'font-extrabold border-b-2 border-indigo-600 text-indigo-700' : 'font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800'}">
-                <i class="fa-solid fa-user-graduate mr-2"></i>Học sinh
+        <div class="mt-5 sm:mt-7 sm:mx-auto sm:w-full sm:max-w-md px-4">
+          <div class="bg-white py-6 px-5 shadow-xl rounded-2xl border border-slate-200 sm:py-8 sm:px-10">
+            <div class="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200/80 mb-5">
+              <button type="button" id="tabStudentBtn" onclick="App.switchLoginTab('student')" class="h-10 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer ${activeTab === 'student' ? 'bg-indigo-600 text-white font-extrabold shadow-xs' : 'text-slate-600 hover:text-slate-900 font-semibold'}">
+                <i class="fa-solid fa-user-graduate"></i><span>Học sinh</span>
               </button>
-              <button id="tabAdminBtn" onclick="App.switchLoginTab('admin')" class="flex-1 pb-3 text-center text-sm cursor-pointer ${activeTab === 'admin' ? 'font-extrabold border-b-2 border-emerald-600 text-emerald-700' : 'font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800'}">
-                <i class="fa-solid fa-chalkboard-user mr-2"></i>Giáo viên
+              <button type="button" id="tabAdminBtn" onclick="App.switchLoginTab('admin')" class="h-10 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer ${activeTab === 'admin' ? 'bg-emerald-600 text-white font-extrabold shadow-xs' : 'text-slate-600 hover:text-slate-900 font-semibold'}">
+                <i class="fa-solid fa-chalkboard-user"></i><span>Giáo viên</span>
               </button>
             </div>
 
             <!-- Form Học sinh -->
             <form id="studentLoginForm" onsubmit="event.preventDefault(); App.handleStudentLogin();" class="space-y-4 ${activeTab === 'student' ? '' : 'hidden'}">
               <div>
-                <label class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mã Học Sinh</label>
-                <div class="mt-1 relative rounded-lg shadow-2xs">
-                  <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <div class="flex items-center justify-between">
+                  <label for="loginStudentId" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mã Học Sinh</label>
+                  <span class="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">Tự động IN HOA</span>
+                </div>
+                <div class="mt-1.5 relative">
+                  <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <i class="fa-solid fa-id-card"></i>
                   </div>
                   <input type="text" id="loginStudentId" placeholder="Nhập mã học sinh (VD: HS202701)" required
-                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
+                    autocapitalize="characters" autocomplete="username" spellcheck="false"
+                    oninput="App.forceUppercaseInput(this)"
+                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono font-bold tracking-wide input-uppercase">
                 </div>
               </div>
 
               <div>
-                <label class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mật khẩu</label>
-                <div class="mt-1 relative rounded-lg shadow-2xs">
-                  <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <label for="loginStudentPass" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mật khẩu</label>
+                <div class="mt-1.5 relative">
+                  <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <i class="fa-solid fa-lock"></i>
                   </div>
                   <input type="password" id="loginStudentPass" placeholder="Nhập mật khẩu" required
-                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
+                    autocomplete="current-password"
+                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
                 </div>
               </div>
 
-              <button type="submit" class="w-full mt-2 py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all flex items-center justify-center cursor-pointer">
+              <button type="submit" class="ui-btn-lg w-full mt-2 text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm">
                 <span>Đăng Nhập Cổng Học Sinh</span>
-                <i class="fa-solid fa-arrow-right ml-2 text-xs"></i>
+                <i class="fa-solid fa-arrow-right text-xs"></i>
               </button>
             </form>
 
             <!-- Form Giáo viên -->
             <form id="adminLoginForm" onsubmit="event.preventDefault(); App.handleAdminLogin();" class="space-y-4 ${activeTab === 'admin' ? '' : 'hidden'}">
               <div>
-                <label class="block text-xs font-bold uppercase tracking-wider text-slate-700">Tài khoản Giáo viên</label>
-                <div class="mt-1 relative rounded-lg shadow-2xs">
-                  <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <div class="flex items-center justify-between">
+                  <label for="loginAdminUser" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Tài khoản Giáo viên</label>
+                  <span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">Tự động IN HOA</span>
+                </div>
+                <div class="mt-1.5 relative">
+                  <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <i class="fa-solid fa-user-shield"></i>
                   </div>
-                  <input type="text" id="loginAdminUser" placeholder="Nhập tên đăng nhập" required
-                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
+                  <input type="text" id="loginAdminUser" placeholder="Nhập tên đăng nhập (VD: ADMIN)" required
+                    autocapitalize="characters" autocomplete="username" spellcheck="false"
+                    oninput="App.forceUppercaseInput(this)"
+                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm font-mono font-bold tracking-wide input-uppercase">
                 </div>
               </div>
 
               <div>
                 <div class="flex items-center justify-between">
-                  <label class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mật khẩu Quản trị</label>
+                  <label for="loginAdminPass" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mật khẩu Quản trị</label>
                   <button type="button" id="forgotAdminPassBtn" onclick="App.requestAdminPasswordReset()" class="text-xs font-bold text-emerald-700 hover:underline cursor-pointer">
                     Quên mật khẩu?
                   </button>
                 </div>
-                <div class="mt-1 relative rounded-lg shadow-2xs">
-                  <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <div class="mt-1.5 relative">
+                  <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <i class="fa-solid fa-key"></i>
                   </div>
                   <input type="password" id="loginAdminPass" placeholder="Nhập mật khẩu quản trị" required
-                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
+                    autocomplete="current-password"
+                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm font-medium">
                 </div>
               </div>
 
-              <button type="submit" class="w-full mt-2 py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-all flex items-center justify-center cursor-pointer">
+              <button type="submit" class="ui-btn-lg w-full mt-2 text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm">
                 <span>Đăng Nhập Cổng Giáo Viên</span>
-                <i class="fa-solid fa-arrow-right ml-2 text-xs"></i>
+                <i class="fa-solid fa-arrow-right text-xs"></i>
               </button>
             </form>
           </div>
 
           <!-- Thẻ mở nhanh Mã QR & Hướng dẫn Tạo App trên iOS -->
-          <button type="button" id="loginIosPromoCard" onclick="App.showIosAppModal()" class="mt-4 w-full bg-white hover:bg-indigo-50/60 p-4 rounded-2xl border border-indigo-200 shadow-sm transition flex items-center justify-between gap-3 text-left cursor-pointer group">
+          <button type="button" id="loginIosPromoCard" onclick="App.showIosAppModal()" class="mt-4 w-full bg-white hover:bg-indigo-50/60 p-3.5 sm:p-4 rounded-2xl border border-indigo-200 shadow-sm transition flex items-center justify-between gap-3 text-left cursor-pointer group">
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-11 h-11 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
                 <i class="fa-brands fa-apple text-xl"></i>
               </div>
               <div class="min-w-0">
-                <div class="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
+                <div class="text-xs font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
                   <span>Quét QR tạo App trên điện thoại iOS</span>
                   <span class="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[10px] font-bold">iPhone / iPad</span>
                 </div>
                 <p class="text-[11px] text-slate-500 mt-0.5 leading-snug">Xem đề PDF đa trang sắc nét &amp; nộp đáp án trực tiếp trên App • Hướng dẫn 4 bước</p>
               </div>
             </div>
-            <div class="w-9 h-9 rounded-xl bg-indigo-50 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white flex items-center justify-center shrink-0 transition border border-indigo-200">
+            <div class="ui-btn-icon bg-indigo-50 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white border border-indigo-200">
               <i class="fa-solid fa-qrcode text-base"></i>
             </div>
           </button>
@@ -1291,27 +1449,30 @@ const App = {
     const aForm = document.getElementById('adminLoginForm');
     if (!sBtn || !aBtn || !sForm || !aForm) return;
 
+    const baseTab = 'h-10 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer';
     if (this.state.loginTab === 'student') {
-      sBtn.className = 'flex-1 pb-3 text-center text-sm font-extrabold border-b-2 border-indigo-600 text-indigo-700 cursor-pointer';
-      aBtn.className = 'flex-1 pb-3 text-center text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer';
+      sBtn.className = `${baseTab} bg-indigo-600 text-white font-extrabold shadow-xs`;
+      aBtn.className = `${baseTab} text-slate-600 hover:text-slate-900 font-semibold`;
       sForm.classList.remove('hidden');
       aForm.classList.add('hidden');
     } else {
-      aBtn.className = 'flex-1 pb-3 text-center text-sm font-extrabold border-b-2 border-emerald-600 text-emerald-700 cursor-pointer';
-      sBtn.className = 'flex-1 pb-3 text-center text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800 cursor-pointer';
+      aBtn.className = `${baseTab} bg-emerald-600 text-white font-extrabold shadow-xs`;
+      sBtn.className = `${baseTab} text-slate-600 hover:text-slate-900 font-semibold`;
       aForm.classList.remove('hidden');
       sForm.classList.add('hidden');
     }
   },
 
   handleStudentLogin() {
-    const id = document.getElementById('loginStudentId').value;
+    const idEl = document.getElementById('loginStudentId');
+    const id = this.forceUppercaseInput(idEl);
     const pass = document.getElementById('loginStudentPass').value;
     this.loginStudent(id, pass);
   },
 
   handleAdminLogin() {
-    const user = document.getElementById('loginAdminUser').value;
+    const userEl = document.getElementById('loginAdminUser');
+    const user = this.forceUppercaseInput(userEl);
     const pass = document.getElementById('loginAdminPass').value;
     this.loginAdmin(user, pass);
   },
@@ -1408,41 +1569,41 @@ const App = {
       <div class="min-h-screen bg-slate-50 flex flex-col">
         <!-- Header -->
         <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 shadow-xs">
-          <div class="w-full max-w-[97%] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-            <div class="flex items-center space-x-3 cursor-pointer" onclick="App.goHome()" title="Về trang chủ">
-              <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-200">
-                <i class="fa-solid fa-graduation-cap"></i>
+          <div class="w-full max-w-[97%] mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
+            <div class="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer min-w-0" onclick="App.goHome()" title="Về trang chủ">
+              <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-200 shrink-0">
+                <i class="fa-solid fa-graduation-cap text-sm sm:text-base"></i>
               </div>
-              <div>
-                <span class="text-xs font-semibold text-indigo-600 uppercase tracking-wider">Cổng Học Sinh</span>
-                <h1 class="text-base sm:text-lg font-bold text-slate-800 leading-none">Khảo Thí Toán 6 – 12</h1>
+              <div class="min-w-0">
+                <span class="block text-[10px] sm:text-xs font-bold text-indigo-600 uppercase tracking-wider leading-tight">Cổng Học Sinh</span>
+                <h1 class="text-sm sm:text-lg font-extrabold text-slate-800 leading-tight truncate">Toán 6 – 12</h1>
               </div>
             </div>
 
-            <div class="flex items-center space-x-2 sm:space-x-2.5">
-              <!-- Nút Về Trang Chủ -->
-              <button onclick="App.goHome()" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 border border-indigo-200 shadow-xs cursor-pointer" title="Về trang chủ">
+            <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <!-- Nút Về Trang Chủ (ẩn trên điện thoại vì bấm vào logo đã về trang chủ) -->
+              <button type="button" onclick="App.goHome()" class="hidden md:inline-flex ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-xs" title="Về trang chủ">
                 <i class="fa-solid fa-house"></i>
-                <span class="hidden sm:inline">Trang chủ</span>
+                <span>Trang chủ</span>
               </button>
 
               <!-- Nút Quét QR / Tạo App iOS -->
-              <button id="studentIosAppBtn" onclick="App.showIosAppModal()" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer" title="Quét QR & Hướng dẫn tạo App trên iPhone / iPad">
+              <button type="button" id="studentIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs md:gap-1.5" title="Quét QR & Hướng dẫn tạo App trên iPhone / iPad">
                 <i class="fa-solid fa-qrcode"></i>
                 <span class="hidden md:inline">App iOS / QR</span>
               </button>
 
               <!-- Nút Chuyển Nhanh Sáng/Tối & Bảng Màu -->
-              <button id="studentQuickThemeBtn" onclick="App.cycleTheme()" class="p-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition border border-slate-200 shadow-xs cursor-pointer" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
+              <button type="button" id="studentQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn-icon bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-xs" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
                 <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
               </button>
-              <button id="studentThemeBtn" onclick="App.showThemeModal()" class="px-2.5 py-1.5 bg-white hover:bg-indigo-50 text-slate-700 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 border border-slate-200 shadow-xs cursor-pointer" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
+              <button type="button" id="studentThemeBtn" onclick="App.showThemeModal()" class="ui-btn-icon md:w-auto md:px-3 bg-white hover:bg-indigo-50 text-slate-700 text-xs font-bold border border-slate-200 shadow-xs md:gap-1.5" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
                 <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-black/15 shrink-0" style="background:${swatchHex};"></span>
                 <span class="hidden md:inline">Giao diện</span>
               </button>
 
               <!-- Nút Hồ Sơ Cá Nhân / Đổi Mật Khẩu -->
-              <button onclick="App.showStudentSelfEditModal()" class="px-3 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 border border-slate-200 shadow-xs cursor-pointer" title="Hồ sơ cá nhân & Đổi mật khẩu">
+              <button type="button" onclick="App.showStudentSelfEditModal()" class="ui-btn-icon lg:w-auto lg:px-3 bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-bold border border-slate-200 shadow-xs lg:gap-1.5" title="Hồ sơ cá nhân & Đổi mật khẩu">
                 <i class="fa-solid fa-user-pen text-indigo-600"></i>
                 <span class="hidden lg:inline">Hồ sơ cá nhân</span>
               </button>
@@ -1453,7 +1614,7 @@ const App = {
                 <div class="text-sm font-bold text-slate-800">${u.fullName}</div>
                 <div class="text-xs text-slate-500">Mã HS: <span class="font-mono font-semibold text-indigo-600">${u.studentId}</span> • Khối ${this.getStudentGrade(u)} • Lớp ${u.className || '12'}</div>
               </div>
-              <button onclick="App.logout()" class="p-2 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition cursor-pointer" title="Đăng xuất">
+              <button type="button" onclick="App.logout()" class="ui-btn-icon bg-white hover:bg-red-50 text-slate-500 hover:text-red-600 border border-slate-200 shadow-xs" title="Đăng xuất">
                 <i class="fa-solid fa-right-from-bracket"></i>
               </button>
             </div>
@@ -1461,30 +1622,30 @@ const App = {
         </header>
 
         <!-- Main Body -->
-        <main class="w-full max-w-[97%] mx-auto px-4 sm:px-6 py-8 flex-1 space-y-6">
+        <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 py-5 sm:py-8 flex-1 space-y-5 sm:space-y-6">
           <!-- Student Banner -->
-          <div class="bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-800 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
+          <div class="bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-800 rounded-2xl p-4 sm:p-6 text-white shadow-xl relative overflow-hidden">
             <div class="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <div class="inline-flex items-center space-x-2 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold mb-3">
+                <div class="inline-flex items-center space-x-2 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold mb-2.5">
                   <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                   <span>Tài khoản đang hoạt động</span>
                 </div>
-                <h2 class="text-2xl sm:text-3xl font-extrabold">Xin chào, ${u.fullName}!</h2>
-                <p class="text-indigo-100 text-sm mt-1">
+                <h2 class="text-xl sm:text-3xl font-extrabold">Xin chào, ${u.fullName}!</h2>
+                <p class="text-indigo-100 text-xs sm:text-sm mt-1">
                   Mã học sinh: <strong class="font-mono tracking-wider">${u.studentId}</strong> • Khối: <strong>Khối ${this.getStudentGrade(u)}</strong> • Lớp: <strong>${u.className || '12'}</strong>
                   ${u.phone ? ` • SĐT: <strong>${u.phone}</strong>` : ''}
                 </p>
-                <div class="mt-3.5 flex flex-wrap items-center gap-2">
-                  <button onclick="App.showStudentSelfEditModal()" class="px-3.5 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 backdrop-blur-md border border-white/25 cursor-pointer shadow-xs">
+                <div class="mt-3.5 grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2">
+                  <button type="button" onclick="App.showStudentSelfEditModal()" class="ui-btn bg-white/20 hover:bg-white/30 text-white backdrop-blur-md border border-white/25 shadow-xs">
                     <i class="fa-solid fa-user-pen"></i><span>Hồ sơ cá nhân &amp; Đổi mật khẩu</span>
                   </button>
-                  <button id="studentBannerIosBtn" onclick="App.showIosAppModal()" class="px-3.5 py-1.5 bg-white text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-extrabold transition inline-flex items-center gap-1.5 cursor-pointer shadow-sm">
+                  <button type="button" id="studentBannerIosBtn" onclick="App.showIosAppModal()" class="ui-btn bg-white text-indigo-700 hover:bg-indigo-50 font-extrabold shadow-sm">
                     <i class="fa-brands fa-apple text-sm"></i><span>Quét QR Cài App iOS</span>
                   </button>
                 </div>
               </div>
-              <div class="flex gap-3">
+              <div class="grid grid-cols-2 sm:flex gap-2.5 sm:gap-3">
                 <div class="bg-white/10 backdrop-blur-md rounded-xl p-3 text-center min-w-[96px]">
                   <div class="text-xs text-indigo-200">Đề được mở</div>
                   <div class="text-2xl font-bold font-mono">${allowedExams.length}</div>
@@ -1500,11 +1661,12 @@ const App = {
           <!-- Thanh Điều Hướng Cổng Học Sinh -->
           <div class="bg-white rounded-2xl p-2.5 border border-slate-200 shadow-sm">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <nav class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <nav class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap pb-0.5 sm:pb-0">
                 <button
+                  type="button"
                   id="studentTabExamsBtn"
                   onclick="App.setStudentMainTab('exams')"
-                  class="flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${this.state.studentMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.studentMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-file-pen"></i>
                   <span>Đề Thi &amp; Kiểm Tra</span>
@@ -1514,9 +1676,10 @@ const App = {
                 </button>
 
                 <button
+                  type="button"
                   id="studentTabHomeworksBtn"
                   onclick="App.setStudentMainTab('homeworks')"
-                  class="flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-book-open"></i>
                   <span>Tài Liệu &amp; Chuyên Đề</span>
@@ -1526,9 +1689,10 @@ const App = {
                 </button>
 
                 <button
+                  type="button"
                   id="studentTabGradesBtn"
                   onclick="App.setStudentMainTab('grades')"
-                  class="flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${this.state.studentMainTab === 'grades' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.studentMainTab === 'grades' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-chart-simple"></i>
                   <span>Kết Quả &amp; Xếp Hạng</span>
@@ -1944,6 +2108,7 @@ const App = {
 
   exitExamToHome() {
     this.clearIntervalTimer();
+    this.resetExamMonitorState();
     this.state.activeExam = null;
     this.goHome();
   },
@@ -2035,23 +2200,23 @@ const App = {
                 ` : ''}
               </div>
 
-              <div class="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+              <div class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 ${attemptsCount > 0 ? `
-                  <div class="flex items-center gap-2">
-                    <button onclick="App.viewSubmissionDetail('${latestSub.id}')" class="px-3 py-1.5 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-xl transition flex items-center cursor-pointer">
-                      <i class="fa-solid fa-eye mr-1.5"></i>Xem lại (${latestSub.scoreResult.totalScore}đ)
+                  <div class="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
+                    <button type="button" onclick="App.viewSubmissionDetail('${latestSub.id}')" class="ui-btn bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
+                      <i class="fa-solid fa-eye"></i><span>Xem lại (${latestSub.scoreResult.totalScore}đ)</span>
                     </button>
-                    <button onclick="App.confirmRetakeExam('${ex.id}')" class="px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs transition flex items-center cursor-pointer">
-                      <i class="fa-solid fa-rotate-right mr-1.5"></i>Thi Lại (Lần ${attemptsCount + 1})
+                    <button type="button" onclick="App.confirmRetakeExam('${ex.id}')" class="ui-btn text-white bg-amber-600 hover:bg-amber-700 shadow-xs">
+                      <i class="fa-solid fa-rotate-right"></i><span>Thi Lại (Lần ${attemptsCount + 1})</span>
                     </button>
                   </div>
                   <span class="text-[11px] text-slate-400">Gần nhất: ${new Date(latestSub.submittedAt).toLocaleDateString('vi-VN')}</span>
                 ` : `
-                  <button onclick="App.startExam('${ex.id}')" class="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs transition flex items-center cursor-pointer">
-                    <i class="fa-solid fa-play mr-1.5 text-[10px]"></i>
+                  <button type="button" onclick="App.startExam('${ex.id}')" class="ui-btn w-full sm:w-auto px-4 text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs">
+                    <i class="fa-solid fa-play text-[10px]"></i>
                     <span>Vào Làm Bài</span>
                   </button>
-                  <span class="text-[11px] text-slate-400">Chưa làm bài</span>
+                  <span class="text-[11px] text-slate-400 text-center sm:text-right">Chưa làm bài</span>
                 `}
               </div>
             </div>
@@ -2129,12 +2294,12 @@ const App = {
               <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">${hw.description}</p>
               <div class="mt-2 text-[11px] text-slate-400 font-mono truncate">${hw.fileName || 'Tai_Lieu.pdf'} • ${hw.fileSize || '2.0 MB'}</div>
 
-              <div class="mt-3 flex items-center space-x-2">
-                <button onclick="App.openPdfModal('${hw.title}', '${hw.pdfUrl}', '${hw.id}')" class="inline-flex items-center px-3 py-1.5 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-xl transition cursor-pointer">
-                  <i class="fa-solid fa-eye mr-1.5"></i>Xem trực tiếp
+              <div class="mt-3 grid grid-cols-2 sm:flex items-center gap-2">
+                <button type="button" onclick="App.openPdfModal('${hw.title}', '${hw.pdfUrl}', '${hw.id}')" class="ui-btn bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100">
+                  <i class="fa-solid fa-eye"></i><span>Xem trực tiếp</span>
                 </button>
-                <a href="${hw.pdfUrl}" download="${hw.fileName || 'Tai_Lieu.pdf'}" class="inline-flex items-center px-3 py-1.5 text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl transition">
-                  <i class="fa-solid fa-download mr-1.5"></i>Tải về
+                <a href="${hw.pdfUrl}" download="${hw.fileName || 'Tai_Lieu.pdf'}" class="ui-btn bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200/80">
+                  <i class="fa-solid fa-download"></i><span>Tải về</span>
                 </a>
               </div>
             </div>
@@ -2197,6 +2362,8 @@ const App = {
     this.state.examStartTime = new Date();
     this.state.secondsLeft = (exam.time_minutes || 90) * 60;
     this.state.tabSwitchesCount = 0;
+    this.state.violationLogs = [];
+    this.resetExamMonitorState();
     this.state.activeSectionTab = exam.part1.length ? 'p1' : (exam.part2.length ? 'p2' : 'p3');
     this.state.mobileExamPane = 'both';
 
@@ -2252,9 +2419,9 @@ const App = {
       const btn = document.getElementById(`sectionTabBtn_${t}`);
       if (btn) {
         if (t === tab) {
-          btn.className = 'flex-1 py-1.5 rounded-md text-center transition bg-indigo-600 text-white shadow font-bold';
+          btn.className = 'flex-1 h-9 rounded-lg text-center transition cursor-pointer bg-indigo-600 text-white shadow font-bold';
         } else {
-          btn.className = 'flex-1 py-1.5 rounded-md text-center transition text-slate-600 hover:bg-slate-50 font-medium';
+          btn.className = 'flex-1 h-9 rounded-lg text-center transition cursor-pointer text-slate-600 hover:bg-slate-50 font-semibold';
         }
       }
     });
@@ -2327,6 +2494,8 @@ const App = {
     const u = this.state.currentUser;
     const progress = this.calculateProgress();
     const pdfSrc = this.state.resolvedPdfUrl || ex.pdf_url || 'de-toan-12-le-thanh-tong.pdf';
+    const guardOn = this.isExamExitWarningEnabled();
+    const vCount = this.state.tabSwitchesCount || 0;
 
     container.innerHTML = `
       <div class="fixed inset-0 flex flex-col bg-slate-100 overflow-hidden select-none z-10">
@@ -2334,66 +2503,69 @@ const App = {
         <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 px-2.5 sm:px-6 py-2 flex items-center justify-between gap-2 shrink-0 z-30 shadow-xs sticky top-0">
           <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
             <!-- Nút Về Trang Chủ -->
-            <button onclick="App.confirmExitExam()" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer shrink-0" title="Quay về trang chủ">
+            <button type="button" onclick="App.confirmExitExam()" class="ui-btn-icon sm:w-auto sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 text-xs font-bold shadow-xs sm:gap-1.5" title="Quay về trang chủ">
               <i class="fa-solid fa-house text-indigo-600"></i>
               <span class="hidden sm:inline">Trang chủ</span>
             </button>
 
             <div class="h-5 w-px bg-slate-200 hidden sm:block shrink-0"></div>
 
-            <span class="hidden sm:flex w-8 h-8 rounded-lg bg-indigo-600 text-white items-center justify-center font-bold text-sm shadow-sm shrink-0">
+            <span class="hidden sm:flex w-9 h-9 rounded-xl bg-indigo-600 text-white items-center justify-center font-bold text-sm shadow-sm shrink-0">
               <i class="fa-solid fa-pen-ruler text-xs"></i>
             </span>
             <div class="min-w-0 flex-1">
               <h2 class="text-xs sm:text-sm font-bold text-slate-800 truncate">${ex.title}</h2>
-              <div class="text-[11px] text-slate-500 flex items-center gap-x-1.5 truncate">
-                <span class="hidden sm:inline">Học sinh: <strong>${u.fullName}</strong> (${u.studentId})</span>
-                <span class="sm:hidden font-semibold text-slate-600 truncate">${u.studentId}</span>
-                <span class="text-indigo-600 font-bold shrink-0">• Lần ${this.state.currentAttemptNumber || 1}</span>
-                <span id="violationHeaderBadge" class="${this.state.tabSwitchesCount > 0 ? 'inline-flex items-center space-x-1 bg-red-100 border border-red-300 px-1.5 py-0.5 rounded text-red-700 font-bold text-[10px] animate-pulse shrink-0' : 'hidden'}">
-                  <i class="fa-solid fa-triangle-exclamation text-red-600"></i><span>${this.state.tabSwitchesCount}</span>
+              <div class="text-[11px] text-slate-500 flex items-center gap-x-1.5 overflow-hidden mt-0.5">
+                <span class="hidden sm:inline truncate">Học sinh: <strong>${u.fullName}</strong> (${u.studentId})</span>
+                <span id="examHeaderMobStuCode" class="${guardOn && vCount > 0 ? 'hidden' : ''} sm:hidden font-mono font-bold text-slate-700 truncate">${u.studentId}</span>
+                <span class="text-indigo-600 font-bold shrink-0 whitespace-nowrap">${guardOn && vCount > 0 ? '' : '• '}Lần ${this.state.currentAttemptNumber || 1}</span>
+                <span id="examGuardActiveBadge" class="${guardOn && vCount === 0 ? 'inline-flex' : 'hidden'} items-center gap-1 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md text-emerald-700 font-bold text-[10px] shrink-0" title="Đang bật cảnh báo khi thoát ứng dụng / rời màn hình thi">
+                  <i class="fa-solid fa-shield-halved"></i><span class="hidden sm:inline">Giám sát BẬT</span>
+                </span>
+                <span id="violationHeaderBadge" class="${guardOn && vCount > 0 ? 'inline-flex items-center gap-1 bg-red-100 border border-red-300 px-1.5 sm:px-2 py-0.5 rounded-md text-red-700 font-bold text-[10px] sm:text-[11px] animate-pulse shrink-0 whitespace-nowrap' : 'hidden'}">
+                  <i class="fa-solid fa-triangle-exclamation text-red-600"></i><span>Vi phạm: ${vCount}</span>
                 </span>
               </div>
             </div>
           </div>
 
           <!-- Controls & Actions -->
-          <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+          <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <!-- Nút Lên Đầu Trang (Desktop/Tablet) -->
-            <button onclick="App.scrollToTop()" class="hidden md:flex px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 rounded-lg text-xs font-bold transition items-center space-x-1 shadow-xs cursor-pointer" title="Cuộn lên đầu trang">
+            <button type="button" onclick="App.scrollToTop()" class="hidden md:inline-flex ui-btn bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 shadow-xs" title="Cuộn lên đầu trang">
               <i class="fa-solid fa-arrow-up text-indigo-600"></i>
               <span class="hidden lg:inline">Đầu trang</span>
             </button>
 
             <!-- Tải file PDF về máy (Desktop/Tablet) -->
-            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" class="hidden md:flex px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition items-center" title="Tải file PDF về máy nếu muốn in ấn">
-              <i class="fa-solid fa-cloud-arrow-down text-indigo-600 mr-1.5"></i>
+            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" onclick="App.suppressAntiCheatTemporarily(2000)" class="hidden md:inline-flex ui-btn bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200" title="Tải file PDF về máy nếu muốn in ấn">
+              <i class="fa-solid fa-cloud-arrow-down text-indigo-600"></i>
               <span class="hidden lg:inline">Tải Đề</span>
             </a>
 
             <!-- Nút chỉnh cỡ chữ A- / A+ -->
-            <div class="hidden md:flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200 text-xs">
-              <button onclick="App.adjustFontSize(-1)" class="px-2 py-1 text-slate-600 hover:text-indigo-600 font-bold" title="Giảm cỡ chữ">A-</button>
-              <button onclick="App.adjustFontSize(1)" class="px-2 py-1 text-slate-600 hover:text-indigo-600 font-bold" title="Tăng cỡ chữ">A+</button>
+            <div class="hidden md:flex items-center h-[38px] bg-slate-100 rounded-xl p-0.5 border border-slate-200 text-xs">
+              <button type="button" onclick="App.adjustFontSize(-1)" class="px-2.5 h-full rounded-lg text-slate-600 hover:text-indigo-600 font-bold cursor-pointer" title="Giảm cỡ chữ">A-</button>
+              <button type="button" onclick="App.adjustFontSize(1)" class="px-2.5 h-full rounded-lg text-slate-600 hover:text-indigo-600 font-bold cursor-pointer" title="Tăng cỡ chữ">A+</button>
             </div>
 
             <!-- Nút đổi theme: Sáng / Dịu mắt / Tối & Bộ màu -->
-            <button id="examQuickThemeBtn" onclick="App.cycleTheme()" class="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 border border-slate-200 cursor-pointer" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
+            <button type="button" id="examQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn-icon bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
               <i class="fa-solid fa-circle-half-stroke"></i>
             </button>
-            <button id="examThemeBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex p-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-indigo-600 border border-slate-200 cursor-pointer" title="Tùy chỉnh bộ màu & độ tương phản">
+            <button type="button" id="examThemeBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex ui-btn-icon bg-slate-100 hover:bg-slate-200 text-indigo-600 border border-slate-200" title="Tùy chỉnh bộ màu & độ tương phản">
               <i class="fa-solid fa-palette"></i>
             </button>
 
             <!-- Timer Badge -->
-            <div class="flex items-center space-x-1 bg-amber-50 border border-amber-200 px-2 sm:px-2.5 py-1.5 rounded-lg text-amber-900 font-mono font-bold text-xs sm:text-sm whitespace-nowrap">
+            <div class="inline-flex items-center gap-1 h-[38px] bg-amber-50 border border-amber-200 px-2.5 sm:px-3 rounded-xl text-amber-900 font-mono font-bold text-xs sm:text-sm whitespace-nowrap">
               <i class="fa-regular fa-clock text-amber-600"></i>
               <span id="examTimer">--:--</span>
             </div>
 
             <!-- Nộp bài Button -->
-            <button id="examTopSubmitBtn" onclick="App.confirmSubmitExam()" class="px-2.5 sm:px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs sm:text-sm font-bold shadow-sm transition flex items-center whitespace-nowrap cursor-pointer">
-              <i class="fa-solid fa-paper-plane mr-1"></i>
+            <button type="button" id="examTopSubmitBtn" onclick="App.confirmSubmitExam()" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-3 sm:px-4">
+              <i class="fa-solid fa-paper-plane"></i>
               <span>Nộp Bài</span>
             </button>
           </div>
@@ -2405,17 +2577,17 @@ const App = {
         </div>
 
         <!-- Thanh chuyển chế độ Đề PDF / Phiếu trả lời / Bảng câu tối ưu cho App iOS & Điện thoại -->
-        <div class="lg:hidden bg-slate-900 border-b border-slate-800 px-2 py-1.5 flex items-center gap-1 shrink-0 z-20">
-          <button type="button" id="mobPaneBtn_pdf" onclick="App.setMobileExamPane('pdf')" class="flex-1 py-1.5 px-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'pdf' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+        <div class="lg:hidden bg-slate-900 border-b border-slate-800 px-2 py-1.5 flex items-center gap-1.5 shrink-0 z-20">
+          <button type="button" id="mobPaneBtn_pdf" onclick="App.setMobileExamPane('pdf')" class="flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'pdf' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
             <i class="fa-solid fa-file-pdf text-red-400"></i><span>Đề PDF</span>
           </button>
-          <button type="button" id="mobPaneBtn_both" onclick="App.setMobileExamPane('both')" class="flex-1 py-1.5 px-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'both' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+          <button type="button" id="mobPaneBtn_both" onclick="App.setMobileExamPane('both')" class="flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'both' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
             <i class="fa-solid fa-table-columns text-indigo-300"></i><span>Đề + Phiếu</span>
           </button>
-          <button type="button" id="mobPaneBtn_sheet" onclick="App.setMobileExamPane('sheet')" class="flex-1 py-1.5 px-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'sheet' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+          <button type="button" id="mobPaneBtn_sheet" onclick="App.setMobileExamPane('sheet')" class="flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'sheet' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
             <i class="fa-solid fa-pen-to-square text-emerald-300"></i><span>Phiếu (<span class="exam-mobile-ans-short">${progress.answered}/${progress.total}</span>)</span>
           </button>
-          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="py-1.5 px-2.5 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap" title="Mở bảng câu hỏi">
+          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="h-9 px-3 rounded-xl text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap" title="Mở bảng câu hỏi">
             <i class="fa-solid fa-list-check"></i><span id="mobilePaletteBtnText">Câu</span>
           </button>
         </div>
@@ -2479,7 +2651,7 @@ const App = {
     ['pdf', 'both', 'sheet'].forEach(k => {
       const btn = document.getElementById(`mobPaneBtn_${k}`);
       if (btn) {
-        btn.className = `flex-1 py-1.5 px-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${k === m ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`;
+        btn.className = `flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${k === m ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`;
       }
     });
   },
@@ -2497,10 +2669,10 @@ const App = {
         <div class="bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0">
           <span class="flex items-center font-bold text-white truncate"><i class="fa-solid fa-file-pdf text-red-400 mr-2"></i><span class="truncate">Đề thi PDF gốc</span></span>
           <div class="flex items-center space-x-2.5 shrink-0">
-            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" class="text-xs text-indigo-300 hover:text-white flex items-center">
+            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" onclick="App.suppressAntiCheatTemporarily(2000)" class="text-xs text-indigo-300 hover:text-white flex items-center">
               <i class="fa-solid fa-download mr-1"></i><span class="hidden sm:inline">Tải về</span>
             </a>
-            <button onclick="App.openPdfModal('${safeTitle}', '${pdfSrc}', '${ex.id}')" class="text-xs text-emerald-400 hover:text-emerald-300 flex items-center cursor-pointer">
+            <button type="button" onclick="App.openPdfModal('${safeTitle}', '${pdfSrc}', '${ex.id}')" class="text-xs text-emerald-400 hover:text-emerald-300 flex items-center cursor-pointer">
               <i class="fa-solid fa-expand mr-1"></i><span>Phóng to</span>
             </button>
             ${!inStandalone ? `
@@ -2516,14 +2688,14 @@ const App = {
       <!-- Cột phải: Phiếu trả lời 3 phần trực tuyến -->
       <div id="examRightSheetPane" class="${paneCls.right}">
         <div class="p-2.5 sm:p-3 border-b border-slate-200 bg-slate-50 sticky top-0 z-10 space-y-2">
-          <div class="flex border border-slate-200 rounded-lg p-1 bg-white text-xs font-bold">
-            <button id="sectionTabBtn_p1" onclick="App.setSectionTab('p1')" class="flex-1 py-1.5 rounded-md text-center transition cursor-pointer ${this.state.activeSectionTab === 'p1' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'}">
+          <div class="flex border border-slate-200 rounded-xl p-1 bg-white text-xs font-bold gap-1">
+            <button type="button" id="sectionTabBtn_p1" onclick="App.setSectionTab('p1')" class="flex-1 h-9 rounded-lg text-center transition cursor-pointer ${this.state.activeSectionTab === 'p1' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
               Phần I (${ex.part1.length})
             </button>
-            <button id="sectionTabBtn_p2" onclick="App.setSectionTab('p2')" class="flex-1 py-1.5 rounded-md text-center transition cursor-pointer ${this.state.activeSectionTab === 'p2' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'}">
+            <button type="button" id="sectionTabBtn_p2" onclick="App.setSectionTab('p2')" class="flex-1 h-9 rounded-lg text-center transition cursor-pointer ${this.state.activeSectionTab === 'p2' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
               Phần II (${ex.part2.length} Đ/S)
             </button>
-            <button id="sectionTabBtn_p3" onclick="App.setSectionTab('p3')" class="flex-1 py-1.5 rounded-md text-center transition cursor-pointer ${this.state.activeSectionTab === 'p3' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'}">
+            <button type="button" id="sectionTabBtn_p3" onclick="App.setSectionTab('p3')" class="flex-1 h-9 rounded-lg text-center transition cursor-pointer ${this.state.activeSectionTab === 'p3' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
               Phần III (${ex.part3.length})
             </button>
           </div>
@@ -2534,7 +2706,7 @@ const App = {
         </div>
 
         <div class="p-3.5 pt-2 border-t border-slate-200 bg-slate-50 ios-safe-bottom">
-          <button type="button" id="sheetBottomSubmitBtn" onclick="App.confirmSubmitExam()" class="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-extrabold shadow-sm transition flex items-center justify-center gap-2 cursor-pointer">
+          <button type="button" id="sheetBottomSubmitBtn" onclick="App.confirmSubmitExam()" class="ui-btn-lg w-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm">
             <i class="fa-solid fa-paper-plane"></i>
             <span>Nộp Bài &amp; Chấm Điểm Ngay</span>
           </button>
@@ -2611,17 +2783,17 @@ const App = {
     if (this.state.activeSectionTab === 'p1') {
       if (ex.part1.length === 0) return `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này không có câu hỏi Phần I.</div>`;
       return `
-        <div class="space-y-3">
+        <div class="space-y-2.5">
           <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Phần I: Chọn 1 trong 4 đáp án (${ex.part1.length} câu)</div>
           ${ex.part1.map(q => {
             const curAns = this.state.answers.part1[q.id];
             return `
-              <div id="row_p1_${q.id}" class="p-2.5 bg-slate-50 rounded-lg border border-slate-200 flex items-center justify-between transition">
+              <div id="row_p1_${q.id}" class="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between transition">
                 <span class="font-bold text-xs text-slate-700 w-16">Câu ${q.id}:</span>
-                <div class="flex space-x-2">
+                <div class="flex gap-2">
                   ${['A', 'B', 'C', 'D'].map(opt => `
-                    <button id="split_btn_p1_${q.id}_${opt}" onclick="App.selectPart1Answer(${q.id}, '${opt}')" 
-                      class="w-8 h-8 rounded-lg font-bold text-xs border transition cursor-pointer ${curAns === opt ? 'bg-indigo-600 border-indigo-600 text-white shadow' : 'bg-white border-slate-300 text-slate-700 hover:bg-indigo-50'}">
+                    <button type="button" id="split_btn_p1_${q.id}_${opt}" onclick="App.selectPart1Answer(${q.id}, '${opt}')" 
+                      class="w-10 h-10 sm:w-9 sm:h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer ${curAns === opt ? 'bg-indigo-600 border-indigo-600 text-white shadow' : 'bg-white border-slate-300 text-slate-700 hover:bg-indigo-50'}">
                       ${opt}
                     </button>
                   `).join('')}
@@ -2641,15 +2813,15 @@ const App = {
           ${ex.part2.map(q => `
             <div id="row_p2_${q.id}" class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 transition">
               <div class="font-bold text-xs text-slate-800">Câu ${q.id} (4 ý):</div>
-              <div class="grid grid-cols-2 gap-2">
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
                 ${['a', 'b', 'c', 'd'].map(sub => {
                   const val = this.state.answers.part2[q.id]?.[sub];
                   return `
-                    <div class="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200 text-xs">
-                      <span class="font-mono font-bold text-slate-700">${sub})</span>
-                      <div class="flex space-x-1">
-                        <button id="split_tf_${q.id}_${sub}_true" onclick="App.selectPart2Answer(${q.id}, '${sub}', true)" class="tf-btn px-2.5 py-0.5 rounded text-[11px] font-bold border cursor-pointer ${val === true ? 'selected-true' : 'bg-slate-50 text-slate-600 border-slate-200'}">Đ</button>
-                        <button id="split_tf_${q.id}_${sub}_false" onclick="App.selectPart2Answer(${q.id}, '${sub}', false)" class="tf-btn px-2.5 py-0.5 rounded text-[11px] font-bold border cursor-pointer ${val === false ? 'selected-false' : 'bg-slate-50 text-slate-600 border-slate-200'}">S</button>
+                    <div class="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200 text-xs">
+                      <span class="font-mono font-bold text-slate-700">Ý ${sub})</span>
+                      <div class="flex gap-1.5">
+                        <button type="button" id="split_tf_${q.id}_${sub}_true" onclick="App.selectPart2Answer(${q.id}, '${sub}', true)" class="tf-btn px-3 text-xs font-bold border cursor-pointer ${val === true ? 'selected-true' : 'bg-slate-50 text-slate-600 border-slate-200'}">Đúng</button>
+                        <button type="button" id="split_tf_${q.id}_${sub}_false" onclick="App.selectPart2Answer(${q.id}, '${sub}', false)" class="tf-btn px-3 text-xs font-bold border cursor-pointer ${val === false ? 'selected-false' : 'bg-slate-50 text-slate-600 border-slate-200'}">Sai</button>
                       </div>
                     </div>
                   `;
@@ -2819,9 +2991,9 @@ const App = {
       const btn = document.getElementById(`split_btn_p1_${qId}_${opt}`);
       if (btn) {
         if (opt === choice) {
-          btn.className = 'w-8 h-8 rounded-lg font-bold text-xs border transition cursor-pointer bg-indigo-600 border-indigo-600 text-white shadow';
+          btn.className = 'w-10 h-10 sm:w-9 sm:h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer bg-indigo-600 border-indigo-600 text-white shadow';
         } else {
-          btn.className = 'w-8 h-8 rounded-lg font-bold text-xs border transition cursor-pointer bg-white border-slate-300 text-slate-700 hover:bg-indigo-50';
+          btn.className = 'w-10 h-10 sm:w-9 sm:h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer bg-white border-slate-300 text-slate-700 hover:bg-indigo-50';
         }
       }
     });
@@ -2841,11 +3013,11 @@ const App = {
     const sFalse = document.getElementById(`split_tf_${qId}_${subId}_false`);
     if (sTrue && sFalse) {
       if (boolVal === true) {
-        sTrue.className = 'tf-btn px-2.5 py-0.5 rounded text-[11px] font-bold border cursor-pointer selected-true';
-        sFalse.className = 'tf-btn px-2.5 py-0.5 rounded text-[11px] font-bold border cursor-pointer bg-slate-50 text-slate-600 border-slate-200';
+        sTrue.className = 'tf-btn px-3 text-xs font-bold border cursor-pointer selected-true';
+        sFalse.className = 'tf-btn px-3 text-xs font-bold border cursor-pointer bg-slate-50 text-slate-600 border-slate-200';
       } else if (boolVal === false) {
-        sFalse.className = 'tf-btn px-2.5 py-0.5 rounded text-[11px] font-bold border cursor-pointer selected-false';
-        sTrue.className = 'tf-btn px-2.5 py-0.5 rounded text-[11px] font-bold border cursor-pointer bg-slate-50 text-slate-600 border-slate-200';
+        sFalse.className = 'tf-btn px-3 text-xs font-bold border cursor-pointer selected-false';
+        sTrue.className = 'tf-btn px-3 text-xs font-bold border cursor-pointer bg-slate-50 text-slate-600 border-slate-200';
       }
     }
   },
@@ -2897,6 +3069,8 @@ const App = {
 
   submitExam(force = false) {
     this.clearIntervalTimer();
+    this.resetExamMonitorState();
+    document.getElementById('antiCheatModal')?.remove();
 
     // Khôi phục cuộn trang bình thường
     document.body.classList.remove('in-exam');
@@ -2926,6 +3100,7 @@ const App = {
       submittedAt: new Date().toISOString(),
       durationTakenSeconds: duration,
       tabSwitches: this.state.tabSwitchesCount,
+      violationLogs: Array.isArray(this.state.violationLogs) ? [...this.state.violationLogs] : [],
       attemptNumber: this.state.currentAttemptNumber || 1,
       scoreResult: result,
       answers: JSON.parse(JSON.stringify(evaluatedAnswers))
@@ -2962,7 +3137,7 @@ const App = {
         <div>
           <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Kết quả bài thi</span>
           <h3 class="text-xl font-extrabold text-slate-900">${sub.examTitle}</h3>
-          <p class="text-xs text-slate-500 mt-1">Giám sát: <strong class="text-slate-700">${sub.tabSwitches || 0} lần rời tab</strong></p>
+          <p class="text-xs text-slate-500 mt-1">Giám sát thoát màn hình: <strong class="${(sub.tabSwitches || 0) > 0 ? 'text-red-600' : 'text-emerald-600'}">${sub.tabSwitches || 0} lần vi phạm</strong></p>
         </div>
 
         <div class="bg-slate-50 rounded-2xl p-4 border border-slate-100">
@@ -3290,46 +3465,46 @@ const App = {
       <div class="min-h-screen bg-slate-100 flex flex-col">
         <!-- Top Nav -->
         <header class="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30">
-          <div class="w-full max-w-[97%] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-            <div class="flex items-center space-x-3 cursor-pointer" onclick="App.goHome()" title="Về trang chủ">
-              <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-500/25">
-                <i class="fa-solid fa-chalkboard-user"></i>
+          <div class="w-full max-w-[97%] mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
+            <div class="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer min-w-0" onclick="App.goHome()" title="Về trang chủ">
+              <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-500/25 shrink-0">
+                <i class="fa-solid fa-chalkboard-user text-sm sm:text-base"></i>
               </div>
-              <div>
-                <span class="text-xs font-semibold text-indigo-400 uppercase tracking-wider">Cổng Giáo Viên</span>
-                <h1 class="text-base sm:text-lg font-bold leading-none">Khảo Thí Toán 6 – 12</h1>
+              <div class="min-w-0">
+                <span class="block text-[10px] sm:text-xs font-bold text-indigo-400 uppercase tracking-wider leading-tight">Cổng Giáo Viên</span>
+                <h1 class="text-sm sm:text-lg font-extrabold leading-tight truncate">Toán 6 – 12</h1>
               </div>
             </div>
 
-            <div class="flex items-center space-x-2 sm:space-x-2.5">
-              <!-- Nút Về Trang Chủ -->
-              <button onclick="App.goHome()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 border border-slate-700 shadow-xs cursor-pointer" title="Về trang chủ">
+            <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <!-- Nút Về Trang Chủ (ẩn trên điện thoại vì bấm vào logo đã về trang chủ) -->
+              <button type="button" onclick="App.goHome()" class="hidden md:inline-flex ui-btn bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 shadow-xs" title="Về trang chủ">
                 <i class="fa-solid fa-house text-indigo-400"></i>
-                <span class="hidden sm:inline">Trang chủ</span>
+                <span>Trang chủ</span>
               </button>
 
               <!-- Nút Quét QR Tạo App iOS cho Học Sinh -->
-              <button id="adminIosAppBtn" onclick="App.showIosAppModal()" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 border border-indigo-500 shadow-xs cursor-pointer" title="Hiển thị mã QR để học sinh quét tạo App trên iPhone / iPad">
+              <button type="button" id="adminIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold border border-indigo-500 shadow-xs md:gap-1.5" title="Hiển thị mã QR để học sinh quét tạo App trên iPhone / iPad">
                 <i class="fa-solid fa-qrcode"></i>
                 <span class="hidden md:inline">App iOS / QR</span>
               </button>
 
               <!-- Chuyển nhanh Sáng/Tối & Bảng màu -->
-              <button id="adminQuickThemeBtn" onclick="App.cycleTheme()" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition border border-slate-700 cursor-pointer" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
+              <button type="button" id="adminQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn-icon bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
                 <i class="fa-solid ${thMeta.icon} text-indigo-400"></i>
               </button>
-              <button id="adminThemeHeaderBtn" onclick="App.showThemeModal()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 border border-slate-700 cursor-pointer" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
+              <button type="button" id="adminThemeHeaderBtn" onclick="App.showThemeModal()" class="ui-btn-icon lg:w-auto lg:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 lg:gap-1.5" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
                 <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-white/25 shrink-0" style="background:${swatchHex};"></span>
                 <span class="hidden lg:inline">Giao diện</span>
               </button>
 
               <div class="h-6 w-px bg-slate-800 hidden sm:block"></div>
 
-              <button id="adminProfileHeaderBtn" onclick="App.showAdminProfileModal()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 border border-slate-700 cursor-pointer" title="Hồ sơ giáo viên, đổi tên hiển thị & mật khẩu">
+              <button type="button" id="adminProfileHeaderBtn" onclick="App.showAdminProfileModal()" class="ui-btn-icon sm:w-auto sm:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 sm:gap-1.5" title="Hồ sơ giáo viên, đổi tên hiển thị & mật khẩu">
                 <i class="fa-solid fa-user-gear text-emerald-400"></i>
                 <span class="hidden sm:inline">${u.fullName}</span>
               </button>
-              <button onclick="App.logout()" class="p-2 text-slate-400 hover:text-red-400 rounded-lg hover:bg-white/5 transition cursor-pointer" title="Đăng xuất">
+              <button type="button" onclick="App.logout()" class="ui-btn-icon bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-400 border border-slate-700" title="Đăng xuất">
                 <i class="fa-solid fa-right-from-bracket"></i>
               </button>
             </div>
@@ -3337,15 +3512,16 @@ const App = {
         </header>
 
         <!-- Main Body -->
-        <main class="w-full max-w-[97%] mx-auto px-4 sm:px-6 py-8 flex-1 space-y-6">
+        <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 py-5 sm:py-8 flex-1 space-y-5 sm:space-y-6">
           <!-- Thanh Điều Hướng Cổng Giáo Viên -->
           <div class="bg-white rounded-2xl p-2.5 border border-slate-200 shadow-sm">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <nav class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <nav class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap pb-0.5 sm:pb-0">
                 <button
+                  type="button"
                   id="adminTabMainBtn"
                   onclick="App.setAdminMainTab('main')"
-                  class="flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${this.state.adminMainTab === 'main' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.adminMainTab === 'main' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-chart-pie"></i>
                   <span>Tổng Quan &amp; Sổ Điểm</span>
@@ -3355,9 +3531,10 @@ const App = {
                 </button>
 
                 <button
+                  type="button"
                   id="adminTabStudentsBtn"
                   onclick="App.setAdminMainTab('students')"
-                  class="flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${this.state.adminMainTab === 'students' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.adminMainTab === 'students' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-users"></i>
                   <span>Quản Lý Học Sinh</span>
@@ -3367,9 +3544,10 @@ const App = {
                 </button>
 
                 <button
+                  type="button"
                   id="adminTabExamsBtn"
                   onclick="App.setAdminMainTab('exams')"
-                  class="flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${this.state.adminMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.adminMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-file-lines"></i>
                   <span>Quản Lý Đề Thi</span>
@@ -3379,9 +3557,10 @@ const App = {
                 </button>
 
                 <button
+                  type="button"
                   id="adminTabHomeworksBtn"
                   onclick="App.setAdminMainTab('homeworks')"
-                  class="flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-book-open"></i>
                   <span>Tài Liệu &amp; Chuyên Đề</span>
@@ -3391,9 +3570,10 @@ const App = {
                 </button>
 
                 <button
+                  type="button"
                   id="adminTabSettingsBtn"
                   onclick="App.setAdminMainTab('settings')"
-                  class="flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${this.state.adminMainTab === 'settings' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.adminMainTab === 'settings' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-sliders"></i>
                   <span>Cài Đặt &amp; Bảo Mật</span>
@@ -3429,12 +3609,12 @@ const App = {
                 </h3>
                 <p class="text-xs text-slate-500 mt-0.5">Xếp khối học sinh (Khối 6 – 12), quản lý hồ sơ, liên hệ phụ huynh, tài khoản đăng nhập và lịch sử thi</p>
               </div>
-              <div class="flex flex-wrap items-center gap-2.5">
-                <button id="openBulkGradeModalBtn" onclick="App.showBulkGradeModal()" class="px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold shadow-2xs transition flex items-center justify-center cursor-pointer">
-                  <i class="fa-solid fa-layer-group mr-2"></i>Xếp Khối Học Sinh
+              <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+                <button type="button" id="openBulkGradeModalBtn" onclick="App.showBulkGradeModal()" class="ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs">
+                  <i class="fa-solid fa-layer-group"></i><span>Xếp Khối HS</span>
                 </button>
-                <button onclick="App.showAddStudentModal()" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center cursor-pointer">
-                  <i class="fa-solid fa-user-plus mr-2"></i>Thêm Học Sinh Mới
+                <button type="button" onclick="App.showAddStudentModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
+                  <i class="fa-solid fa-user-plus"></i><span>Thêm Học Sinh</span>
                 </button>
               </div>
             </div>
@@ -3549,9 +3729,15 @@ const App = {
                 </h3>
                 <p class="text-xs text-slate-500 mt-0.5">Phân chia Khối 6 – 12 &amp; Phân loại (GK1, CK1, GK2, CK2, Đề thi vào 10, Thi thử THPT QG) • Bấm vào đề thi để cấu hình &amp; phân quyền</p>
               </div>
-              <button onclick="App.showCreateExamModal()" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center shrink-0 cursor-pointer">
-                <i class="fa-solid fa-cloud-arrow-up mr-2"></i>Thêm Đề Thi Mới
-              </button>
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" id="quickToggleWarnExitExamsBtn" onclick="App.toggleSetting('warnOnExitExam')" class="ui-btn ${this.isExamExitWarningEnabled() ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200'}" title="Bật/Tắt cảnh báo khi học sinh dùng điện thoại thoát ra ngoài lúc đang thi">
+                  <i class="fa-solid ${this.isExamExitWarningEnabled() ? 'fa-shield-halved text-rose-600' : 'fa-shield text-slate-400'}"></i>
+                  <span>Cảnh báo thoát App: ${this.isExamExitWarningEnabled() ? 'BẬT' : 'TẮT'}</span>
+                </button>
+                <button type="button" onclick="App.showCreateExamModal()" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-4">
+                  <i class="fa-solid fa-cloud-arrow-up"></i><span>Thêm Đề Thi Mới</span>
+                </button>
+              </div>
             </div>
 
             <!-- Thanh Phân Khối 6-12, Phân Loại Đề & Tìm Kiếm -->
@@ -3676,8 +3862,8 @@ const App = {
                       <input type="text" id="inlineAdminFullName" required value="${(this.state.admin && this.state.admin.fullName) || u.fullName}" placeholder="VD: Thầy Huỳnh Thanh Chí" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-800 focus:border-indigo-600 outline-none">
                     </div>
                     <div>
-                      <label class="block text-xs font-bold text-slate-700 mb-1">Tên đăng nhập (Username) *</label>
-                      <input type="text" id="inlineAdminUsername" required value="${(this.state.admin && this.state.admin.username) || 'admin'}" placeholder="admin" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-mono font-bold text-indigo-700 focus:border-indigo-600 outline-none">
+                      <label class="block text-xs font-bold text-slate-700 mb-1">Tên đăng nhập (Username — IN HOA) *</label>
+                      <input type="text" id="inlineAdminUsername" required value="${String((this.state.admin && this.state.admin.username) || 'ADMIN').toUpperCase()}" placeholder="ADMIN" autocapitalize="characters" spellcheck="false" oninput="App.forceUppercaseInput(this)" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-mono font-bold text-indigo-700 focus:border-indigo-600 outline-none input-uppercase">
                     </div>
                   </div>
 
@@ -3753,6 +3939,30 @@ const App = {
               </div>
             </div>
 
+            <!-- Khối Giám Sát Phòng Thi & Cảnh Báo Thoát Ứng Dụng Trên Điện Thoại -->
+            <div class="pb-6 border-b border-slate-200">
+              <h4 class="text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <i class="fa-solid fa-mobile-screen-button text-rose-600"></i><span>Giám Sát Phòng Thi Trên Điện Thoại &amp; Trình Duyệt</span>
+              </h4>
+              <div class="p-4 sm:p-5 rounded-2xl border ${this.isExamExitWarningEnabled() ? 'border-rose-200 bg-rose-50/50' : 'border-slate-200 bg-slate-50/60'} flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div class="space-y-1.5">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h5 class="text-sm font-extrabold text-slate-900">Cảnh Báo &amp; Nhắc Vi Phạm Khi Thoát Ra Ngoài Lúc Đang Thi</h5>
+                    <span id="warnOnExitStatusPill" class="px-2.5 py-0.5 rounded-full text-xs font-bold ${this.isExamExitWarningEnabled() ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-slate-200 text-slate-600'}">
+                      ${this.isExamExitWarningEnabled() ? 'Đang Bật Giám Sát' : 'Đang Tắt'}
+                    </span>
+                  </div>
+                  <p class="text-xs text-slate-600 leading-relaxed max-w-3xl">
+                    Khi bật: Nếu học sinh thi trên điện thoại (App iOS / Safari / Chrome) hoặc máy tính mà vuốt ra màn hình chính, chuyển sang ứng dụng khác (Zalo, Camera, trình duyệt...), mở đa nhiệm hoặc rời tab khi đang làm bài, hệ thống sẽ lập tức <strong>rung cảnh báo, hiện bảng nhắc vi phạm quy chế</strong> và <strong>cộng số lần vi phạm vào sổ điểm gửi Giáo viên</strong>.
+                  </p>
+                </div>
+                <button type="button" id="toggleWarnOnExitExamBtn" onclick="App.toggleSetting('warnOnExitExam')" class="ui-btn px-4 shrink-0 ${this.isExamExitWarningEnabled() ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm' : 'bg-slate-800 hover:bg-slate-900 text-white shadow-sm'}">
+                  <i class="fa-solid ${this.isExamExitWarningEnabled() ? 'fa-shield-halved' : 'fa-power-off'}"></i>
+                  <span>${this.isExamExitWarningEnabled() ? 'Tắt Cảnh Báo Thoát Màn Hình' : 'Bật Cảnh Báo Thoát Màn Hình'}</span>
+                </button>
+              </div>
+            </div>
+
             <div>
               <h4 class="text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-3 flex items-center gap-1.5">
                 <i class="fa-solid fa-user-graduate text-indigo-600"></i><span>Phân Quyền Hiển Thị Cho Học Sinh</span>
@@ -3760,16 +3970,16 @@ const App = {
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <!-- Cấu hình 1: Cho phép xem điểm bản thân -->
               <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between space-y-3">
-                <div class="flex items-start justify-between">
+                <div class="flex items-start justify-between gap-2">
                   <div>
                     <h4 class="text-xs font-bold text-slate-800">1. Xem Điểm Bản Thân</h4>
                     <p class="text-[11px] text-slate-500 mt-1">Học sinh được tra cứu kết quả bài làm của chính mình.</p>
                   </div>
-                  <span class="text-xs font-bold px-2 py-0.5 rounded-full ${this.state.settings.allowStudentViewOwnScore ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
+                  <span class="text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${this.state.settings.allowStudentViewOwnScore ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
                     ${this.state.settings.allowStudentViewOwnScore ? 'Đang Mở' : 'Đang Khóa'}
                   </span>
                 </div>
-                <button onclick="App.toggleSetting('allowStudentViewOwnScore')" class="w-full py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer ${this.state.settings.allowStudentViewOwnScore ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
+                <button type="button" onclick="App.toggleSetting('allowStudentViewOwnScore')" class="ui-btn w-full ${this.state.settings.allowStudentViewOwnScore ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
                   <i class="fa-solid ${this.state.settings.allowStudentViewOwnScore ? 'fa-lock-open' : 'fa-lock'}"></i>
                   <span>${this.state.settings.allowStudentViewOwnScore ? 'Khóa Quyền Xem Điểm' : 'Mở Cho Xem Điểm'}</span>
                 </button>
@@ -3777,16 +3987,16 @@ const App = {
 
               <!-- Cấu hình 2: Bảng điểm cả lớp để so sánh -->
               <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between space-y-3">
-                <div class="flex items-start justify-between">
+                <div class="flex items-start justify-between gap-2">
                   <div>
                     <h4 class="text-xs font-bold text-slate-800">2. Bảng Điểm Cả Lớp</h4>
                     <p class="text-[11px] text-slate-500 mt-1">Cho phép học sinh xem bảng xếp hạng lớp để đối chiếu năng lực.</p>
                   </div>
-                  <span class="text-xs font-bold px-2 py-0.5 rounded-full ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200 text-slate-600'}">
+                  <span class="text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200 text-slate-600'}">
                     ${this.state.settings.allowStudentViewClassBoard ? 'Cho Phép' : 'Chỉ Xem Riêng'}
                   </span>
                 </div>
-                <button onclick="App.toggleSetting('allowStudentViewClassBoard')" class="w-full py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
+                <button type="button" onclick="App.toggleSetting('allowStudentViewClassBoard')" class="ui-btn w-full ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
                   <i class="fa-solid fa-chart-simple"></i>
                   <span>${this.state.settings.allowStudentViewClassBoard ? 'Khóa Bảng Lớp' : 'Mở Bảng So Sánh'}</span>
                 </button>
@@ -3794,16 +4004,16 @@ const App = {
 
               <!-- Cấu hình 3: Ẩn danh thông tin học sinh khác -->
               <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between space-y-3">
-                <div class="flex items-start justify-between">
+                <div class="flex items-start justify-between gap-2">
                   <div>
                     <h4 class="text-xs font-bold text-slate-800">3. Ẩn Danh Bạn Khác</h4>
                     <p class="text-[11px] text-slate-500 mt-1">Che tên/mã bạn khác (VD "Học sinh ẩn danh #1"), giữ nguyên điểm.</p>
                   </div>
-                  <span class="text-xs font-bold px-2 py-0.5 rounded-full ${this.state.settings.anonymizeOtherStudents ? 'bg-purple-100 text-purple-800' : 'bg-amber-100 text-amber-800'}">
+                  <span class="text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${this.state.settings.anonymizeOtherStudents ? 'bg-purple-100 text-purple-800' : 'bg-amber-100 text-amber-800'}">
                     ${this.state.settings.anonymizeOtherStudents ? 'Đang Ẩn Danh' : 'Hiện Tên Thật'}
                   </span>
                 </div>
-                <button onclick="App.toggleSetting('anonymizeOtherStudents')" class="w-full py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer ${this.state.settings.anonymizeOtherStudents ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
+                <button type="button" onclick="App.toggleSetting('anonymizeOtherStudents')" class="ui-btn w-full ${this.state.settings.anonymizeOtherStudents ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
                   <i class="fa-solid ${this.state.settings.anonymizeOtherStudents ? 'fa-user-secret' : 'fa-users'}"></i>
                   <span>${this.state.settings.anonymizeOtherStudents ? 'Tắt Ẩn Danh (Tên Thật)' : 'Bật Ẩn Danh'}</span>
                 </button>
@@ -3811,16 +4021,16 @@ const App = {
 
               <!-- Cấu hình 4: Bật/Tắt hiển thị đáp án đúng & lời giải chi tiết -->
               <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between space-y-3">
-                <div class="flex items-start justify-between">
+                <div class="flex items-start justify-between gap-2">
                   <div>
                     <h4 class="text-xs font-bold text-slate-800">4. Đáp Án & Lời Giải</h4>
                     <p class="text-[11px] text-slate-500 mt-1">Cho phép học sinh xem đáp án đúng (A/B/C/D) và lời giải sau khi nộp.</p>
                   </div>
-                  <span class="text-xs font-bold px-2 py-0.5 rounded-full ${this.state.settings.allowStudentViewAnswers ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
+                  <span class="text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${this.state.settings.allowStudentViewAnswers ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
                     ${this.state.settings.allowStudentViewAnswers ? 'Đang Mở' : 'Đang Khóa'}
                   </span>
                 </div>
-                <button onclick="App.toggleSetting('allowStudentViewAnswers')" class="w-full py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer ${this.state.settings.allowStudentViewAnswers ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
+                <button type="button" onclick="App.toggleSetting('allowStudentViewAnswers')" class="ui-btn w-full ${this.state.settings.allowStudentViewAnswers ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
                   <i class="fa-solid ${this.state.settings.allowStudentViewAnswers ? 'fa-eye' : 'fa-eye-slash'}"></i>
                   <span>${this.state.settings.allowStudentViewAnswers ? 'Khóa Đáp Án & Lời Giải' : 'Mở Cho Xem Đáp Án'}</span>
                 </button>
@@ -4363,32 +4573,32 @@ const App = {
               </div>
 
               <!-- Các nút thao tác sắp xếp gọn gàng theo lưới 2 hàng cân đối -->
-              <div class="pt-3 border-t border-slate-100 space-y-1.5">
+              <div class="pt-3 border-t border-slate-100 space-y-2">
                 <div class="grid grid-cols-2 gap-2">
-                  <button onclick="App.previewAdminPdf('${ex.id}')" class="px-3 py-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap" title="Xem trực tiếp file PDF đề thi">
+                  <button type="button" onclick="App.previewAdminPdf('${ex.id}')" class="ui-btn bg-red-50 hover:bg-red-100 border border-red-200 text-red-700" title="Xem trực tiếp file PDF đề thi">
                     <i class="fa-solid fa-file-pdf"></i><span>Xem PDF Đề</span>
                   </button>
                   ${ex.solution_pdf_url ? `
-                    <button onclick="App.previewAdminSolutionPdf('${ex.id}')" class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap" title="Xem trực tiếp file PDF đáp án và lời giải">
+                    <button type="button" onclick="App.previewAdminSolutionPdf('${ex.id}')" class="ui-btn bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700" title="Xem trực tiếp file PDF đáp án và lời giải">
                       <i class="fa-solid fa-file-shield"></i><span>Xem PDF Đáp Án</span>
                     </button>
                   ` : `
-                    <button onclick="App.showUpdatePdfModal('${ex.id}')" class="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 text-slate-600 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap">
+                    <button type="button" onclick="App.showUpdatePdfModal('${ex.id}')" class="ui-btn bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 text-slate-600">
                       <i class="fa-solid fa-cloud-arrow-up"></i><span>Up PDF Đáp Án</span>
                     </button>
                   `}
                 </div>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                  <button onclick="App.showExamAccessModal('${ex.id}')" class="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1 transition cursor-pointer whitespace-nowrap" title="Chọn ai được phép thi đề này">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button type="button" onclick="App.showExamAccessModal('${ex.id}')" class="ui-btn bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700" title="Chọn ai được phép thi đề này">
                     <i class="fa-solid fa-user-check"></i><span>Phân quyền</span>
                   </button>
-                  <button onclick="App.toggleExamViewAnswers('${ex.id}')" class="px-2.5 py-1.5 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1 transition cursor-pointer whitespace-nowrap ${ex.allow_view_answers !== false ? 'bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700' : 'bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700'}" title="Bật/Tắt cho phép học sinh xem đáp án & lời giải PDF">
+                  <button type="button" onclick="App.toggleExamViewAnswers('${ex.id}')" class="ui-btn ${ex.allow_view_answers !== false ? 'bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700' : 'bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700'}" title="Bật/Tắt cho phép học sinh xem đáp án & lời giải PDF">
                     <i class="fa-solid ${ex.allow_view_answers !== false ? 'fa-eye' : 'fa-eye-slash'}"></i><span>${ex.allow_view_answers !== false ? 'Mở ĐA' : 'Khóa ĐA'}</span>
                   </button>
-                  <button onclick="App.showUpdatePdfModal('${ex.id}')" class="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1 transition cursor-pointer whitespace-nowrap" title="Cập nhật file PDF đề thi, lời giải và bảng đáp án chấm điểm">
+                  <button type="button" onclick="App.showUpdatePdfModal('${ex.id}')" class="ui-btn bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700" title="Cập nhật file PDF đề thi, lời giải và bảng đáp án chấm điểm">
                     <i class="fa-solid fa-file-arrow-up"></i><span>PDF &amp; ĐA</span>
                   </button>
-                  <button onclick="App.deleteExam('${ex.id}')" class="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 border border-red-100 text-red-600 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1 transition cursor-pointer whitespace-nowrap" title="Xóa đề thi này">
+                  <button type="button" onclick="App.deleteExam('${ex.id}')" class="ui-btn bg-red-50 hover:bg-red-100 border border-red-100 text-red-600" title="Xóa đề thi này">
                     <i class="fa-solid fa-trash-can"></i><span>Xóa</span>
                   </button>
                 </div>
@@ -5056,8 +5266,8 @@ const App = {
         <form onsubmit="event.preventDefault(); App.handleAddStudentSubmit();" class="p-6 space-y-4 text-sm">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Mã Học Sinh *</label>
-              <input type="text" id="newStudentId" required value="${defaultCode}" placeholder="VD: HS202705" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold uppercase text-indigo-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+              <label class="block text-xs font-bold text-slate-700 mb-1">Mã Học Sinh (Tự động IN HOA) *</label>
+              <input type="text" id="newStudentId" required value="${defaultCode}" placeholder="VD: HS202705" autocapitalize="characters" spellcheck="false" oninput="App.forceUppercaseInput(this)" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold input-uppercase text-indigo-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
             </div>
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Họ và Tên Học Sinh *</label>
@@ -5187,8 +5397,8 @@ const App = {
         <form onsubmit="event.preventDefault(); App.handleEditStudentSubmit('${student.studentId}');" class="p-6 space-y-4 text-sm">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Mã Học Sinh <span class="text-indigo-600 font-normal">(Định danh)</span> *</label>
-              <input type="text" id="editStudentId" required value="${student.studentId}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold uppercase text-indigo-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+              <label class="block text-xs font-bold text-slate-700 mb-1">Mã Học Sinh <span class="text-indigo-600 font-normal">(IN HOA)</span> *</label>
+              <input type="text" id="editStudentId" required value="${student.studentId}" autocapitalize="characters" spellcheck="false" oninput="App.forceUppercaseInput(this)" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold input-uppercase text-indigo-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
               <p class="text-[11px] text-amber-600 mt-1"><i class="fa-solid fa-circle-info mr-1"></i>Đổi mã sẽ tự động cập nhật đồng bộ các bài thi cũ.</p>
             </div>
             <div>
@@ -6665,7 +6875,7 @@ const App = {
   // --- CÀI ĐẶT HỒ SƠ GIÁO VIÊN, ĐỔI MẬT KHẨU & KHÔI PHỤC QUA EMAIL ---
   handleAdminProfileSave(prefix = 'inline') {
     const fullName = (document.getElementById(`${prefix}AdminFullName`)?.value || '').trim();
-    const username = (document.getElementById(`${prefix}AdminUsername`)?.value || '').trim();
+    const username = (document.getElementById(`${prefix}AdminUsername`)?.value || '').trim().toUpperCase();
     if (!fullName || !username) {
       this.notify('Vui lòng nhập đầy đủ Tên hiển thị và Tên đăng nhập của Giáo viên!', 'warning', 'Thiếu thông tin bắt buộc');
       return false;
@@ -6760,8 +6970,8 @@ const App = {
               <input type="text" id="modalAdminFullName" required value="${adminAcc.fullName || 'Thầy Huỳnh Thanh Chí'}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-800 text-xs focus:border-indigo-600 outline-none">
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Tên đăng nhập (Username) *</label>
-              <input type="text" id="modalAdminUsername" required value="${adminAcc.username || 'admin'}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold text-indigo-700 text-xs focus:border-indigo-600 outline-none">
+              <label class="block text-xs font-bold text-slate-700 mb-1">Tên đăng nhập (Username — IN HOA) *</label>
+              <input type="text" id="modalAdminUsername" required value="${String(adminAcc.username || 'ADMIN').toUpperCase()}" autocapitalize="characters" spellcheck="false" oninput="App.forceUppercaseInput(this)" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold text-indigo-700 text-xs focus:border-indigo-600 outline-none input-uppercase">
             </div>
           </div>
 

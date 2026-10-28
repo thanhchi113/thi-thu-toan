@@ -99,4 +99,39 @@ const paneSheet = App.getExamPaneClasses('sheet');
 console.assert(panePdf.left.includes('h-full') && panePdf.right.includes('hidden'), 'Mobile PDF pane class fail');
 console.assert(paneSheet.right.includes('h-full') && paneSheet.left.includes('hidden'), 'Mobile Sheet pane class fail');
 
-console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM, ĐỀ PDF & APP iOS QR ĐÃ ĐẠT 100%!');
+// Test 5: Tự động IN HOA tài khoản đăng nhập & Cảnh báo thoát màn hình khi đang thi (warnOnExitExam)
+let caretCaptured = null;
+const mockLoginInput = {
+  value: 'hs202701',
+  selectionStart: 4,
+  selectionEnd: 4,
+  setSelectionRange(s, e) { caretCaptured = [s, e]; }
+};
+const upperVal = App.forceUppercaseInput(mockLoginInput);
+console.assert(upperVal === 'HS202701' && mockLoginInput.value === 'HS202701', 'Uppercase login input fail');
+console.assert(caretCaptured && caretCaptured[0] === 4 && caretCaptured[1] === 4, 'Uppercase cursor preserve fail');
+
+// Khi BẬT warnOnExitExam: ghi nhận đúng 1 lần khi thoát, chống đếm trùng liên tiếp, và báo cảnh báo khi quay lại
+App.state.activeExam = { id: 'EXAM_TEST_GUARD', title: 'Đề kiểm tra' };
+App.state.settings.warnOnExitExam = true;
+App.state.tabSwitchesCount = 0;
+App.state.violationLogs = [];
+App.resetExamMonitorState();
+
+const v1 = App.recordExamLeaveViolation('Thoát app iOS');
+const v1Dup = App.recordExamLeaveViolation('Sự kiện trùng pagehide');
+console.assert(v1 === true && v1Dup === false && App.state.tabSwitchesCount === 1, 'Exam leave single-count fail');
+console.assert(App.state.violationLogs.length === 1, 'Violation log append fail');
+
+const returned = App.handleExamReturnFocus();
+console.assert(returned === true && App._examAwayActive === false, 'Exam return focus warning trigger fail');
+
+// Khi TẮT warnOnExitExam: thoát màn hình KHÔNG tính vi phạm và KHÔNG cảnh báo
+App.state.settings.warnOnExitExam = false;
+App._lastViolationAt = 0;
+const vDisabled = App.recordExamLeaveViolation('Thoát app khi đã tắt giám sát');
+console.assert(vDisabled === false && App.state.tabSwitchesCount === 1, 'Disabled warnOnExitExam should not record violation');
+App.state.activeExam = null;
+App.state.settings.warnOnExitExam = true;
+
+console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM, ĐỀ PDF, IN HOA TK & GIÁM SÁT THOÁT MÀN HÌNH ĐÃ ĐẠT 100%!');
