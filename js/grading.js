@@ -146,13 +146,16 @@ const GradingSystem = {
     }
 
     // Tổng điểm
+    const computedMax = +(result.part1.maxScore + result.part2.maxScore + result.part3.maxScore).toFixed(2);
+    result.maxTotal = computedMax > 0 ? computedMax : 10.0;
     result.totalScore = +(result.part1.score + result.part2.score + result.part3.score).toFixed(2);
     result.percentage = +((result.totalScore / result.maxTotal) * 100).toFixed(1);
 
-    if (result.totalScore >= 9.0) result.rank = 'Xuất sắc';
-    else if (result.totalScore >= 8.0) result.rank = 'Giỏi';
-    else if (result.totalScore >= 6.5) result.rank = 'Khá';
-    else if (result.totalScore >= 5.0) result.rank = 'Trung bình';
+    const scaledTen = (result.totalScore / result.maxTotal) * 10;
+    if (scaledTen >= 9.0) result.rank = 'Xuất sắc';
+    else if (scaledTen >= 8.0) result.rank = 'Giỏi';
+    else if (scaledTen >= 6.5) result.rank = 'Khá';
+    else if (scaledTen >= 5.0) result.rank = 'Trung bình';
     else result.rank = 'Cần cố gắng';
 
     return result;

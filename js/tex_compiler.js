@@ -1193,11 +1193,85 @@ const TeXCompiler = {
     });
   },
 
+  // Loại bỏ hoàn toàn dấu vết đáp án & lời giải khỏi HTML khi hiển thị hoặc tải đề trong giờ thi
+  stripHtmlAnswers(html) {
+    if (!html) return '';
+    return String(html)
+      .replace(/<details\s+[^>]*\btex-loigiai\b[^>]*>[\s\S]*?<\/details>/gi, '')
+      .replace(/<div\s+[^>]*\btex-shortans-box\b[^>]*>[\s\S]*?<\/div>/gi, '')
+      .replace(/<span\s+[^>]*\btex-ans-pill\b[^>]*>[\s\S]*?<\/span>/gi, '')
+      .replace(/\btex-choice-correct\b/g, '');
+  },
+
+  // Bóc tách mã nguồn TeX nhúng sẵn từ file .html đã xuất bởi hệ thống (nếu có)
+  extractTexFromHtml(htmlText) {
+    if (!htmlText) return '';
+    const m = String(htmlText).match(/<script\s+type="application\/x-tex-source"\s+id="texSourceEmbed">([\s\S]*?)<\/script>/i);
+    if (!m) return '';
+    return m[1].replace(/<\\\/script/gi, '</script').trim();
+  },
+
+  // Tạo tài liệu HTML chuẩn từ dữ liệu câu hỏi 3 phần (dự phòng khi đề thi không lưu raw_tex)
+  compileExamDataFallbackHtml(ex) {
+    if (!ex) return '<div class="tex-doc"></div>';
+    const renderQ = (frag) => this.compileFragment(String(frag || ''), { inlineQuestion: true });
+    let partsHtml = `<div class="tex-maketitle text-center my-4 pb-3 border-b border-slate-200"><h1 class="text-xl font-extrabold text-slate-900">${this.escapeHtml(ex.title || 'Đề Thi Môn Toán')}</h1></div>`;
+
+    if (Array.isArray(ex.part1) && ex.part1.length > 0) {
+      partsHtml += `<h2 class="tex-section-heading mt-5 mb-2.5">PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn</h2>`;
+      ex.part1.forEach(q => {
+        const letters = ['A', 'B', 'C', 'D'];
+        const choicesHtml = `<div class="tex-choices-grid tex-choices-cols-2">${(q.choices || []).map((c, idx) => {
+          const letter = letters[idx] || '';
+          const isCorr = q.correct_answer === letter;
+          const cleanChoice = String(c || '').replace(/^[A-D]\.\s*/, '');
+          return `<div class="tex-choice-item ${isCorr ? 'tex-choice-correct' : ''}"><span class="tex-choice-letter">${letter}.</span><span class="tex-choice-body">${renderQ(cleanChoice)}</span></div>`;
+        }).join('')}</div>`;
+        const lgHtml = q.explanation ? `<details class="tex-loigiai mt-3" open><summary class="tex-loigiai-summary"><i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Lời giải chi tiết</summary><div class="tex-loigiai-body">${renderQ(q.explanation)}</div></details>` : '';
+        partsHtml += `<article class="tex-env tex-env-ex my-4"><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Câu ${q.id}.</span></div><div class="tex-env-body">${renderQ(q.content)}${choicesHtml}${lgHtml}</div></article>`;
+      });
+    }
+
+    if (Array.isArray(ex.part2) && ex.part2.length > 0) {
+      partsHtml += `<h2 class="tex-section-heading mt-5 mb-2.5">PHẦN II. Câu trắc nghiệm Đúng / Sai</h2>`;
+      ex.part2.forEach(q => {
+        const stList = q.statements || q.items || [];
+        const tfHtml = `<div class="tex-tf-list space-y-1.5 mt-2.5">${stList.map(st => {
+          const subId = st.sub_id || st.key || '';
+          const badge = st.correct ? '<span class="tex-ans-pill tex-ans-true">Đúng</span>' : '<span class="tex-ans-pill tex-ans-false">Sai</span>';
+          return `<div class="tex-tf-item"><span class="tex-tf-label">${subId})</span><div class="tex-tf-body flex-1">${renderQ(st.text)}</div>${badge}</div>`;
+        }).join('')}</div>`;
+        const lgHtml = q.explanation ? `<details class="tex-loigiai mt-3" open><summary class="tex-loigiai-summary"><i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Lời giải chi tiết</summary><div class="tex-loigiai-body">${renderQ(q.explanation)}</div></details>` : '';
+        partsHtml += `<article class="tex-env tex-env-ex my-4"><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Câu ${q.id}.</span></div><div class="tex-env-body">${renderQ(q.content)}${tfHtml}${lgHtml}</div></article>`;
+      });
+    }
+
+    if (Array.isArray(ex.part3) && ex.part3.length > 0) {
+      partsHtml += `<h2 class="tex-section-heading mt-5 mb-2.5">PHẦN III. Câu trắc nghiệm trả lời ngắn</h2>`;
+      ex.part3.forEach(q => {
+        const ansHtml = q.correct_answer !== undefined && q.correct_answer !== ''
+          ? `<div class="tex-shortans-box"><span class="tex-shortans-label">Đáp án:</span><span class="tex-shortans-val">${this.escapeHtml(String(q.correct_answer))}</span></div>`
+          : '';
+        const lgHtml = q.explanation ? `<details class="tex-loigiai mt-3" open><summary class="tex-loigiai-summary"><i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Lời giải chi tiết</summary><div class="tex-loigiai-body">${renderQ(q.explanation)}</div></details>` : '';
+        partsHtml += `<article class="tex-env tex-env-ex my-4"><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Câu ${q.id}.</span></div><div class="tex-env-body">${renderQ(q.content)}${ansHtml}${lgHtml}</div></article>`;
+      });
+    }
+
+    return `<div class="tex-doc">${partsHtml}</div>`;
+  },
+
   // Xuất file .html độc lập hoàn chỉnh (nhúng CDN KaTeX + mhchem + @rod2ik/tikzjax + CSS + nút ẩn/hiện lời giải)
-  buildStandaloneHtml(rawTex, customTitle = '') {
-    const res = this.compileDocument(rawTex);
+  buildStandaloneHtml(rawTex, customTitle = '', options = {}) {
+    const lockAnswers = Boolean(options.lockAnswers);
+    const res = rawTex && String(rawTex).trim()
+      ? this.compileDocument(rawTex)
+      : { html: options.precompiledHtml || '<div class="tex-doc"></div>', title: customTitle, preamble: null };
     const docTitle = customTitle || res.title || 'Tài liệu Toán học (TeX -> HTML)';
     const macrosJson = JSON.stringify(this.getKaTeXMacros(res.preamble?.macros || {}));
+    const finalBodyHtml = lockAnswers ? this.stripHtmlAnswers(res.html) : res.html;
+    const embeddedSourceTag = (!lockAnswers && rawTex && String(rawTex).trim())
+      ? `\n  <script type="application/x-tex-source" id="texSourceEmbed">${String(rawTex).replace(/<\/script/gi, '<\\/script')}</script>`
+      : '';
 
     return `<!DOCTYPE html>
 <html lang="vi" data-theme="light">
@@ -1271,17 +1345,25 @@ const TeXCompiler = {
     @media print { .toolbar { display: none !important; } .container { border: 0; box-shadow: none; margin: 0; max-width: 100%; } }
   </style>
 </head>
-<body class="show-answers">
+<body class="${lockAnswers ? '' : 'show-answers'}">
   <div class="toolbar">
     <div class="toolbar-title"><i class="fa-solid fa-book-open-reader" style="margin-right:6px;color:var(--accent)"></i>${this.escapeHtml(docTitle)}</div>
     <div class="toolbar-actions">
-      <button class="btn" onclick="document.body.classList.toggle('show-answers')"><i class="fa-solid fa-eye"></i> Ẩn / Hiện lời giải &amp; đáp án</button>
+      ${lockAnswers ? '' : '<button class="btn" onclick="document.body.classList.toggle(\'show-answers\')"><i class="fa-solid fa-eye"></i> Ẩn / Hiện lời giải &amp; đáp án</button>'}
       <button class="btn" onclick="const h=document.documentElement;h.setAttribute('data-theme',h.getAttribute('data-theme')==='dark'?'light':'dark')"><i class="fa-solid fa-circle-half-stroke"></i> Sáng / Tối</button>
       <button class="btn" onclick="window.print()"><i class="fa-solid fa-print"></i> In / Lưu PDF</button>
     </div>
   </div>
-  <main class="container">${res.html}</main>
+  <main class="container">${finalBodyHtml}</main>${embeddedSourceTag}
   <script>
+    (function() {
+      var p = new URLSearchParams(window.location.search);
+      if (p.get('mode') === 'exam') {
+        document.body.classList.remove('show-answers');
+        var tb = document.querySelector('.toolbar');
+        if (tb) tb.remove();
+      }
+    })();
     window.addEventListener('DOMContentLoaded', function() {
       if (typeof renderMathInElement === 'function') {
         renderMathInElement(document.body, {

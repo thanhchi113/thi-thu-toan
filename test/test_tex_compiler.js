@@ -78,4 +78,30 @@ assert.ok(parsed.part1[0].explanation.includes('<table class="tex-table">'));
 const scDoc = TeXCompiler.compileDocument('\\setcounter{bt}{13}\\begin{bt}Nội dung bài 14.\\end{bt}');
 assert.ok(scDoc.html.includes('Bài 14.'), 'Should honor \\setcounter{bt}{13}');
 
+// HTML Exam Mode: stripHtmlAnswers & extractTexFromHtml & lockAnswers & fallback HTML
+const docWithShortans = TeXCompiler.compileDocument('\\begin{ex}Tính $2+3$.\\shortans{5}\\loigiai{Vì $2+3=5$.}\\end{ex}').html;
+assert.ok(docWithShortans.includes('tex-shortans-box'), 'Compiled shortans must emit tex-shortans-box');
+const stripped = TeXCompiler.stripHtmlAnswers(compiled.html + docWithShortans);
+assert.ok(!stripped.includes('tex-loigiai'), 'stripHtmlAnswers must remove loigiai blocks');
+assert.ok(!stripped.includes('tex-choice-correct'), 'stripHtmlAnswers must remove correct choice highlight');
+assert.ok(!stripped.includes('tex-shortans-box'), 'stripHtmlAnswers must remove shortans answer box with extra Tailwind classes');
+
+const recoveredTex = TeXCompiler.extractTexFromHtml(standalone);
+assert.strictEqual(recoveredTex, arbitraryTex.trim(), 'extractTexFromHtml must round-trip raw TeX from exported HTML');
+
+const lockedStandalone = TeXCompiler.buildStandaloneHtml(arbitraryTex, 'Student Exam', { lockAnswers: true });
+const lockedMain = lockedStandalone.split('<main')[1] || '';
+assert.ok(!lockedStandalone.includes('texSourceEmbed'), 'Locked standalone HTML must not embed raw TeX answers');
+assert.ok(!lockedMain.includes('tex-loigiai'), 'Locked standalone HTML main must strip loigiai DOM');
+assert.ok(!lockedMain.includes('tex-choice-correct'), 'Locked standalone HTML main must strip correct choice class');
+
+const fallbackHtml = TeXCompiler.compileExamDataFallbackHtml({
+  part1: [{ id: 1, content: 'Tính $1+1$', choices: ['A. $1$', 'B. $2$', 'C. $3$', 'D. $4$'], correct_answer: 'B', explanation: 'Vì $1+1=2$.' }],
+  part2: [{ id: 1, content: 'Xét $f(x)=x^2$', statements: [{ sub_id: 'a', text: '$f(0)=0$', correct: true }] }],
+  part3: [{ id: 1, content: 'Tính $3\\cdot 4$', correct_answer: '12', explanation: '$3\\cdot 4=12$.' }]
+});
+assert.ok(fallbackHtml.includes('tex-choice-correct') && fallbackHtml.includes('tex-shortans-box') && fallbackHtml.includes('tex-loigiai'));
+const fallbackStudentHtml = TeXCompiler.stripHtmlAnswers(fallbackHtml);
+assert.ok(!fallbackStudentHtml.includes('tex-choice-correct') && !fallbackStudentHtml.includes('tex-shortans-box') && !fallbackStudentHtml.includes('tex-loigiai'));
+
 console.log('[OK] ALL TEX COMPILER & PARSER ASSERTIONS PASSED 100%!');
