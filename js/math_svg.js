@@ -197,31 +197,17 @@ const MathSVG = {
   }
 };
 
-// TikZToSVG: Bộ phân giải mã TikZ tự động
+// TikZToSVG: Biên dịch trực tiếp mọi khối TikZ / tkz-tab / pgfplots / circuitikz / chemfig sang SVG thật qua @rod2ik/tikzjax (WebAssembly)
 const TikZToSVG = {
-  render(tikzStr) {
+  render(tikzStr, preambleInfo = null) {
     if (!tikzStr) return '';
-    const lower = tikzStr.toLowerCase();
-
-    // 1. Nhận diện đồ thị hàm số
-    if (lower.includes('plot') || lower.includes('declare function') || lower.includes('tiệm cận') || lower.includes('arrow') && lower.includes('->')) {
-      return MathSVG.renderCubicGraph();
+    const compiler = (typeof TeXCompiler !== 'undefined')
+      ? TeXCompiler
+      : (typeof require === 'function' ? require('./tex_compiler.js') : null);
+    if (compiler) {
+      return compiler.renderTikzToHtml(tikzStr, preambleInfo);
     }
-    // 2. Nhận diện bảng biến thiên
-    if (lower.includes('tkztab') || lower.includes('biến thiên') || lower.includes('xét dấu')) {
-      return MathSVG.renderVariationTable();
-    }
-    // 3. Nhận diện khối chóp / hình chóp S.ABC, S.ABCD
-    if (lower.includes('pyramid') || lower.includes('chóp') || (lower.includes('s') && lower.includes('a') && lower.includes('b') && lower.includes('c'))) {
-      return MathSVG.renderPyramidSABC();
-    }
-    // 4. Nhận diện hình hộp chữ nhật / bể cá
-    if (lower.includes('hộp') || lower.includes('bể cá') || lower.includes('lăng trụ')) {
-      return MathSVG.renderBox3D();
-    }
-
-    // Mặc định trả về hình minh họa đồ thị vector
-    return MathSVG.renderCubicGraph();
+    return '';
   }
 };
 
