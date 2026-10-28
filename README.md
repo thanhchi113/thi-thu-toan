@@ -1,65 +1,50 @@
-# Cổng Thi & Luyện Đề Toán THPT Quốc Gia 2027 (Cấu Trúc 3 Phần GDPT 2018)
+# Hệ Thống Khảo Thí & Luyện Đề Toán 6 – 12 (Cấu Trúc 3 Phần GDPT 2018)
 
-Hệ thống web tĩnh (Static Web App) tối ưu cho cả **Máy tính (Desktop)** và **Điện thoại (Mobile)**, chạy với **chi phí 0 đồng** vĩnh viễn, hỗ trợ tải lên file PDF và mã nguồn TeX (LaTeX).
+Hệ thống web tĩnh (Static Web App) tối ưu cho cả **Máy tính (Desktop)** và **Điện thoại (Mobile)**, chạy với **chi phí 0 đồng** vĩnh viễn, cho phép giáo viên đăng tải trực tiếp file **PDF Đề Thi**, **PDF Đáp Án & Lời Giải** và cấu hình bảng đáp án 3 phần chấm điểm tự động.
 
 ---
 
 ## 🌟 Tính Năng Nổi Bật
 
 ### 1. Dành Cho Giáo Viên (Admin)
-- **Đăng nhập quản trị**: Toàn quyền quản lý học sinh, đề thi, bài tập và xem kết quả.
-- **Cấp tài khoản cho học sinh**: Tạo Mã học sinh (ví dụ `HS202701`, `HS202702`...) đi kèm tên, lớp và mật khẩu. Có thể khóa hoặc kích hoạt tài khoản bất kỳ lúc nào.
-- **Quản lý đề thi (TeX / PDF)**:
-  - Tích hợp bộ phân tích **TeX Parser** trực tiếp ngay trên trình duyệt, tự động bóc tách cấu trúc 3 phần chuẩn Bộ GD&ĐT 2027.
-  - Cho phép gắn link file PDF đề thi gốc hoặc đề biên dịch từ TeX.
-  - Đóng / mở quyền truy cập đề thi cho từng học sinh hoặc toàn lớp.
-- **Quản lý file bài tập & tài liệu**: Gắn link file PDF bài tập rèn luyện và chỉ định danh sách học sinh được phép truy cập.
+- **Đăng nhập quản trị**: Toàn quyền quản lý học sinh, đề thi, tài liệu chuyên đề và xem kết quả.
+- **Cấp tài khoản cho học sinh**: Tạo Mã học sinh (ví dụ `HS202701`, `HS202702`...) đi kèm tên, khối/lớp và mật khẩu. Có thể khóa hoặc kích hoạt tài khoản bất kỳ lúc nào.
+- **Quản lý đề thi PDF & Đáp án 3 phần**:
+  - Đăng tải trực tiếp **File PDF Đề Thi** và **File PDF Đáp Án & Lời Giải Chi Tiết** từ máy tính (lưu bền vững bằng `IndexedDB`).
+  - Thiết lập nhanh **Bảng Đáp Án Chấm Điểm Tự Động 3 Phần** (hỗ trợ dán chuỗi đáp án nhanh `1C 2D 3A...` cho Phần I, bấm chọn `Đ/S` cho Phần II, điền đáp án số cho Phần III, tùy chỉnh linh hoạt số câu mỗi phần).
+  - Đóng / mở quyền truy cập đề thi và quyền xem lời giải cho từng học sinh, theo khối lớp hoặc toàn trường.
+- **Quản lý file bài tập & tài liệu PDF**: Tải lên file PDF chuyên đề theo Khối 6 – 12 và phân quyền học sinh truy cập.
 - **Theo dõi kết quả & xuất điểm**: Bảng điểm toàn bộ học sinh chi tiết 3 phần, xuất ra file CSV/Excel tiện lợi.
 
 ### 2. Dành Cho Học Sinh (Student)
 - **Đăng nhập định danh**: Đăng nhập bằng **Mã học sinh** và Mật khẩu do giáo viên cấp.
-- **Tra cứu kết quả & Lịch sử thi**: Xem điểm số từng phần (Phần I: /3.0đ, Phần II: /4.0đ, Phần III: /3.0đ, Tổng điểm /10.0đ), xem lại chi tiết bài làm kèm lời giải chi tiết từng câu.
-- **Tải file bài tập**: Xem trực tiếp file PDF bài tập hoặc tải về máy nếu được giáo viên cấp quyền.
-- **Làm bài kiểm tra đa nền tảng**:
-  - **Trên Máy tính (Desktop)**: Chế độ **Split-Screen** (Nửa trái xem file PDF đề gốc, nửa phải phiếu tô trắc nghiệm 3 phần).
-  - **Trên Điện thoại (Mobile)**: Chế độ **Web Quiz** mượt mà, hỗ trợ bàn phím số toán học nhanh cho Phần III.
-  - Chuyển đổi linh hoạt giữa 2 chế độ bằng 1 nút bấm.
-  - Đồng hồ đếm ngược lùi giờ thi với cảnh báo khi sắp hết giờ.
+- **Làm bài trực tiếp trên PDF gốc**:
+  - Hiển thị trực tiếp file **PDF đề thi gốc** sắc nét 100% (công thức, bảng biến thiên, hình học không gian đúng chuẩn bản in của giáo viên) song song với **Phiếu trả lời trực tuyến 3 phần** và bàn phím số toán học nhanh cho Phần III.
+  - Đồng hồ đếm ngược giờ thi và giám sát rời màn hình.
+- **Tra cứu kết quả & Đối chiếu PDF lời giải**: Xem điểm chi tiết từng phần ngay sau khi nộp bài, đối chiếu bảng đáp án và xem trực tiếp file **PDF lời giải chi tiết** của giáo viên.
+- **Kho tài liệu chuyên đề**: Xem trực tiếp hoặc tải file PDF bài tập theo khối lớp được phân quyền.
 
 ---
 
 ## 📐 Cấu Trúc Barem Chấm Điểm 3 Phần (Bộ GD&ĐT 2025–2027)
 
-1. **Phần I (Trắc nghiệm nhiều lựa chọn):** 12 câu. Mỗi câu đúng $+0{,}25$ điểm (tối đa $3{,}0$ điểm).
-2. **Phần II (Trắc nghiệm Đúng/Sai):** 4 câu. Mỗi câu gồm 4 ý $a, b, c, d$. Chấm điểm lũy tiến:
+1. **Phần I (Trắc nghiệm nhiều lựa chọn):** Mặc định 12 câu. Mỗi câu đúng $+0{,}25$ điểm.
+2. **Phần II (Trắc nghiệm Đúng/Sai):** Mặc định 4 câu. Mỗi câu gồm 4 ý $a, b, c, d$. Chấm điểm lũy tiến:
    - Đúng 1 ý: $+0{,}1$ điểm.
    - Đúng 2 ý: $+0{,}25$ điểm.
    - Đúng 3 ý: $+0{,}5$ điểm.
-   - Đúng 4 ý: $+1{,}0$ điểm (tối đa $4{,}0$ điểm/4 câu).
-3. **Phần III (Trắc nghiệm Trả lời ngắn):** 6 câu. Học sinh điền kết quả vào ô số. Mỗi câu đúng $+0{,}5$ điểm (tối đa $3{,}0$ điểm). Hệ thống tự động so khớp số thập phân, phân số hoặc sai số hợp lệ.
+   - Đúng 4 ý: $+1{,}0$ điểm.
+3. **Phần III (Trắc nghiệm Trả lời ngắn):** Mặc định 6 câu. Học sinh điền kết quả vào ô số 4 ký tự. Mỗi câu đúng $+0{,}5$ điểm (hỗ trợ tự động quy đổi số thập phân, dấu phẩy/chấm và phân số).
 
 ---
 
-## 🚀 Hướng Dẫn Chạy & Triển Khai Lên GitHub Pages
+## 🚀 Hướng Dẫn Chạy & Triển Khai
 
 ### Cách 1: Chạy trực tiếp trên máy tính (Local)
-Chỉ cần chạy lệnh sau trong thư mục dự án:
 ```bash
 python -m http.server 8000
 ```
-Sau đó mở trình duyệt truy cập: `http://localhost:8000`.
+Mở trình duyệt truy cập: `http://localhost:8000`.
 
-### Cách 2: Triển khai lên GitHub Pages (0 đồng vĩnh viễn)
-1. Tạo 1 repository mới trên GitHub (ví dụ: `toan-thpt-2027`).
-2. Đẩy toàn bộ mã nguồn này lên nhánh `main`:
-   ```bash
-   git init
-   git add .
-   git commit -m "Khoi tao cong luyen thi toan 2027"
-   git branch -M main
-   git remote add origin https://github.com/tai-khoan-cua-ban/toan-thpt-2027.git
-   git push -u origin main
-   ```
-3. Vào repository trên GitHub: **Settings** $\to$ **Pages** $\to$ Tại mục **Build and deployment / Source**, chọn **GitHub Actions**.
-4. GitHub Actions sẽ tự động kích hoạt file `.github/workflows/deploy.yml` và xuất bản trang web của bạn tại địa chỉ:  
-   `https://tai-khoan-cua-ban.github.io/toan-thpt-2027/`
+### Cách 2: Triển khai lên GitHub Pages
+Đẩy mã nguồn lên nhánh `main` và bật **GitHub Actions** tại mục **Settings** -> **Pages** để xuất bản tự động qua `.github/workflows/deploy.yml`.
