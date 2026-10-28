@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Hệ Thống Khảo Thí & Luyện Đề Toán 6 – 12 (Cấu Trúc 3 Phần GDPT 2018)</title>
+  <meta name="description" content="Hệ thống kiểm tra định kì (GK1, CK1, GK2, CK2), tuyển sinh vào lớp 10 và thi thử THPT Quốc gia môn Toán Khối 6 – 12 chuẩn cấu trúc 3 phần.">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='44' font-family='sans-serif' font-size='34' font-weight='800' text-anchor='middle' fill='white'%3E%CF%80%3C/text%3E%3C/svg%3E">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            indigo: {
+              50: 'rgb(var(--accent-50) / <alpha-value>)',
+              100: 'rgb(var(--accent-100) / <alpha-value>)',
+              200: 'rgb(var(--accent-200) / <alpha-value>)',
+              300: 'rgb(var(--accent-300) / <alpha-value>)',
+              400: 'rgb(var(--accent-400) / <alpha-value>)',
+              500: 'rgb(var(--accent-500) / <alpha-value>)',
+              600: 'rgb(var(--accent-600) / <alpha-value>)',
+              700: 'rgb(var(--accent-700) / <alpha-value>)',
+              800: 'rgb(var(--accent-800) / <alpha-value>)',
+              900: 'rgb(var(--accent-900) / <alpha-value>)',
+              950: 'rgb(var(--accent-950) / <alpha-value>)',
+            },
+            brand: {
+              50: 'rgb(var(--accent-50) / <alpha-value>)',
+              100: 'rgb(var(--accent-100) / <alpha-value>)',
+              500: 'rgb(var(--accent-500) / <alpha-value>)',
+              600: 'rgb(var(--accent-600) / <alpha-value>)',
+              700: 'rgb(var(--accent-700) / <alpha-value>)',
+              800: 'rgb(var(--accent-800) / <alpha-value>)',
+              900: 'rgb(var(--accent-900) / <alpha-value>)',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous">
+
+  <!-- KaTeX CSS & JS for Lightning Fast Math Rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
+
+  <!-- Canvas Confetti for Celebration (Hiệu ứng chúc mừng nộp bài) -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen">
+
+  <!-- Main Root Container Managed by App.js -->
+  <div id="app">
+    <!-- Fallback Loading State -->
+    <div class="min-h-screen flex items-center justify-center bg-slate-900 text-white">
+      <div class="text-center space-y-3">
+        <i class="fa-solid fa-spinner fa-spin text-3xl text-indigo-400"></i>
+        <p class="text-sm font-semibold tracking-wide text-slate-300">Đang khởi tạo Hệ thống Khảo thí Toán 6 – 12...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Logic Scripts -->
+  <script src="js/pdf_storage.js"></script>
+  <script src="js/grading.js"></script>
+  <script src="js/math_svg.js"></script>
+  <script src="js/tex_parser.js"></script>
+  <script src="js/exam_data.js"></script>
+  <script src="js/seed_data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
