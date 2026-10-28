@@ -636,37 +636,6 @@ const App = {
     });
   },
 
-  resetToDefault() {
-    this.confirmDialog(
-      'Toàn bộ đề thi, học sinh và điểm số thử nghiệm sẽ được đặt về trạng thái mẫu ban đầu (tài khoản & mật khẩu Giáo viên vẫn được giữ nguyên).',
-      async () => {
-        const savedAdmin = localStorage.getItem('thpt_admin_account');
-        const savedAppearance = localStorage.getItem('thpt_appearance');
-        localStorage.clear();
-        if (savedAdmin) localStorage.setItem('thpt_admin_account', savedAdmin);
-        if (savedAppearance) localStorage.setItem('thpt_appearance', savedAppearance);
-        if (typeof PDFStorage !== 'undefined') {
-          await PDFStorage.deletePdf('EXAM-2027-01');
-        }
-        this.state.settings = {
-          allowStudentViewOwnScore: true,
-          allowStudentViewClassBoard: true,
-          anonymizeOtherStudents: true,
-        };
-        this.loadData();
-        this.logout();
-        this.notify('Đã khôi phục dữ liệu mẫu và file PDF thực tế thành công!', 'success', 'Khôi phục hoàn tất');
-      },
-      {
-        type: 'warning',
-        title: 'Khôi phục dữ liệu mẫu?',
-        icon: 'fa-rotate-left',
-        confirmText: 'Khôi phục ngay',
-        cancelText: 'Hủy'
-      }
-    );
-  },
-
   // 2. Quản lý Đăng nhập / Phiên làm việc
   checkSession() {
     const session = sessionStorage.getItem('thpt_current_user');
@@ -726,25 +695,6 @@ const App = {
     this.state.examStatusFilter = 'ALL';
     sessionStorage.removeItem('thpt_current_user');
     this.render();
-  },
-
-  quickLogin(role, id) {
-    if (role === 'admin') {
-      const adminAcc = this.state.admin || INITIAL_SEED_DATA.admin;
-      if (adminAcc.password === '123') {
-        this.loginAdmin(adminAcc.username, '123');
-      } else {
-        this.switchLoginTab('admin');
-        const passInput = document.getElementById('loginAdminPass');
-        if (passInput) {
-          passInput.value = '';
-          passInput.focus();
-        }
-        this.notify('Giáo viên đã thay đổi mật khẩu mặc định. Vui lòng nhập mật khẩu mới hoặc bấm "Quên mật khẩu?" để gửi link đặt lại về email.', 'info', 'Yêu cầu mật khẩu mới');
-      }
-    } else if (role === 'student') {
-      this.loginStudent(id || 'HS202701', '123');
-    }
   },
 
   // 3. Quản lý Giao diện (Sáng / Dịu mắt / Tối), Bộ màu tùy chỉnh & Độ tương phản WCAG
@@ -1301,7 +1251,7 @@ const App = {
                   <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                     <i class="fa-solid fa-id-card"></i>
                   </div>
-                  <input type="text" id="loginStudentId" placeholder="VD: HS202701" required value="HS202702"
+                  <input type="text" id="loginStudentId" placeholder="Nhập mã học sinh (VD: HS202701)" required
                     class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
                 </div>
               </div>
@@ -1312,7 +1262,7 @@ const App = {
                   <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                     <i class="fa-solid fa-lock"></i>
                   </div>
-                  <input type="password" id="loginStudentPass" placeholder="Mật khẩu" required value="123"
+                  <input type="password" id="loginStudentPass" placeholder="Nhập mật khẩu" required
                     class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
                 </div>
               </div>
@@ -1331,7 +1281,7 @@ const App = {
                   <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                     <i class="fa-solid fa-user-shield"></i>
                   </div>
-                  <input type="text" id="loginAdminUser" placeholder="Tên đăng nhập" required value="${(this.state.admin && this.state.admin.username) || 'admin'}"
+                  <input type="text" id="loginAdminUser" placeholder="Nhập tên đăng nhập" required
                     class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
                 </div>
               </div>
@@ -1347,7 +1297,7 @@ const App = {
                   <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                     <i class="fa-solid fa-key"></i>
                   </div>
-                  <input type="password" id="loginAdminPass" placeholder="Mật khẩu" required value="${(!this.state.admin || this.state.admin.password === '123') ? '123' : ''}"
+                  <input type="password" id="loginAdminPass" placeholder="Nhập mật khẩu quản trị" required
                     class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
                 </div>
               </div>
@@ -1357,27 +1307,6 @@ const App = {
                 <i class="fa-solid fa-arrow-right ml-2 text-xs"></i>
               </button>
             </form>
-
-            <!-- Tài khoản dùng thử nhanh -->
-            <div class="mt-8 pt-6 border-t border-slate-200">
-              <p class="text-xs text-center font-semibold text-slate-600 mb-3">
-                <i class="fa-solid fa-vial-circle-check text-amber-600 mr-1"></i>Đăng nhập nhanh tài khoản mẫu:
-              </p>
-              <div class="grid grid-cols-1 gap-2 text-xs">
-                <button onclick="App.quickLogin('admin')" class="w-full py-2 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-700 flex items-center justify-between cursor-pointer transition">
-                  <span><i class="fa-solid fa-shield text-emerald-600 mr-2"></i><strong>${(this.state.admin && this.state.admin.fullName) || 'Giáo viên quản trị'}</strong></span>
-                  <span class="text-slate-500 font-mono">${(this.state.admin && this.state.admin.username) || 'admin'}${(!this.state.admin || this.state.admin.password === '123') ? ' / 123' : ' • Đã đổi MK'}</span>
-                </button>
-                <button onclick="App.quickLogin('student', 'HS202701')" class="w-full py-2 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-700 flex items-center justify-between cursor-pointer transition">
-                  <span><i class="fa-solid fa-check-double text-sky-600 mr-2"></i><strong>Học sinh Nguyễn Văn An</strong> (Lớp 12A1)</span>
-                  <span class="text-slate-500 font-mono">HS202701</span>
-                </button>
-                <button onclick="App.quickLogin('student', 'HS202702')" class="w-full py-2 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-700 flex items-center justify-between cursor-pointer transition">
-                  <span><i class="fa-solid fa-play text-indigo-600 mr-2"></i><strong>Học sinh Trần Thị Mai</strong> (Lớp 12A1)</span>
-                  <span class="text-slate-500 font-mono">HS202702</span>
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -3577,9 +3506,6 @@ const App = {
                 <i class="fa-solid fa-user-gear text-emerald-400"></i>
                 <span class="hidden sm:inline">${u.fullName}</span>
               </button>
-              <button onclick="App.resetToDefault()" class="text-xs px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-lg border border-amber-500/30 font-semibold cursor-pointer" title="Khôi phục dữ liệu mẫu mặc định">
-                <i class="fa-solid fa-rotate-left mr-1"></i><span class="hidden md:inline">Khôi phục mặc định</span>
-              </button>
               <button onclick="App.logout()" class="p-2 text-slate-400 hover:text-red-400 rounded-lg hover:bg-white/5 transition cursor-pointer" title="Đăng xuất">
                 <i class="fa-solid fa-right-from-bracket"></i>
               </button>
@@ -4069,19 +3995,6 @@ const App = {
                 </button>
               </div>
             </div>
-            </div>
-
-            <!-- Khối Quản trị Dữ liệu & Hệ thống -->
-            <div class="mt-6 pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div>
-                <h4 class="text-xs font-bold text-slate-800">Quản Trị Dữ Liệu & Khôi Phục</h4>
-                <p class="text-[11px] text-slate-500 mt-0.5">Đặt lại dữ liệu ban đầu hoặc xóa bộ nhớ đệm khi cần kiểm thử</p>
-              </div>
-              <div class="flex items-center space-x-2">
-                <button onclick="App.resetToDefault()" class="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-amber-200 cursor-pointer">
-                  <i class="fa-solid fa-rotate-left"></i><span>Khôi phục dữ liệu mặc định</span>
-                </button>
-              </div>
             </div>
             </div>
           </section>

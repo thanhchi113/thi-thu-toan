@@ -28,19 +28,6 @@ Hệ thống web tĩnh (Static Web App) tối ưu cho cả **Máy tính (Desktop
 
 ---
 
-## 🔑 Tài Khoản Thử Nghiệm Sẵn Có (Seed Tester)
-
-| Vai trò | Tài khoản / Mã HS | Mật khẩu | Ghi chú kiểm thử |
-| :--- | :--- | :--- | :--- |
-| **Giáo viên (Admin)** | `admin` | `123` | Quản lý học sinh, xuất bản đề TeX/PDF, xem kết quả cả lớp |
-| **Học sinh 1** | `HS202701` *(Nguyễn Văn An)* | `123` | **Đã hoàn thành bài thi (8.5đ)** $\rightarrow$ Dùng để thử tính năng tra cứu điểm |
-| **Học sinh 2** | `HS202702` *(Trần Thị Mai)* | `123` | **Chưa thi** $\rightarrow$ Dùng để bấm "Vào làm bài" thử nghiệm trên Desktop/Mobile |
-| **Học sinh 3** | `HS202703` *(Lê Hoàng Long)* | `123` | Học sinh lớp 12A2 |
-
-*(Trên màn hình Đăng nhập có sẵn 3 nút "Chọn nhanh tài khoản kiểm thử" để bạn bấm thử chỉ với 1 click!)*
-
----
-
 ## 📐 Cấu Trúc Barem Chấm Điểm 3 Phần (Bộ GD&ĐT 2025–2027)
 
 1. **Phần I (Trắc nghiệm nhiều lựa chọn):** 12 câu. Mỗi câu đúng $+0{,}25$ điểm (tối đa $3{,}0$ điểm).
