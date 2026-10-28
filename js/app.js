@@ -49,9 +49,11 @@ const App = {
     tempSelectedPdfFile: null,
     tempParsedExam: null,
 
-    // Quản lý hiển thị Bảng điểm Admin
+    // Quản lý hiển thị Bảng điểm & Học sinh Admin
     adminViewTab: 'matrix',   // 'matrix' (Sổ điểm tổng hợp các đợt) | 'log' (Chi tiết từng lượt nộp)
+    adminGradeFilter: 'ALL',  // 'ALL' hoặc 6..12
     adminClassFilter: 'ALL',  // 'ALL' hoặc tên lớp ('12A1', '12A2')
+    studentGradeFilter: 'ALL', // 'ALL' hoặc 6..12
 
     // Bộ lọc & Tìm kiếm Đề thi (Giáo viên & Học sinh)
     examSearchQuery: '',
@@ -371,12 +373,13 @@ const App = {
         }
       });
     }
-    // Đảm bảo mọi học sinh đều có đủ trường
+    // Đảm bảo mọi học sinh đều có đủ trường và khối lớp chuẩn (6 – 12)
     stus.forEach(s => {
       if (s.phone === undefined) s.phone = '';
       if (s.parentName === undefined) s.parentName = '';
       if (s.notes === undefined) s.notes = '';
       if (!s.status) s.status = 'active';
+      s.grade = this.getStudentGrade(s);
     });
     this.state.students = stus;
     
@@ -644,6 +647,10 @@ const App = {
       if (parsed && parsed.role === 'admin' && this.state.admin) {
         this.state.currentUser = { ...this.state.admin };
         sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+      } else if (parsed && parsed.role === 'student') {
+        const fresh = this.state.students.find(x => x.studentId === parsed.studentId);
+        this.state.currentUser = fresh ? { role: 'student', ...fresh } : { ...parsed, grade: this.getStudentGrade(parsed) };
+        sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
       } else {
         this.state.currentUser = parsed;
       }
@@ -693,6 +700,8 @@ const App = {
     this.state.examGradeFilter = 'ALL';
     this.state.examCategoryFilter = 'ALL';
     this.state.examStatusFilter = 'ALL';
+    this.state.studentGradeFilter = 'ALL';
+    this.state.adminGradeFilter = 'ALL';
     sessionStorage.removeItem('thpt_current_user');
     this.render();
   },
@@ -1346,11 +1355,33 @@ const App = {
     this.loginAdmin(user, pass);
   },
 
+  // Xác định khối lớp chuẩn (6 – 12) của học sinh: ưu tiên trường grade, dự phòng tách từ tên lớp
+  getStudentGrade(st) {
+    const g = Number(st && st.grade);
+    if (Number.isInteger(g) && g >= 6 && g <= 12) return g;
+    const m = String((st && st.className) || '').match(/(?:^|\D)(1[0-2]|[6-9])(?=\D|$)/);
+    return m ? parseInt(m[1], 10) : 12;
+  },
+
+  syncGradeFromClassInput(clsValue, gradeSelectId) {
+    const m = String(clsValue || '').match(/(?:^|\D)(1[0-2]|[6-9])(?=\D|$)/);
+    const sel = document.getElementById(gradeSelectId);
+    if (m && sel) sel.value = String(parseInt(m[1], 10));
+  },
+
+  syncClassFromGradeSelect(gradeValue, classInputId) {
+    const inp = document.getElementById(classInputId);
+    if (!inp) return;
+    if (/^(1[0-2]|[6-9])A1$/i.test(inp.value.trim())) {
+      inp.value = `${gradeValue}A1`;
+    }
+  },
+
   // Kiểm tra quyền dự thi của học sinh theo 3 chế độ: Tất cả / Theo khối (6-12) / Chỉ định
   isStudentAllowedExam(ex, u) {
     if (!ex || !ex.is_active || !u) return false;
     if (ex.allowed_all) return true;
-    const studentGrade = parseInt(String(u.className || '12').match(/\d+/)?.[0] || '12', 10);
+    const studentGrade = this.getStudentGrade(u);
     if (ex.access_type === 'grade') {
       return Array.isArray(ex.allowed_grades) && ex.allowed_grades.map(Number).includes(studentGrade);
     }
@@ -1382,7 +1413,7 @@ const App = {
   isStudentAllowedHomework(hw, u) {
     if (!hw || !u) return false;
     if (hw.allowedAll || hw.accessType === 'all') return true;
-    const studentGrade = parseInt(String(u.className || '12').match(/\d+/)?.[0] || '12', 10);
+    const studentGrade = this.getStudentGrade(u);
     if (hw.accessType === 'grade') return Number(hw.grade || 12) === studentGrade;
     return Array.isArray(hw.allowedStudents) && hw.allowedStudents.includes(u.studentId);
   },
@@ -1453,7 +1484,7 @@ const App = {
 
               <div class="text-right hidden sm:block">
                 <div class="text-sm font-bold text-slate-800">${u.fullName}</div>
-                <div class="text-xs text-slate-500">Mã HS: <span class="font-mono font-semibold text-indigo-600">${u.studentId}</span> • Lớp ${u.className || '12'}</div>
+                <div class="text-xs text-slate-500">Mã HS: <span class="font-mono font-semibold text-indigo-600">${u.studentId}</span> • Khối ${this.getStudentGrade(u)} • Lớp ${u.className || '12'}</div>
               </div>
               <button onclick="App.logout()" class="p-2 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition cursor-pointer" title="Đăng xuất">
                 <i class="fa-solid fa-right-from-bracket"></i>
@@ -1474,7 +1505,7 @@ const App = {
                 </div>
                 <h2 class="text-2xl sm:text-3xl font-extrabold">Xin chào, ${u.fullName}!</h2>
                 <p class="text-indigo-100 text-sm mt-1">
-                  Mã học sinh: <strong class="font-mono tracking-wider">${u.studentId}</strong> • Lớp: <strong>${u.className || '12'}</strong>
+                  Mã học sinh: <strong class="font-mono tracking-wider">${u.studentId}</strong> • Khối: <strong>Khối ${this.getStudentGrade(u)}</strong> • Lớp: <strong>${u.className || '12'}</strong>
                   ${u.phone ? ` • SĐT: <strong>${u.phone}</strong>` : ''}
                 </p>
                 <div class="mt-3.5">
@@ -1697,7 +1728,7 @@ const App = {
                             <th class="px-4 py-3.5 text-center font-bold w-14">Hạng</th>
                             <th class="px-4 py-3.5 font-bold font-mono">Mã HS</th>
                             <th class="px-5 py-3.5 font-bold">Học Sinh</th>
-                            <th class="px-4 py-3.5 text-center font-bold">Lớp</th>
+                            <th class="px-4 py-3.5 text-center font-bold">Khối / Lớp</th>
                             ${this.state.exams.map((ex, idx) => `
                               <th class="px-4 py-3.5 text-center font-bold min-w-[100px]">
                                 <div class="text-indigo-900 font-extrabold">${ex.roundLabel || ('Đợt ' + (idx + 1))}</div>
@@ -1747,7 +1778,7 @@ const App = {
                                     <span>${displayName}</span>
                                     ${isMe ? `<span class="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-bold">Chính Bạn</span>` : ''}
                                   </td>
-                                  <td class="px-4 py-3.5 text-center text-xs font-semibold text-slate-600">${item.student.className || '12'}</td>
+                                  <td class="px-4 py-3.5 text-center text-xs font-semibold text-slate-600 whitespace-nowrap">K${this.getStudentGrade(item.student)} • ${item.student.className || '12'}</td>
                                   ${item.examScores.map(sc => `
                                     <td class="px-4 py-3.5 text-center font-mono text-xs">
                                       ${sc !== null ? `
@@ -1782,7 +1813,7 @@ const App = {
                       <p class="text-xs text-slate-500 mt-0.5">Theo dõi kết quả làm bài và điểm trung bình qua từng vòng khảo sát</p>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
-                      ${this.state.exams.filter(ex => (ex.is_active && (ex.allowed_all || (ex.allowed_students && ex.allowed_students.includes(u.studentId)))) || mySubmissions.some(s => s.examId === ex.id)).map((ex) => {
+                      ${this.state.exams.filter(ex => this.isStudentAllowedExam(ex, u) || mySubmissions.some(s => s.examId === ex.id)).map((ex) => {
                         const sSub = mySubmissions.find(s => s.examId === ex.id);
                         const catShort = this.getExamCategoryMeta(this.inferExamCategory(ex)).short;
                         const label = `K${ex.grade || 12} • ${catShort}`;
@@ -3460,7 +3491,9 @@ const App = {
   renderAdminDashboard(container) {
     const u = this.state.currentUser;
     const allClasses = [...new Set(this.state.students.map(s => s.className || '12'))];
+    const activeStudentGrades = [...new Set(this.state.students.map(s => this.getStudentGrade(s)))].sort((a, b) => a - b);
     const filteredStudents = this.state.students.filter(s => {
+      if (this.state.adminGradeFilter && this.state.adminGradeFilter !== 'ALL' && String(this.getStudentGrade(s)) !== String(this.state.adminGradeFilter)) return false;
       if (this.state.adminClassFilter === 'ALL') return true;
       return (s.className || '12') === this.state.adminClassFilter;
     });
@@ -3583,7 +3616,7 @@ const App = {
                 <i class="fa-solid fa-circle-info text-indigo-500 text-xs"></i>
                 <span>
                   ${this.state.adminMainTab === 'main' ? 'Theo dõi thống kê toàn hệ thống, sổ điểm tổng hợp qua các đợt kiểm tra và nhật ký nộp bài chi tiết.' : ''}
-                  ${this.state.adminMainTab === 'students' ? 'Quản lý hồ sơ học sinh, cấp tài khoản mới, tra cứu thông tin liên hệ và đồng bộ mật khẩu đăng nhập.' : ''}
+                  ${this.state.adminMainTab === 'students' ? 'Quản lý hồ sơ học sinh, xếp khối (Khối 6 – 12), cấp tài khoản mới, tra cứu liên hệ và đồng bộ mật khẩu.' : ''}
                   ${this.state.adminMainTab === 'exams' ? 'Quản lý đề thi theo Khối 6 – 12 và phân loại (GK1, CK1, GK2, CK2, Đề thi vào 10, Thi thử THPT QG), tải PDF/TeX và phân quyền dự thi.' : ''}
                   ${this.state.adminMainTab === 'homeworks' ? 'Quản lý kho tài liệu & chuyên đề theo Khối 6 – 12, tải lên file PDF và phân quyền truy cập cho học sinh.' : ''}
                   ${this.state.adminMainTab === 'settings' ? 'Cập nhật hồ sơ & mật khẩu Giáo viên, khôi phục qua email, phân quyền xem điểm và quản trị dữ liệu.' : ''}
@@ -3604,9 +3637,12 @@ const App = {
                   <i class="fa-solid fa-users text-indigo-600 mr-2"></i>
                   Quản Lý Học Sinh (${this.state.students.length})
                 </h3>
-                <p class="text-xs text-slate-500 mt-0.5">Hồ sơ học sinh, thông tin liên hệ phụ huynh, tài khoản đăng nhập và lịch sử các lượt nộp bài</p>
+                <p class="text-xs text-slate-500 mt-0.5">Xếp khối học sinh (Khối 6 – 12), quản lý hồ sơ, liên hệ phụ huynh, tài khoản đăng nhập và lịch sử thi</p>
               </div>
-              <div class="flex items-center space-x-2.5">
+              <div class="flex flex-wrap items-center gap-2.5">
+                <button id="openBulkGradeModalBtn" onclick="App.showBulkGradeModal()" class="px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold shadow-2xs transition flex items-center justify-center cursor-pointer">
+                  <i class="fa-solid fa-layer-group mr-2"></i>Xếp Khối Học Sinh
+                </button>
                 <button onclick="App.showAddStudentModal()" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center cursor-pointer">
                   <i class="fa-solid fa-user-plus mr-2"></i>Thêm Học Sinh Mới
                 </button>
@@ -3647,13 +3683,18 @@ const App = {
 
               <div class="bg-amber-50/60 p-4 rounded-2xl border border-amber-100/80 flex items-center justify-between">
                 <div>
-                  <div class="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Phân bổ lớp học</div>
-                  <div class="text-2xl font-extrabold text-amber-950 mt-1 font-mono">${allClasses.length} <span class="text-xs font-normal text-slate-500">khối lớp</span></div>
+                  <div class="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Phân bổ khối &amp; lớp</div>
+                  <div class="text-2xl font-extrabold text-amber-950 mt-1 font-mono">${activeStudentGrades.length} <span class="text-xs font-normal text-slate-500">khối</span> • ${allClasses.length} <span class="text-xs font-normal text-slate-500">lớp</span></div>
                 </div>
                 <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
                   <i class="fa-solid fa-school text-lg"></i>
                 </div>
               </div>
+            </div>
+
+            <!-- Thanh Phân Khối 6 – 12 Cho Học Sinh -->
+            <div class="px-6 pt-3 pb-2.5 border-y border-slate-100 bg-slate-50/70">
+              ${this.renderExamGradePillsHtml(this.state.students, this.state.studentGradeFilter, 'App.onStudentFilterInput')}
             </div>
 
             <!-- Smart Search & Filter Toolbar (Tham khảo 2 web) -->
@@ -3664,7 +3705,7 @@ const App = {
                   id="studentSearchInput"
                   type="text"
                   oninput="App.onStudentFilterInput('query', this.value)"
-                  placeholder="Tìm nhanh theo tên, mã HS, số điện thoại, phụ huynh..."
+                  placeholder="Tìm nhanh theo tên, mã HS, khối, lớp, số điện thoại, phụ huynh..."
                   value="${this.state.studentSearchQuery || ''}"
                   class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:border-indigo-500 outline-none transition"
                 />
@@ -3692,7 +3733,7 @@ const App = {
                   </select>
                 </div>
 
-                ${(this.state.studentSearchQuery || (this.state.studentClassFilter && this.state.studentClassFilter !== 'ALL') || (this.state.studentStatusFilter && this.state.studentStatusFilter !== 'ALL')) ? `
+                ${(this.state.studentSearchQuery || (this.state.studentGradeFilter && this.state.studentGradeFilter !== 'ALL') || (this.state.studentClassFilter && this.state.studentClassFilter !== 'ALL') || (this.state.studentStatusFilter && this.state.studentStatusFilter !== 'ALL')) ? `
                   <button onclick="App.resetStudentFilter()" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="Đặt lại bộ lọc">
                     <i class="fa-solid fa-rotate-left"></i><span>Đặt lại</span>
                   </button>
@@ -4072,6 +4113,16 @@ const App = {
 
               <div class="flex flex-wrap items-center gap-2.5">
                 <div class="flex items-center bg-white rounded-xl px-3 py-1.5 border border-slate-200 text-xs">
+                  <span class="text-slate-500 mr-1.5 font-medium">Khối:</span>
+                  <select onchange="App.filterAdminGrade(this.value)" class="bg-transparent font-bold text-indigo-700 outline-none cursor-pointer">
+                    <option value="ALL" ${(!this.state.adminGradeFilter || this.state.adminGradeFilter === 'ALL') ? 'selected' : ''}>Tất cả khối</option>
+                    ${[6, 7, 8, 9, 10, 11, 12].map(g => `
+                      <option value="${g}" ${String(this.state.adminGradeFilter) === String(g) ? 'selected' : ''}>Khối ${g}</option>
+                    `).join('')}
+                  </select>
+                </div>
+
+                <div class="flex items-center bg-white rounded-xl px-3 py-1.5 border border-slate-200 text-xs">
                   <span class="text-slate-500 mr-1.5 font-medium">Lớp:</span>
                   <select onchange="App.filterAdminGradebook(this.value)" class="bg-transparent font-bold text-slate-700 outline-none cursor-pointer">
                     <option value="ALL" ${this.state.adminClassFilter === 'ALL' ? 'selected' : ''}>Tất cả các lớp</option>
@@ -4106,7 +4157,7 @@ const App = {
                       <th class="px-4 py-3 text-center font-bold w-12 bg-slate-100 border-b border-slate-200">STT</th>
                       <th class="px-4 py-3 font-bold font-mono bg-slate-100 border-b border-slate-200">Mã HS</th>
                       <th class="px-5 py-3 font-bold bg-slate-100 border-b border-slate-200">Họ và Tên</th>
-                      <th class="px-4 py-3 text-center font-bold bg-slate-100 border-b border-slate-200">Lớp</th>
+                      <th class="px-4 py-3 text-center font-bold bg-slate-100 border-b border-slate-200">Khối / Lớp</th>
                       ${examsList.map((ex) => `
                         <th class="px-4 py-3 text-center font-bold min-w-[125px] bg-slate-100 border-b border-slate-200">
                           <div class="text-indigo-900 font-extrabold">K${ex.grade || 12} • ${this.getExamCategoryMeta(this.inferExamCategory(ex)).short}</div>
@@ -4177,8 +4228,9 @@ const App = {
                               <i class="fa-solid fa-chart-line text-[10px] text-indigo-400"></i>
                             </button>
                           </td>
-                          <td class="px-4 py-3.5 text-center">
-                            <span class="px-2 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-slate-600">${s.className || '12'}</span>
+                          <td class="px-4 py-3.5 text-center whitespace-nowrap">
+                            <span class="px-2 py-0.5 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">K${this.getStudentGrade(s)}</span>
+                            <span class="px-2 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-slate-600 ml-1">${s.className || '12'}</span>
                           </td>
                           ${examScores.map(es => {
                             if (!es.hasSub) {
@@ -4243,8 +4295,11 @@ const App = {
                   <tbody class="divide-y divide-slate-100">
                     ${this.state.submissions
                       .filter(sub => {
-                        if (this.state.adminClassFilter === 'ALL') return true;
                         const st = this.state.students.find(x => x.studentId === sub.studentId);
+                        if (this.state.adminGradeFilter && this.state.adminGradeFilter !== 'ALL') {
+                          if (!st || String(this.getStudentGrade(st)) !== String(this.state.adminGradeFilter)) return false;
+                        }
+                        if (this.state.adminClassFilter === 'ALL') return true;
                         return st && (st.className || '12') === this.state.adminClassFilter;
                       })
                       .map(sub => `
@@ -4692,8 +4747,10 @@ const App = {
             </div>
 
             <div class="max-h-48 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white">
-              ${this.state.students.map(st => `
-                <label class="access-student-row flex items-center justify-between px-3 py-2 hover:bg-indigo-50/40 cursor-pointer" data-search="${(st.fullName + ' ' + st.studentId + ' ' + (st.className || '')).toLowerCase()}">
+              ${this.state.students.map(st => {
+                const stGrade = this.getStudentGrade(st);
+                return `
+                <label class="access-student-row flex items-center justify-between px-3 py-2 hover:bg-indigo-50/40 cursor-pointer" data-search="${(st.fullName + ' ' + st.studentId + ' khối ' + stGrade + ' k' + stGrade + ' ' + (st.className || '')).toLowerCase()}">
                   <div class="flex items-center gap-2.5 min-w-0">
                     <input type="checkbox" name="accessStudentCheck" value="${st.studentId}" onchange="App.updateAccessSelectedCounter()" ${selectedStudents.has(st.studentId) ? 'checked' : ''} class="rounded text-indigo-600">
                     <div class="truncate">
@@ -4701,9 +4758,10 @@ const App = {
                       <span class="text-[11px] font-mono text-indigo-600 ml-1.5">${st.studentId}</span>
                     </div>
                   </div>
-                  <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold text-[11px] shrink-0">Lớp ${st.className || '12'}</span>
+                  <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold text-[11px] shrink-0">Khối ${stGrade} • Lớp ${st.className || '12'}</span>
                 </label>
-              `).join('')}
+              `;
+              }).join('')}
             </div>
           </div>
 
@@ -4811,13 +4869,16 @@ const App = {
     this.render();
   },
 
-  // --- QUẢN LÝ BẢNG HỌC SINH & TÌM KIẾM BỘ LỌC (LAYOUT THEO QUẢN LÝ THU CHI & BÁN HÀNG) ---
+  // --- QUẢN LÝ BẢNG HỌC SINH, XẾP KHỐI & TÌM KIẾM BỘ LỌC ---
   renderStudentTableHtml() {
     const query = (this.state.studentSearchQuery || '').toLowerCase().trim();
+    const gradeFilter = this.state.studentGradeFilter || 'ALL';
     const classFilter = this.state.studentClassFilter || 'ALL';
     const statusFilter = this.state.studentStatusFilter || 'ALL';
 
     const filtered = this.state.students.filter(st => {
+      const stGrade = this.getStudentGrade(st);
+      if (gradeFilter !== 'ALL' && String(stGrade) !== String(gradeFilter)) return false;
       if (classFilter !== 'ALL' && (st.className || '12A1') !== classFilter) return false;
       if (statusFilter !== 'ALL') {
         const isActive = st.status === 'active';
@@ -4829,9 +4890,10 @@ const App = {
         const matchName = (st.fullName || '').toLowerCase().includes(query);
         const matchPhone = (st.phone || '').toLowerCase().includes(query);
         const matchClass = (st.className || '').toLowerCase().includes(query);
+        const matchGrade = (`khối ${stGrade} k${stGrade} lớp ${stGrade}`).includes(query);
         const matchParent = (st.parentName || '').toLowerCase().includes(query);
         const matchNotes = (st.notes || '').toLowerCase().includes(query);
-        if (!matchId && !matchName && !matchPhone && !matchClass && !matchParent && !matchNotes) return false;
+        if (!matchId && !matchName && !matchPhone && !matchClass && !matchGrade && !matchParent && !matchNotes) return false;
       }
       return true;
     });
@@ -4853,12 +4915,13 @@ const App = {
         <table class="min-w-full divide-y divide-slate-200 text-sm">
           <thead class="bg-slate-100 text-xs uppercase tracking-wider text-slate-600 font-bold sticky top-0 z-10 shadow-2xs">
             <tr>
-              <th class="w-14 px-3 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">STT</th>
-              <th class="w-32 px-4 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">Mã Học Sinh</th>
+              <th class="w-12 px-3 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">STT</th>
+              <th class="w-28 px-3 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">Mã Học Sinh</th>
               <th class="px-5 py-3.5 font-bold text-left whitespace-nowrap bg-slate-100">Họ và Tên Học Sinh</th>
+              <th class="w-28 px-3 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">Xếp Khối</th>
               <th class="w-24 px-3 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">Lớp</th>
-              <th class="w-44 px-4 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">Lượt nộp &amp; Điểm TB</th>
-              <th class="w-28 px-3 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">Trạng thái</th>
+              <th class="w-40 px-4 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">Lượt nộp &amp; Điểm TB</th>
+              <th class="w-24 px-3 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">Trạng thái</th>
               <th class="w-36 px-4 py-3.5 font-bold text-center whitespace-nowrap bg-slate-100">Thao tác</th>
             </tr>
           </thead>
@@ -4870,16 +4933,17 @@ const App = {
               const nameParts = (st.fullName || '').trim().split(' ').filter(Boolean);
               const initials = nameParts.length >= 2 ? (nameParts[nameParts.length - 2][0] + nameParts[nameParts.length - 1][0]).toUpperCase() : (st.fullName ? st.fullName.substring(0, 2).toUpperCase() : 'HS');
               const isActive = st.status === 'active';
+              const curGrade = this.getStudentGrade(st);
 
               return `
                 <tr class="hover:bg-indigo-50/30 transition group">
                   <td class="px-3 py-3.5 text-center align-middle font-mono text-xs font-semibold text-slate-500 whitespace-nowrap">${idx + 1}</td>
-                  <td class="px-4 py-3.5 text-center align-middle whitespace-nowrap">
+                  <td class="px-3 py-3.5 text-center align-middle whitespace-nowrap">
                     <button type="button" onclick="App.showStudentDetailModal('${st.studentId}')" class="inline-block font-mono font-bold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-100 text-xs transition cursor-pointer" title="Bấm để xem hồ sơ & mật khẩu học sinh">
                       ${st.studentId}
                     </button>
                   </td>
-                  <td class="px-5 py-3.5 text-left align-middle min-w-[260px]">
+                  <td class="px-5 py-3.5 text-left align-middle min-w-[240px]">
                     <div onclick="App.showStudentDetailModal('${st.studentId}')" class="flex items-center space-x-3 cursor-pointer" title="Bấm để xem hồ sơ, mật khẩu & lịch sử thi">
                       <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
                         ${initials}
@@ -4896,6 +4960,11 @@ const App = {
                         </div>
                       </div>
                     </div>
+                  </td>
+                  <td class="px-3 py-3.5 text-center align-middle whitespace-nowrap">
+                    <select aria-label="Xếp khối học sinh ${st.fullName}" onchange="App.updateStudentGrade('${st.studentId}', this.value)" class="student-grade-select px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50/80 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 outline-none cursor-pointer transition" title="Chọn để xếp khối nhanh cho học sinh">
+                      ${[6, 7, 8, 9, 10, 11, 12].map(g => `<option value="${g}" ${g === curGrade ? 'selected' : ''}>Khối ${g}</option>`).join('')}
+                    </select>
                   </td>
                   <td class="px-3 py-3.5 text-center align-middle whitespace-nowrap">
                     <span class="inline-block px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200/60">
@@ -4940,27 +5009,224 @@ const App = {
   },
 
   onStudentFilterInput(field, val) {
-    if (field === 'query') this.state.studentSearchQuery = val;
+    if (field === 'query') {
+      this.state.studentSearchQuery = val;
+      const container = document.getElementById('adminStudentTableContainer');
+      if (container) {
+        container.innerHTML = this.renderStudentTableHtml();
+        return;
+      }
+    }
+    if (field === 'grade') this.state.studentGradeFilter = val;
     if (field === 'class') this.state.studentClassFilter = val;
     if (field === 'status') this.state.studentStatusFilter = val;
-
-    const container = document.getElementById('adminStudentTableContainer');
-    if (container) {
-      container.innerHTML = this.renderStudentTableHtml();
-    }
+    this.render();
   },
 
   resetStudentFilter() {
     this.state.studentSearchQuery = '';
+    this.state.studentGradeFilter = 'ALL';
     this.state.studentClassFilter = 'ALL';
     this.state.studentStatusFilter = 'ALL';
     this.render();
+  },
+
+  updateStudentGrade(studentId, newGrade) {
+    const st = this.state.students.find(s => s.studentId === studentId);
+    const g = parseInt(newGrade, 10);
+    if (!st || !Number.isInteger(g) || g < 6 || g > 12) return;
+    st.grade = g;
+    st.updatedAt = new Date().toISOString();
+    if (this.state.currentUser && this.state.currentUser.studentId === studentId) {
+      this.state.currentUser.grade = g;
+      sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+    }
+    this.saveData();
+    this.render();
+  },
+
+  // --- MỤC XẾP KHỐI CHO HỌC SINH (HÀNG LOẠT / THEO LỚP / NHÓM) ---
+  showBulkGradeModal() {
+    const existing = document.getElementById('bulkGradeModal');
+    if (existing) existing.remove();
+
+    const defaultTargetGrade = (this.state.studentGradeFilter && this.state.studentGradeFilter !== 'ALL')
+      ? Number(this.state.studentGradeFilter)
+      : 12;
+    const allClasses = [...new Set(this.state.students.map(s => s.className || '12A1'))];
+
+    const modal = document.createElement('div');
+    modal.id = 'bulkGradeModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[88vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between shrink-0">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm">
+              <i class="fa-solid fa-layer-group text-base"></i>
+            </div>
+            <div>
+              <h3 class="font-extrabold text-base text-slate-900">Xếp Khối Cho Học Sinh (Khối 6 – 12)</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Chọn học sinh hoặc cả lớp để phân vào khối tương ứng phục vụ mở đề &amp; chuyên đề</p>
+            </div>
+          </div>
+          <button type="button" onclick="document.getElementById('bulkGradeModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        <form id="bulkGradeForm" onsubmit="event.preventDefault(); App.handleBulkGradeSubmit();" class="p-6 space-y-4 text-xs overflow-y-auto flex-1">
+          <!-- Chọn khối đích -->
+          <div class="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200 space-y-2.5">
+            <label class="block font-extrabold text-indigo-950 text-xs uppercase tracking-wider">
+              <i class="fa-solid fa-bullseye text-indigo-600 mr-1.5"></i>1. Chọn khối lớp cần xếp vào *
+            </label>
+            <input type="hidden" id="bulkTargetGradeInput" value="${defaultTargetGrade}">
+            <div class="grid grid-cols-4 sm:grid-cols-7 gap-2" id="bulkTargetGradeButtons">
+              ${[6, 7, 8, 9, 10, 11, 12].map(g => `
+                <button type="button" data-grade="${g}" onclick="App.selectBulkTargetGrade(${g})" class="bulk-target-grade-btn py-2 px-2 rounded-xl font-bold text-xs border transition cursor-pointer ${g === defaultTargetGrade ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50'}">
+                  Khối ${g}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Bộ lọc chọn học sinh -->
+          <div class="space-y-2.5">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="font-extrabold text-slate-800 uppercase tracking-wider">
+                <i class="fa-solid fa-user-check text-indigo-600 mr-1.5"></i>2. Chọn học sinh áp dụng (<span id="bulkGradeSelectedCount">0</span> đã chọn)
+              </span>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="App.toggleAllBulkGradeStudents(true)" class="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold cursor-pointer">Chọn tất cả đang lọc</button>
+                <button type="button" onclick="App.toggleAllBulkGradeStudents(false)" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold cursor-pointer">Bỏ chọn</button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div class="sm:col-span-1 relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400"></i>
+                <input type="text" id="bulkGradeSearchInput" oninput="App.filterBulkGradeStudents()" placeholder="Tìm tên, mã HS..." class="w-full pl-8 pr-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:border-indigo-500">
+              </div>
+              <select id="bulkGradeFilterCurGrade" onchange="App.filterBulkGradeStudents()" class="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-700 outline-none cursor-pointer">
+                <option value="ALL">Tất cả khối hiện tại</option>
+                ${[6, 7, 8, 9, 10, 11, 12].map(g => `<option value="${g}">Đang ở Khối ${g}</option>`).join('')}
+              </select>
+              <select id="bulkGradeFilterClass" onchange="App.filterBulkGradeStudents()" class="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-700 outline-none cursor-pointer">
+                <option value="ALL">Tất cả các lớp</option>
+                ${allClasses.map(c => `<option value="${c}">Lớp ${c}</option>`).join('')}
+              </select>
+            </div>
+
+            <div class="max-h-60 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-2xl bg-white">
+              ${this.state.students.map(st => {
+                const g = this.getStudentGrade(st);
+                return `
+                  <label class="bulk-grade-student-row flex items-center justify-between px-3.5 py-2.5 hover:bg-indigo-50/40 cursor-pointer" data-grade="${g}" data-class="${st.className || '12A1'}" data-search="${(st.fullName + ' ' + st.studentId + ' ' + (st.className || '')).toLowerCase()}">
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <input type="checkbox" name="bulkGradeStudentCheck" value="${st.studentId}" onchange="App.updateBulkGradeCounter()" class="rounded text-indigo-600">
+                      <div class="truncate">
+                        <span class="font-bold text-slate-900">${st.fullName}</span>
+                        <span class="font-mono text-indigo-600 ml-1.5">${st.studentId}</span>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                      <span class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100 font-bold">Khối ${g}</span>
+                      <span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-semibold">Lớp ${st.className || '12A1'}</span>
+                    </div>
+                  </label>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </form>
+
+        <div class="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2.5 shrink-0">
+          <button type="button" onclick="document.getElementById('bulkGradeModal').remove()" class="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold rounded-xl text-xs transition cursor-pointer">
+            Hủy
+          </button>
+          <button type="submit" form="bulkGradeForm" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition inline-flex items-center gap-1.5 cursor-pointer">
+            <i class="fa-solid fa-floppy-disk"></i><span>Lưu Xếp Khối</span>
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  },
+
+  selectBulkTargetGrade(g) {
+    const inp = document.getElementById('bulkTargetGradeInput');
+    if (inp) inp.value = String(g);
+    document.querySelectorAll('#bulkGradeModal .bulk-target-grade-btn').forEach(btn => {
+      const active = Number(btn.getAttribute('data-grade')) === Number(g);
+      btn.className = 'bulk-target-grade-btn py-2 px-2 rounded-xl font-bold text-xs border transition cursor-pointer ' + (
+        active ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50'
+      );
+    });
+  },
+
+  filterBulkGradeStudents() {
+    const q = (document.getElementById('bulkGradeSearchInput')?.value || '').toLowerCase().trim();
+    const gFilter = document.getElementById('bulkGradeFilterCurGrade')?.value || 'ALL';
+    const cFilter = document.getElementById('bulkGradeFilterClass')?.value || 'ALL';
+    document.querySelectorAll('#bulkGradeModal .bulk-grade-student-row').forEach(row => {
+      const matchQ = !q || (row.getAttribute('data-search') || '').includes(q);
+      const matchG = gFilter === 'ALL' || row.getAttribute('data-grade') === String(gFilter);
+      const matchC = cFilter === 'ALL' || row.getAttribute('data-class') === cFilter;
+      row.style.display = (matchQ && matchG && matchC) ? '' : 'none';
+    });
+  },
+
+  toggleAllBulkGradeStudents(selectAll) {
+    document.querySelectorAll('#bulkGradeModal .bulk-grade-student-row').forEach(row => {
+      if (row.style.display === 'none') return;
+      const cb = row.querySelector('input[name="bulkGradeStudentCheck"]');
+      if (cb) cb.checked = selectAll;
+    });
+    this.updateBulkGradeCounter();
+  },
+
+  updateBulkGradeCounter() {
+    const el = document.getElementById('bulkGradeSelectedCount');
+    if (!el) return;
+    el.textContent = document.querySelectorAll('#bulkGradeModal input[name="bulkGradeStudentCheck"]:checked').length;
+  },
+
+  handleBulkGradeSubmit() {
+    const targetGrade = parseInt(document.getElementById('bulkTargetGradeInput')?.value || '12', 10);
+    const checkedIds = Array.from(document.querySelectorAll('#bulkGradeModal input[name="bulkGradeStudentCheck"]:checked')).map(cb => cb.value);
+    if (!Number.isInteger(targetGrade) || targetGrade < 6 || targetGrade > 12) return;
+    if (checkedIds.length === 0) {
+      this.notify('Vui lòng tích chọn ít nhất 1 học sinh để xếp khối!', 'warning', 'Chưa chọn học sinh');
+      return;
+    }
+
+    const idSet = new Set(checkedIds);
+    const now = new Date().toISOString();
+    this.state.students.forEach(st => {
+      if (idSet.has(st.studentId)) {
+        st.grade = targetGrade;
+        st.updatedAt = now;
+      }
+    });
+    if (this.state.currentUser && idSet.has(this.state.currentUser.studentId)) {
+      this.state.currentUser.grade = targetGrade;
+      sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+    }
+
+    this.saveData();
+    document.getElementById('bulkGradeModal')?.remove();
+    this.render();
+    this.notify(`Đã xếp ${checkedIds.length} học sinh vào Khối ${targetGrade} thành công!`, 'success', 'Xếp khối thành công');
   },
 
   // --- CẤP TÀI KHOẢN HỌC SINH MỚI (MODAL NÂNG CẤP) ---
   showAddStudentModal() {
     const nextIdx = this.state.students.length + 1;
     const defaultCode = `HS2027` + String(nextIdx).padStart(2, '0');
+    const defaultGrade = (this.state.studentGradeFilter && this.state.studentGradeFilter !== 'ALL')
+      ? Number(this.state.studentGradeFilter)
+      : 12;
 
     const modal = document.createElement('div');
     modal.id = 'addStudentModal';
@@ -4974,7 +5240,7 @@ const App = {
             </div>
             <div>
               <h3 class="font-extrabold text-base text-slate-900">Thêm Học Sinh Mới</h3>
-              <p class="text-xs text-slate-500 mt-0.5">Khởi tạo hồ sơ học sinh, mật khẩu đăng nhập và thông tin liên hệ</p>
+              <p class="text-xs text-slate-500 mt-0.5">Khởi tạo hồ sơ học sinh, xếp khối (Khối 6 – 12), mật khẩu và liên hệ</p>
             </div>
           </div>
           <button onclick="document.getElementById('addStudentModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition">
@@ -4994,10 +5260,16 @@ const App = {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Lớp / Khóa học *</label>
-              <input type="text" id="newStudentClass" value="12A1" required placeholder="12A1" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+              <label class="block text-xs font-bold text-slate-700 mb-1">Xếp khối (6 – 12) *</label>
+              <select id="newStudentGrade" onchange="App.syncClassFromGradeSelect(this.value, 'newStudentClass')" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-indigo-700 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none cursor-pointer">
+                ${[6, 7, 8, 9, 10, 11, 12].map(g => `<option value="${g}" ${g === defaultGrade ? 'selected' : ''}>Khối ${g}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Lớp / Nhóm học *</label>
+              <input type="text" id="newStudentClass" value="${defaultGrade}A1" oninput="App.syncGradeFromClassInput(this.value, 'newStudentGrade')" required placeholder="VD: 12A1, Ca 1..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
             </div>
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Mật khẩu cấp *</label>
@@ -5038,6 +5310,8 @@ const App = {
   handleAddStudentSubmit() {
     const id = document.getElementById('newStudentId').value.trim().toUpperCase();
     const name = document.getElementById('newStudentName').value.trim();
+    const gradeVal = parseInt(document.getElementById('newStudentGrade')?.value || '12', 10);
+    const grade = (Number.isInteger(gradeVal) && gradeVal >= 6 && gradeVal <= 12) ? gradeVal : 12;
     const cls = document.getElementById('newStudentClass').value.trim();
     const pass = document.getElementById('newStudentPass').value.trim();
     const phone = (document.getElementById('newStudentPhone')?.value || '').trim();
@@ -5057,7 +5331,8 @@ const App = {
     this.state.students.push({
       studentId: id,
       fullName: name,
-      className: cls || '12A1',
+      grade: grade,
+      className: cls || `${grade}A1`,
       password: pass || '123',
       phone: phone,
       parentName: parent,
@@ -5072,7 +5347,7 @@ const App = {
     const modal = document.getElementById('addStudentModal');
     if (modal) modal.remove();
     this.render();
-    this.notify(`Đã cấp thành công tài khoản cho học sinh: ${name} (Mã: ${id}).`, 'success', 'Cấp tài khoản thành công');
+    this.notify(`Đã cấp thành công tài khoản cho học sinh: ${name} (Mã: ${id} • Khối ${grade}).`, 'success', 'Cấp tài khoản thành công');
   },
 
   // --- CHỈNH SỬA TÀI KHOẢN & THÔNG TIN HỌC SINH (ADMIN EDIT MODAL) ---
@@ -5082,6 +5357,7 @@ const App = {
       this.notify('Không tìm thấy hồ sơ học sinh trong hệ thống!', 'error', 'Không tìm thấy dữ liệu');
       return;
     }
+    const curGrade = this.getStudentGrade(student);
 
     const modal = document.createElement('div');
     modal.id = 'editStudentModal';
@@ -5095,7 +5371,7 @@ const App = {
             </div>
             <div>
               <h3 class="font-extrabold text-base text-slate-900">Chỉnh Sửa Hồ Sơ Học Sinh</h3>
-              <p class="text-xs text-slate-500 mt-0.5">Mã hiện tại: <span class="font-mono text-indigo-600 font-bold">${student.studentId}</span></p>
+              <p class="text-xs text-slate-500 mt-0.5">Mã hiện tại: <span class="font-mono text-indigo-600 font-bold">${student.studentId}</span> • Khối ${curGrade}</p>
             </div>
           </div>
           <button onclick="document.getElementById('editStudentModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition">
@@ -5116,9 +5392,15 @@ const App = {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Lớp / Khóa học *</label>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Xếp khối (6 – 12) *</label>
+              <select id="editStudentGrade" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-indigo-700 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none cursor-pointer">
+                ${[6, 7, 8, 9, 10, 11, 12].map(g => `<option value="${g}" ${g === curGrade ? 'selected' : ''}>Khối ${g}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Lớp / Nhóm học *</label>
               <input type="text" id="editStudentClass" required value="${student.className || '12A1'}" placeholder="12A1" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
             </div>
             <div>
@@ -5182,6 +5464,8 @@ const App = {
   handleEditStudentSubmit(originalId) {
     const newId = document.getElementById('editStudentId').value.trim().toUpperCase();
     const name = document.getElementById('editStudentName').value.trim();
+    const gradeVal = parseInt(document.getElementById('editStudentGrade')?.value || '12', 10);
+    const grade = (Number.isInteger(gradeVal) && gradeVal >= 6 && gradeVal <= 12) ? gradeVal : 12;
     const cls = document.getElementById('editStudentClass').value.trim();
     const pass = document.getElementById('editStudentPass').value.trim();
     const phone = document.getElementById('editStudentPhone').value.trim();
@@ -5202,7 +5486,7 @@ const App = {
     const student = this.state.students.find(s => s.studentId === originalId);
     if (!student) return;
 
-    // Đồng bộ sang submissions và exams nếu đổi mã học sinh
+    // Đồng bộ sang submissions, exams và homeworks nếu đổi mã học sinh
     if (newId !== originalId) {
       this.state.submissions.forEach(sub => {
         if (sub.studentId === originalId) {
@@ -5215,6 +5499,11 @@ const App = {
           ex.allowed_students = ex.allowed_students.map(sid => sid === originalId ? newId : sid);
         }
       });
+      (this.state.homeworks || []).forEach(hw => {
+        if (hw.allowedStudents) {
+          hw.allowedStudents = hw.allowedStudents.map(sid => sid === originalId ? newId : sid);
+        }
+      });
       if (this.state.currentUser && this.state.currentUser.studentId === originalId) {
         this.state.currentUser.studentId = newId;
         this.state.currentUser.fullName = name;
@@ -5224,7 +5513,8 @@ const App = {
 
     student.studentId = newId;
     student.fullName = name;
-    student.className = cls || '12A1';
+    student.grade = grade;
+    student.className = cls || `${grade}A1`;
     student.password = pass || '123';
     student.phone = phone;
     student.parentName = parent;
@@ -5241,7 +5531,7 @@ const App = {
     const modal = document.getElementById('editStudentModal');
     if (modal) modal.remove();
     this.render();
-    this.notify(`Đã cập nhật thông tin học sinh "${name}" (${newId}) thành công!`, 'success', 'Lưu hồ sơ thành công');
+    this.notify(`Đã cập nhật thông tin học sinh "${name}" (${newId} • Khối ${grade}) thành công!`, 'success', 'Lưu hồ sơ thành công');
   },
 
   // --- HỌC SINH TỰ CHỈNH SỬA HỒ SƠ & MẬT KHẨU CÁ NHÂN ---
@@ -5273,7 +5563,7 @@ const App = {
         <form onsubmit="event.preventDefault(); App.handleStudentSelfEditSubmit();" class="p-6 space-y-4 text-sm">
           <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs flex justify-between items-center">
             <div>Mã học sinh: <strong class="font-mono text-indigo-700">${currentStudent.studentId}</strong></div>
-            <div>Lớp: <strong class="text-slate-800">${currentStudent.className || '12'}</strong></div>
+            <div>Khối <strong class="text-indigo-700">${this.getStudentGrade(currentStudent)}</strong> • Lớp <strong class="text-slate-800">${currentStudent.className || '12'}</strong></div>
           </div>
 
           <div>
@@ -5444,7 +5734,7 @@ const App = {
                     <span class="font-bold text-slate-800">${st.fullName}</span>
                     <span class="font-mono text-indigo-600 text-[11px]">${st.studentId}</span>
                   </span>
-                  <span class="text-[11px] text-slate-500">Lớp ${st.className || '12'}</span>
+                  <span class="text-[11px] text-slate-500">Khối ${this.getStudentGrade(st)} • Lớp ${st.className || '12'}</span>
                 </label>
               `).join('')}
             </div>
@@ -5745,6 +6035,11 @@ const App = {
     this.render();
   },
 
+  filterAdminGrade(g) {
+    this.state.adminGradeFilter = g;
+    this.render();
+  },
+
   filterAdminGradebook(cls) {
     this.state.adminClassFilter = cls;
     this.render();
@@ -5753,11 +6048,12 @@ const App = {
   exportMatrixCSV() {
     const exams = this.state.exams;
     const students = this.state.students.filter(s => {
+      if (this.state.adminGradeFilter && this.state.adminGradeFilter !== 'ALL' && String(this.getStudentGrade(s)) !== String(this.state.adminGradeFilter)) return false;
       if (this.state.adminClassFilter === 'ALL') return true;
       return (s.className || '12') === this.state.adminClassFilter;
     });
 
-    let header = ["STT", "Mã Học Sinh", "Họ và Tên", "Lớp"];
+    let header = ["STT", "Mã Học Sinh", "Họ và Tên", "Khối", "Lớp"];
     exams.forEach((ex, idx) => {
       const label = ex.roundLabel || `Đợt ${idx + 1}`;
       header.push(`${label} - ${ex.title.replace(/"/g, '""')}`);
@@ -5767,7 +6063,7 @@ const App = {
     let csv = header.map(h => `"${h}"`).join(',') + '\n';
 
     students.forEach((s, stt) => {
-      let row = [stt + 1, s.studentId, s.fullName, s.className || '12'];
+      let row = [stt + 1, s.studentId, s.fullName, `Khối ${this.getStudentGrade(s)}`, s.className || '12'];
       let scores = [];
 
       exams.forEach(ex => {
@@ -5952,7 +6248,8 @@ const App = {
                 </span>
               </div>
               <p class="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span>Lớp: <strong class="text-slate-700">${student.className || '12'}</strong></span>
+                <span>Khối: <strong class="text-indigo-700">Khối ${this.getStudentGrade(student)}</strong></span>
+                <span>• Lớp: <strong class="text-slate-700">${student.className || '12'}</strong></span>
                 <span class="inline-flex items-center gap-1.5">
                   <span>• Mật khẩu:</span>
                   <button type="button" id="toggleDetailPassBtn" onclick="App.toggleStudentPassReveal('${student.studentId}')" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-mono font-bold text-xs transition cursor-pointer" title="Bấm để xem hoặc ẩn mật khẩu học sinh">
@@ -6142,7 +6439,7 @@ const App = {
                 <label class="flex items-center space-x-2 text-xs bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 cursor-pointer hover:border-indigo-300">
                   <input type="checkbox" name="newHwStudentPick" value="${s.studentId}" checked class="rounded text-indigo-600">
                   <span class="truncate font-semibold text-slate-700">${s.fullName}</span>
-                  <span class="text-[10px] font-mono text-slate-400">(${s.className || '12'})</span>
+                  <span class="text-[10px] font-mono text-slate-400">(K${this.getStudentGrade(s)} • ${s.className || '12'})</span>
                 </label>
               `).join('')}
             </div>

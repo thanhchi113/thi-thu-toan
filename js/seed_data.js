@@ -11,12 +11,13 @@ const INITIAL_SEED_DATA = {
     email: "badaoqn132@gmail.com"
   },
 
-  // 2. Danh sách Học sinh (Mã học sinh đi kèm tên và lớp)
+  // 2. Danh sách Học sinh (Mã học sinh đi kèm tên, khối và lớp)
   students: [
     {
       studentId: "HS202701",
       fullName: "Nguyễn Văn An",
       password: "123",
+      grade: 12,
       className: "12A1",
       phone: "0912345601",
       parentName: "Bác Hùng (Bố)",
@@ -30,6 +31,7 @@ const INITIAL_SEED_DATA = {
       studentId: "HS202702",
       fullName: "Trần Thị Mai",
       password: "123",
+      grade: 12,
       className: "12A1",
       phone: "0987654302",
       parentName: "Cô Lan (Mẹ)",
@@ -43,6 +45,7 @@ const INITIAL_SEED_DATA = {
       studentId: "HS202703",
       fullName: "Lê Hoàng Long",
       password: "123",
+      grade: 12,
       className: "12A2",
       phone: "0934567803",
       parentName: "Bác Tuấn (Bố)",
@@ -56,6 +59,7 @@ const INITIAL_SEED_DATA = {
       studentId: "HS202704",
       fullName: "Phạm Quỳnh Anh",
       password: "123",
+      grade: 12,
       className: "12A2",
       phone: "0901234504",
       parentName: "Cô Mai (Mẹ)",
