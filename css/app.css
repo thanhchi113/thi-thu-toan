@@ -28,7 +28,38 @@ html, body {
 body.in-exam {
   overflow: hidden !important;
   height: 100vh !important;
+  height: 100dvh !important;
   max-height: 100vh !important;
+  max-height: 100dvh !important;
+}
+
+/* Hỗ trợ App iOS toàn màn hình (Safe Area) & Trình xem PDF đa trang trên iPhone/iPad */
+@media all and (display-mode: standalone) {
+  header.sticky.top-0 {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .ios-safe-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (max-width: 640px) {
+  input[type="text"]:not(.box-digit),
+  input[type="password"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+.pdf-viewer-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.pdf-page-canvas {
+  display: block;
+  margin: 0 auto;
+  background: #ffffff;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 body {

@@ -3,6 +3,9 @@
 
 const App = {
   ADMIN_RECOVERY_EMAIL: 'badaoqn132@gmail.com',
+  PUBLIC_APP_URL: 'https://thanhchi113.github.io/thi-thu-toan/',
+  _pdfViewers: {},
+  _deferredInstallPrompt: null,
 
   ACCENT_PRESETS: [
     { id: 'indigo',  name: 'Chàm Cổ Điển',  hex: '#4f46e5' },
@@ -36,6 +39,7 @@ const App = {
     secondsLeft: 0,
     tabSwitchesCount: 0,      // Giám sát số lần rời tab
     activeSectionTab: 'p1',   // 'p1' | 'p2' | 'p3'
+    mobileExamPane: 'both',   // 'pdf' | 'both' | 'sheet'
     paletteFilter: 'all',     // 'all' | 'unanswered' | 'answered' | 'flagged'
     activePart3Target: { qId: 1, boxIdx: 0 },
     theme: 'light',           // 'light' | 'sepia' | 'dark'
@@ -167,6 +171,7 @@ const App = {
   },
 
   init() {
+    this.initPwaSupport();
     this.loadAppearance();
     this.applyAppearance();
     this.loadData();
@@ -174,6 +179,31 @@ const App = {
     this.initGlobalEvents();
     this.render();
     this.checkPasswordResetUrl();
+  },
+
+  initPwaSupport() {
+    if (typeof window === 'undefined') return;
+    if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    if ('serviceWorker' in navigator && /^https?:$/i.test(window.location.protocol)) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      this._deferredInstallPrompt = e;
+    });
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('install') === 'ios') {
+      params.delete('install');
+      const rest = params.toString();
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState({}, document.title, window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
+      }
+      if (!this.isStandaloneApp()) {
+        setTimeout(() => this.showIosAppModal(true), 150);
+      }
+    }
   },
 
   initGlobalEvents() {
@@ -1125,15 +1155,19 @@ const App = {
 
     container.innerHTML = `
       <div class="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative text-slate-900">
-        <!-- Thanh công cụ Giao diện & Bộ màu nhanh ở góc phải -->
-        <div class="fixed top-4 right-4 z-30 flex items-center gap-2">
-          <button type="button" id="loginQuickThemeBtn" onclick="App.cycleTheme()" class="px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-sm hover:bg-slate-100 text-xs font-bold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer" title="Chuyển nhanh chế độ Sáng / Dịu mắt / Tối">
-            <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
-            <span>${thMeta.label}</span>
+        <!-- Thanh công cụ Giao diện, Cài App iOS & Bộ màu nhanh ở góc phải -->
+        <div class="fixed top-4 right-4 z-30 flex items-center gap-1.5 sm:gap-2">
+          <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer" title="Quét mã QR & Hướng dẫn tạo App trên iPhone / iPad">
+            <i class="fa-solid fa-qrcode"></i>
+            <span>Tạo App iOS / QR</span>
           </button>
-          <button type="button" id="loginThemeBtn" onclick="App.showThemeModal()" class="px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-sm hover:bg-slate-100 text-xs font-bold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer" title="Đổi bộ màu chủ đạo & mức độ tương phản">
+          <button type="button" id="loginQuickThemeBtn" onclick="App.cycleTheme()" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-sm hover:bg-slate-100 text-xs font-bold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer" title="Chuyển nhanh chế độ Sáng / Dịu mắt / Tối">
+            <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
+            <span class="hidden sm:inline">${thMeta.label}</span>
+          </button>
+          <button type="button" id="loginThemeBtn" onclick="App.showThemeModal()" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-sm hover:bg-slate-100 text-xs font-bold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer" title="Đổi bộ màu chủ đạo & mức độ tương phản">
             <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-black/15 shrink-0" style="background:${swatchHex};"></span>
-            <span>Bộ màu &amp; Tương phản</span>
+            <span class="hidden sm:inline">Bộ màu &amp; Tương phản</span>
           </button>
         </div>
 
@@ -1225,6 +1259,25 @@ const App = {
               </button>
             </form>
           </div>
+
+          <!-- Thẻ mở nhanh Mã QR & Hướng dẫn Tạo App trên iOS -->
+          <button type="button" id="loginIosPromoCard" onclick="App.showIosAppModal()" class="mt-4 w-full bg-white hover:bg-indigo-50/60 p-4 rounded-2xl border border-indigo-200 shadow-sm transition flex items-center justify-between gap-3 text-left cursor-pointer group">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-11 h-11 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <i class="fa-brands fa-apple text-xl"></i>
+              </div>
+              <div class="min-w-0">
+                <div class="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
+                  <span>Quét QR tạo App trên điện thoại iOS</span>
+                  <span class="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[10px] font-bold">iPhone / iPad</span>
+                </div>
+                <p class="text-[11px] text-slate-500 mt-0.5 leading-snug">Xem đề PDF đa trang sắc nét &amp; nộp đáp án trực tiếp trên App • Hướng dẫn 4 bước</p>
+              </div>
+            </div>
+            <div class="w-9 h-9 rounded-xl bg-indigo-50 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white flex items-center justify-center shrink-0 transition border border-indigo-200">
+              <i class="fa-solid fa-qrcode text-base"></i>
+            </div>
+          </button>
         </div>
       </div>
     `;
@@ -1373,6 +1426,12 @@ const App = {
                 <span class="hidden sm:inline">Trang chủ</span>
               </button>
 
+              <!-- Nút Quét QR / Tạo App iOS -->
+              <button id="studentIosAppBtn" onclick="App.showIosAppModal()" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer" title="Quét QR & Hướng dẫn tạo App trên iPhone / iPad">
+                <i class="fa-solid fa-qrcode"></i>
+                <span class="hidden md:inline">App iOS / QR</span>
+              </button>
+
               <!-- Nút Chuyển Nhanh Sáng/Tối & Bảng Màu -->
               <button id="studentQuickThemeBtn" onclick="App.cycleTheme()" class="p-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition border border-slate-200 shadow-xs cursor-pointer" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
                 <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
@@ -1416,9 +1475,12 @@ const App = {
                   Mã học sinh: <strong class="font-mono tracking-wider">${u.studentId}</strong> • Khối: <strong>Khối ${this.getStudentGrade(u)}</strong> • Lớp: <strong>${u.className || '12'}</strong>
                   ${u.phone ? ` • SĐT: <strong>${u.phone}</strong>` : ''}
                 </p>
-                <div class="mt-3.5">
+                <div class="mt-3.5 flex flex-wrap items-center gap-2">
                   <button onclick="App.showStudentSelfEditModal()" class="px-3.5 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 backdrop-blur-md border border-white/25 cursor-pointer shadow-xs">
                     <i class="fa-solid fa-user-pen"></i><span>Hồ sơ cá nhân &amp; Đổi mật khẩu</span>
+                  </button>
+                  <button id="studentBannerIosBtn" onclick="App.showIosAppModal()" class="px-3.5 py-1.5 bg-white text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-extrabold transition inline-flex items-center gap-1.5 cursor-pointer shadow-sm">
+                    <i class="fa-brands fa-apple text-sm"></i><span>Quét QR Cài App iOS</span>
                   </button>
                 </div>
               </div>
@@ -2136,6 +2198,7 @@ const App = {
     this.state.secondsLeft = (exam.time_minutes || 90) * 60;
     this.state.tabSwitchesCount = 0;
     this.state.activeSectionTab = exam.part1.length ? 'p1' : (exam.part2.length ? 'p2' : 'p3');
+    this.state.mobileExamPane = 'both';
 
     // Đọc file PDF thực tế từ IndexedDB nếu có
     if (typeof PDFStorage !== 'undefined') {
@@ -2217,6 +2280,9 @@ const App = {
     if (drawer && !drawer.classList.contains('hidden')) {
       this.toggleMobileDrawer();
     }
+    if (this.state.mobileExamPane === 'pdf') {
+      this.setMobileExamPane('sheet');
+    }
     this.setSectionTab(part);
     setTimeout(() => {
       const el = document.getElementById(`row_${part}_${qId}`);
@@ -2265,47 +2331,48 @@ const App = {
     container.innerHTML = `
       <div class="fixed inset-0 flex flex-col bg-slate-100 overflow-hidden select-none z-10">
         <!-- Top Sticky Header -->
-        <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 sm:px-6 py-2 flex items-center justify-between shrink-0 z-30 shadow-xs sticky top-0">
-          <div class="flex items-center space-x-2 sm:space-x-3">
+        <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 px-2.5 sm:px-6 py-2 flex items-center justify-between gap-2 shrink-0 z-30 shadow-xs sticky top-0">
+          <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
             <!-- Nút Về Trang Chủ -->
-            <button onclick="App.confirmExitExam()" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer" title="Quay về trang chủ">
+            <button onclick="App.confirmExitExam()" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer shrink-0" title="Quay về trang chủ">
               <i class="fa-solid fa-house text-indigo-600"></i>
               <span class="hidden sm:inline">Trang chủ</span>
             </button>
 
-            <div class="h-5 w-px bg-slate-200 hidden sm:block"></div>
+            <div class="h-5 w-px bg-slate-200 hidden sm:block shrink-0"></div>
 
-            <span class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
+            <span class="hidden sm:flex w-8 h-8 rounded-lg bg-indigo-600 text-white items-center justify-center font-bold text-sm shadow-sm shrink-0">
               <i class="fa-solid fa-pen-ruler text-xs"></i>
             </span>
-            <div class="min-w-0">
-              <h2 class="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[130px] sm:max-w-xs md:max-w-md">${ex.title}</h2>
-              <div class="text-[11px] text-slate-500 flex items-center space-x-2 flex-wrap">
-                <span>Học sinh: <strong>${u.fullName}</strong> (${u.studentId})</span>
-                <span class="text-indigo-600 font-bold">• Lần thi: ${this.state.currentAttemptNumber || 1}</span>
-                <span id="violationHeaderBadge" class="${this.state.tabSwitchesCount > 0 ? 'inline-flex items-center space-x-1 bg-red-100 border border-red-300 px-2 py-0.5 rounded text-red-700 font-bold text-[11px] animate-pulse' : 'hidden'}">
-                  <i class="fa-solid fa-triangle-exclamation text-red-600"></i><span>Rời tab: ${this.state.tabSwitchesCount} lần</span>
+            <div class="min-w-0 flex-1">
+              <h2 class="text-xs sm:text-sm font-bold text-slate-800 truncate">${ex.title}</h2>
+              <div class="text-[11px] text-slate-500 flex items-center gap-x-1.5 truncate">
+                <span class="hidden sm:inline">Học sinh: <strong>${u.fullName}</strong> (${u.studentId})</span>
+                <span class="sm:hidden font-semibold text-slate-600 truncate">${u.studentId}</span>
+                <span class="text-indigo-600 font-bold shrink-0">• Lần ${this.state.currentAttemptNumber || 1}</span>
+                <span id="violationHeaderBadge" class="${this.state.tabSwitchesCount > 0 ? 'inline-flex items-center space-x-1 bg-red-100 border border-red-300 px-1.5 py-0.5 rounded text-red-700 font-bold text-[10px] animate-pulse shrink-0' : 'hidden'}">
+                  <i class="fa-solid fa-triangle-exclamation text-red-600"></i><span>${this.state.tabSwitchesCount}</span>
                 </span>
               </div>
             </div>
           </div>
 
           <!-- Controls & Actions -->
-          <div class="flex items-center space-x-1.5 sm:space-x-2.5">
-            <!-- Nút Lên Đầu Trang -->
-            <button onclick="App.scrollToTop()" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 rounded-lg text-xs font-bold transition flex items-center space-x-1 shadow-xs" title="Cuộn lên đầu trang">
+          <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+            <!-- Nút Lên Đầu Trang (Desktop/Tablet) -->
+            <button onclick="App.scrollToTop()" class="hidden md:flex px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 rounded-lg text-xs font-bold transition items-center space-x-1 shadow-xs cursor-pointer" title="Cuộn lên đầu trang">
               <i class="fa-solid fa-arrow-up text-indigo-600"></i>
-              <span class="hidden md:inline">Đầu trang</span>
+              <span class="hidden lg:inline">Đầu trang</span>
             </button>
 
-            <!-- Tải file PDF về máy -->
-            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition flex items-center" title="Tải file PDF về máy nếu muốn in ấn">
+            <!-- Tải file PDF về máy (Desktop/Tablet) -->
+            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" class="hidden md:flex px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition items-center" title="Tải file PDF về máy nếu muốn in ấn">
               <i class="fa-solid fa-cloud-arrow-down text-indigo-600 mr-1.5"></i>
               <span class="hidden lg:inline">Tải Đề</span>
             </a>
 
             <!-- Nút chỉnh cỡ chữ A- / A+ -->
-            <div class="hidden sm:flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200 text-xs">
+            <div class="hidden md:flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200 text-xs">
               <button onclick="App.adjustFontSize(-1)" class="px-2 py-1 text-slate-600 hover:text-indigo-600 font-bold" title="Giảm cỡ chữ">A-</button>
               <button onclick="App.adjustFontSize(1)" class="px-2 py-1 text-slate-600 hover:text-indigo-600 font-bold" title="Tăng cỡ chữ">A+</button>
             </div>
@@ -2314,19 +2381,19 @@ const App = {
             <button id="examQuickThemeBtn" onclick="App.cycleTheme()" class="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-slate-600 border border-slate-200 cursor-pointer" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
               <i class="fa-solid fa-circle-half-stroke"></i>
             </button>
-            <button id="examThemeBtn" onclick="App.showThemeModal()" class="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-indigo-600 border border-slate-200 cursor-pointer" title="Tùy chỉnh bộ màu & độ tương phản">
+            <button id="examThemeBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex p-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs text-indigo-600 border border-slate-200 cursor-pointer" title="Tùy chỉnh bộ màu & độ tương phản">
               <i class="fa-solid fa-palette"></i>
             </button>
 
             <!-- Timer Badge -->
-            <div class="flex items-center space-x-1.5 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-lg text-amber-900 font-mono font-bold text-xs sm:text-sm">
+            <div class="flex items-center space-x-1 bg-amber-50 border border-amber-200 px-2 sm:px-2.5 py-1.5 rounded-lg text-amber-900 font-mono font-bold text-xs sm:text-sm whitespace-nowrap">
               <i class="fa-regular fa-clock text-amber-600"></i>
               <span id="examTimer">--:--</span>
             </div>
 
             <!-- Nộp bài Button -->
-            <button onclick="App.confirmSubmitExam()" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs sm:text-sm font-bold shadow-sm transition flex items-center">
-              <i class="fa-solid fa-paper-plane mr-1.5"></i>
+            <button id="examTopSubmitBtn" onclick="App.confirmSubmitExam()" class="px-2.5 sm:px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs sm:text-sm font-bold shadow-sm transition flex items-center whitespace-nowrap cursor-pointer">
+              <i class="fa-solid fa-paper-plane mr-1"></i>
               <span>Nộp Bài</span>
             </button>
           </div>
@@ -2337,27 +2404,35 @@ const App = {
           <div class="exam-progress-bar" style="width: ${progress.percentage}%;"></div>
         </div>
 
-        <!-- Main Exam Area: Xem đề trực tiếp qua PDF & Điền phiếu trả lời -->
-        <div class="flex-1 overflow-hidden flex flex-col lg:flex-row w-full h-[calc(100vh-3.75rem)]">
-          ${this.renderSplitViewContent(ex)}
+        <!-- Thanh chuyển chế độ Đề PDF / Phiếu trả lời / Bảng câu tối ưu cho App iOS & Điện thoại -->
+        <div class="lg:hidden bg-slate-900 border-b border-slate-800 px-2 py-1.5 flex items-center gap-1 shrink-0 z-20">
+          <button type="button" id="mobPaneBtn_pdf" onclick="App.setMobileExamPane('pdf')" class="flex-1 py-1.5 px-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'pdf' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+            <i class="fa-solid fa-file-pdf text-red-400"></i><span>Đề PDF</span>
+          </button>
+          <button type="button" id="mobPaneBtn_both" onclick="App.setMobileExamPane('both')" class="flex-1 py-1.5 px-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'both' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+            <i class="fa-solid fa-table-columns text-indigo-300"></i><span>Đề + Phiếu</span>
+          </button>
+          <button type="button" id="mobPaneBtn_sheet" onclick="App.setMobileExamPane('sheet')" class="flex-1 py-1.5 px-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'sheet' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+            <i class="fa-solid fa-pen-to-square text-emerald-300"></i><span>Phiếu (<span class="exam-mobile-ans-short">${progress.answered}/${progress.total}</span>)</span>
+          </button>
+          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="py-1.5 px-2.5 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap" title="Mở bảng câu hỏi">
+            <i class="fa-solid fa-list-check"></i><span id="mobilePaletteBtnText">Câu</span>
+          </button>
         </div>
 
-        <!-- Mobile Floating Button -->
-        <div class="lg:hidden fixed bottom-6 left-6 z-40">
-          <button onclick="App.toggleMobileDrawer()" class="px-4 py-2.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-2xl flex items-center space-x-2 border-2 border-white">
-            <i class="fa-solid fa-list-check"></i>
-            <span>Bảng Câu (${progress.answered}/${progress.total})</span>
-          </button>
+        <!-- Main Exam Area: Xem đề trực tiếp qua PDF & Điền phiếu trả lời -->
+        <div class="flex-1 min-h-0 overflow-hidden flex flex-col lg:flex-row w-full">
+          ${this.renderSplitViewContent(ex)}
         </div>
 
         <!-- Mobile Drawer Backdrop & Content -->
         <div id="mobileDrawerBackdrop" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm transition" onclick="App.toggleMobileDrawer()"></div>
-        <div id="mobileDrawer" class="hidden fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-3xl shadow-2xl p-5 border-t border-slate-200 max-h-[80vh] overflow-y-auto space-y-4">
+        <div id="mobileDrawer" class="hidden fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-3xl shadow-2xl p-5 border-t border-slate-200 max-h-[80vh] overflow-y-auto space-y-4 ios-safe-bottom">
           <div class="flex items-center justify-between border-b border-slate-100 pb-2">
             <div class="flex items-center space-x-2">
               <i class="fa-solid fa-list-check text-indigo-600 text-base"></i>
               <h3 class="font-bold text-slate-900 text-sm">Bảng Điều Hướng Câu Hỏi</h3>
-              <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">${progress.answered}/${progress.total} câu</span>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 exam-mobile-drawer-count">${progress.answered}/${progress.total} câu</span>
             </div>
             <button onclick="App.toggleMobileDrawer()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center">
               <i class="fa-solid fa-xmark text-sm"></i>
@@ -2371,6 +2446,7 @@ const App = {
     `;
 
     this.updateTimerDisplay();
+    this.mountPdfViewer('examRoomPdfViewer', pdfSrc);
   },
 
   toggleMobileDrawer() {
@@ -2382,59 +2458,86 @@ const App = {
     }
   },
 
-  // 1. Chế độ Split View (Hiển thị trực tiếp file PDF đề thi của giáo viên + Phiếu trả lời 3 phần)
+  getExamPaneClasses(mode = 'both') {
+    const m = mode === 'pdf' || mode === 'sheet' ? mode : 'both';
+    const leftMob = m === 'pdf' ? 'flex h-full' : (m === 'sheet' ? 'hidden' : 'flex h-[52%]');
+    const rightMob = m === 'sheet' ? 'flex h-full' : (m === 'pdf' ? 'hidden' : 'flex h-[48%]');
+    return {
+      left: `${leftMob} lg:flex lg:w-[68%] lg:h-full border-b lg:border-b-0 lg:border-r border-slate-200 bg-slate-900 flex-col min-h-0 split-pane-left`,
+      right: `${rightMob} lg:flex lg:w-[32%] lg:h-full bg-white flex-col min-h-0 split-pane-right overflow-y-auto`
+    };
+  },
+
+  setMobileExamPane(mode) {
+    const m = mode === 'pdf' || mode === 'sheet' ? mode : 'both';
+    this.state.mobileExamPane = m;
+    const cls = this.getExamPaneClasses(m);
+    const leftEl = document.getElementById('examLeftPdfPane');
+    const rightEl = document.getElementById('examRightSheetPane');
+    if (leftEl) leftEl.className = cls.left;
+    if (rightEl) rightEl.className = cls.right;
+    ['pdf', 'both', 'sheet'].forEach(k => {
+      const btn = document.getElementById(`mobPaneBtn_${k}`);
+      if (btn) {
+        btn.className = `flex-1 py-1.5 px-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${k === m ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`;
+      }
+    });
+  },
+
+  // 1. Chế độ Split View (Hiển thị trực tiếp file PDF đa trang trên cả Web & App iOS + Phiếu trả lời 3 phần)
   renderSplitViewContent(ex) {
     const pdfSrc = this.state.resolvedPdfUrl || ex.pdf_url || 'de-toan-12-le-thanh-tong.pdf';
     const safeTitle = (ex.title || '').replace(/'/g, "\\'");
+    const paneCls = this.getExamPaneClasses(this.state.mobileExamPane);
+    const inStandalone = this.isStandaloneApp();
 
     return `
-      <!-- Cột trái: Trình xem PDF nhúng trực tiếp (Mở rộng vùng hiển thị tối đa) -->
-      <div class="lg:w-[68%] h-1/2 lg:h-full border-r border-slate-200 bg-slate-900 flex flex-col split-pane-left">
-        <div class="bg-slate-950 text-slate-300 text-xs px-4 py-2 flex items-center justify-between border-b border-slate-800">
-          <span class="flex items-center font-bold text-white"><i class="fa-solid fa-file-pdf text-red-400 mr-2"></i>Đề thi PDF gốc (Hiển thị trực tiếp)</span>
-          <div class="flex items-center space-x-3">
+      <!-- Cột trái: Trình xem PDF đa trang trực tiếp (Hỗ trợ đầy đủ iPhone / iPad Standalone App) -->
+      <div id="examLeftPdfPane" class="${paneCls.left}">
+        <div class="bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0">
+          <span class="flex items-center font-bold text-white truncate"><i class="fa-solid fa-file-pdf text-red-400 mr-2"></i><span class="truncate">Đề thi PDF gốc</span></span>
+          <div class="flex items-center space-x-2.5 shrink-0">
             <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" class="text-xs text-indigo-300 hover:text-white flex items-center">
-              <i class="fa-solid fa-download mr-1"></i>Tải về máy
+              <i class="fa-solid fa-download mr-1"></i><span class="hidden sm:inline">Tải về</span>
             </a>
             <button onclick="App.openPdfModal('${safeTitle}', '${pdfSrc}', '${ex.id}')" class="text-xs text-emerald-400 hover:text-emerald-300 flex items-center cursor-pointer">
-              <i class="fa-solid fa-expand mr-1"></i>Toàn màn hình
+              <i class="fa-solid fa-expand mr-1"></i><span>Phóng to</span>
             </button>
-            <a href="${pdfSrc}" target="_blank" class="text-xs hover:text-white flex items-center">
-              <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Tab mới
-            </a>
+            ${!inStandalone ? `
+              <a href="${pdfSrc}" target="_blank" class="hidden sm:flex text-xs hover:text-white items-center">
+                <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Tab mới
+              </a>
+            ` : ''}
           </div>
         </div>
-        <div class="flex-1 w-full h-full relative bg-slate-950">
-          <object data="${pdfSrc}#toolbar=1&navpanes=0" type="application/pdf" class="w-full h-full border-0">
-            <iframe src="${pdfSrc}#toolbar=1&navpanes=0" class="w-full h-full border-0">
-              <div class="p-6 text-center text-slate-300">
-                <i class="fa-solid fa-file-pdf text-4xl mb-2 text-red-400"></i>
-                <p>Trình duyệt của bạn đang tải về hoặc mở file PDF.</p>
-                <a href="${pdfSrc}" target="_blank" class="mt-2 inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">Mở PDF trong tab mới</a>
-              </div>
-            </iframe>
-          </object>
-        </div>
+        <div id="examRoomPdfViewer" class="flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950"></div>
       </div>
 
       <!-- Cột phải: Phiếu trả lời 3 phần trực tuyến -->
-      <div class="lg:w-[32%] h-1/2 lg:h-full bg-white flex flex-col split-pane-right overflow-y-auto">
-        <div class="p-3 border-b border-slate-200 bg-slate-50 sticky top-0 z-10 space-y-2">
+      <div id="examRightSheetPane" class="${paneCls.right}">
+        <div class="p-2.5 sm:p-3 border-b border-slate-200 bg-slate-50 sticky top-0 z-10 space-y-2">
           <div class="flex border border-slate-200 rounded-lg p-1 bg-white text-xs font-bold">
-            <button id="sectionTabBtn_p1" onclick="App.setSectionTab('p1')" class="flex-1 py-1.5 rounded-md text-center transition ${this.state.activeSectionTab === 'p1' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'}">
-              Phần I (${ex.part1.length} câu)
+            <button id="sectionTabBtn_p1" onclick="App.setSectionTab('p1')" class="flex-1 py-1.5 rounded-md text-center transition cursor-pointer ${this.state.activeSectionTab === 'p1' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'}">
+              Phần I (${ex.part1.length})
             </button>
-            <button id="sectionTabBtn_p2" onclick="App.setSectionTab('p2')" class="flex-1 py-1.5 rounded-md text-center transition ${this.state.activeSectionTab === 'p2' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'}">
-              Phần II (${ex.part2.length} câu Đ/S)
+            <button id="sectionTabBtn_p2" onclick="App.setSectionTab('p2')" class="flex-1 py-1.5 rounded-md text-center transition cursor-pointer ${this.state.activeSectionTab === 'p2' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'}">
+              Phần II (${ex.part2.length} Đ/S)
             </button>
-            <button id="sectionTabBtn_p3" onclick="App.setSectionTab('p3')" class="flex-1 py-1.5 rounded-md text-center transition ${this.state.activeSectionTab === 'p3' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'}">
-              Phần III (${ex.part3.length} câu ngắn)
+            <button id="sectionTabBtn_p3" onclick="App.setSectionTab('p3')" class="flex-1 py-1.5 rounded-md text-center transition cursor-pointer ${this.state.activeSectionTab === 'p3' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'}">
+              Phần III (${ex.part3.length})
             </button>
           </div>
         </div>
 
-        <div id="splitAnswerInputsContainer" class="p-4 space-y-6 flex-1">
+        <div id="splitAnswerInputsContainer" class="p-3.5 sm:p-4 space-y-5 flex-1">
           ${this.renderAnswerSheetInputs(ex)}
+        </div>
+
+        <div class="p-3.5 pt-2 border-t border-slate-200 bg-slate-50 ios-safe-bottom">
+          <button type="button" id="sheetBottomSubmitBtn" onclick="App.confirmSubmitExam()" class="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-extrabold shadow-sm transition flex items-center justify-center gap-2 cursor-pointer">
+            <i class="fa-solid fa-paper-plane"></i>
+            <span>Nộp Bài &amp; Chấm Điểm Ngay</span>
+          </button>
         </div>
       </div>
     `;
@@ -2768,6 +2871,12 @@ const App = {
     counterEls.forEach(el => {
       el.textContent = `Đã làm: ${p.answered}/${p.total} câu (${p.percentage}%)`;
     });
+    document.querySelectorAll('.exam-mobile-ans-short').forEach(el => {
+      el.textContent = `${p.answered}/${p.total}`;
+    });
+    document.querySelectorAll('.exam-mobile-drawer-count').forEach(el => {
+      el.textContent = `${p.answered}/${p.total} câu`;
+    });
   },
 
   confirmSubmitExam() {
@@ -3053,33 +3162,34 @@ const App = {
       <div class="min-h-screen bg-slate-50 flex flex-col">
         <!-- Top Fixed Taskbar -->
         <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 shadow-xs">
-          <div class="w-full max-w-[98%] mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-            <div class="flex items-center space-x-2 sm:space-x-3">
-              <button onclick="App.goHome()" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer" title="Quay về trang chủ">
+          <div class="w-full max-w-[98%] mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2">
+            <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
+              <button onclick="App.goHome()" class="px-2.5 sm:px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer shrink-0 whitespace-nowrap" title="Quay về trang chủ">
                 <i class="fa-solid fa-house"></i>
-                <span>Trang chủ</span>
+                <span class="hidden sm:inline">Trang chủ</span>
               </button>
-              <div class="h-5 w-px bg-slate-200"></div>
-              <span class="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[160px] sm:max-w-md">Chi tiết bài làm: ${sub.examTitle}</span>
+              <div class="h-5 w-px bg-slate-200 shrink-0"></div>
+              <span class="text-xs sm:text-sm font-bold text-slate-800 truncate">Chi tiết: ${sub.examTitle}</span>
             </div>
 
-            <div class="flex items-center space-x-2">
+            <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
               ${solPdfUrl ? `
-                <button onclick="App.toggleSolutionPdfInDetail('${subId}')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer shadow-xs ${this.state.hideSolutionPdfInDetail ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}" title="Ẩn hoặc hiện file PDF lời giải chi tiết">
-                  <i class="fa-solid ${this.state.hideSolutionPdfInDetail ? 'fa-file-pdf' : 'fa-eye-slash'} mr-1.5"></i>
-                  <span>${this.state.hideSolutionPdfInDetail ? 'Hiện PDF Lời Giải' : 'Ẩn PDF Lời Giải'}</span>
+                <button onclick="App.toggleSolutionPdfInDetail('${subId}')" class="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer shadow-xs whitespace-nowrap ${this.state.hideSolutionPdfInDetail ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}" title="Ẩn hoặc hiện file PDF lời giải chi tiết">
+                  <i class="fa-solid ${this.state.hideSolutionPdfInDetail ? 'fa-file-pdf' : 'fa-eye-slash'} mr-1"></i>
+                  <span class="sm:hidden">${this.state.hideSolutionPdfInDetail ? 'Hiện PDF' : 'Ẩn PDF'}</span>
+                  <span class="hidden sm:inline">${this.state.hideSolutionPdfInDetail ? 'Hiện PDF Lời Giải' : 'Ẩn PDF Lời Giải'}</span>
                 </button>
               ` : ''}
 
               ${!isStudent ? `
-                <button onclick="App.toggleExamViewAnswers('${exam.id}'); setTimeout(() => App.viewSubmissionDetail('${subId}'), 100);" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer ${exam.allow_view_answers !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100' : 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'}" title="Bật/Tắt quyền cho học sinh xem đáp án và file lời giải của đề này">
-                  <i class="fa-solid ${exam.allow_view_answers !== false ? 'fa-eye' : 'fa-eye-slash'} mr-1.5"></i>
-                  <span>${exam.allow_view_answers !== false ? 'Học sinh: Mở xem đáp án' : 'Học sinh: Khóa xem đáp án'}</span>
+                <button onclick="App.toggleExamViewAnswers('${exam.id}'); setTimeout(() => App.viewSubmissionDetail('${subId}'), 100);" class="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer whitespace-nowrap ${exam.allow_view_answers !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100' : 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'}" title="Bật/Tắt quyền cho học sinh xem đáp án và file lời giải của đề này">
+                  <i class="fa-solid ${exam.allow_view_answers !== false ? 'fa-eye' : 'fa-eye-slash'} sm:mr-1.5"></i>
+                  <span class="hidden sm:inline">${exam.allow_view_answers !== false ? 'Học sinh: Mở xem đáp án' : 'Học sinh: Khóa xem đáp án'}</span>
                 </button>
               ` : ''}
 
-              <button onclick="window.print()" class="text-xs bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center cursor-pointer">
-                <i class="fa-solid fa-print mr-1.5"></i>In kết quả
+              <button onclick="window.print()" class="text-xs bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-lg shadow-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center cursor-pointer whitespace-nowrap" title="In kết quả">
+                <i class="fa-solid fa-print sm:mr-1.5"></i><span class="hidden sm:inline">In kết quả</span>
               </button>
             </div>
           </div>
@@ -3125,33 +3235,25 @@ const App = {
             </div>
 
             ${showPdf ? `
-              <!-- Trình xem PDF đáp án & lời giải chi tiết gốc (Hiển thị trực tiếp 100%) -->
-              <div class="w-full flex-1 min-w-[340px] h-[calc(100vh-170px)] min-h-[750px] bg-slate-900 rounded-2xl border border-slate-700 shadow-xl overflow-hidden flex flex-col">
+              <!-- Trình xem PDF đáp án & lời giải chi tiết gốc (Hiển thị trực tiếp đa trang trên Web & App iOS) -->
+              <div class="w-full flex-1 min-w-[300px] h-[75dvh] lg:h-[calc(100vh-170px)] min-h-[560px] lg:min-h-[750px] bg-slate-900 rounded-2xl border border-slate-700 shadow-xl overflow-hidden flex flex-col">
                 <div class="px-4 py-2.5 bg-slate-800 text-white flex items-center justify-between text-xs font-bold shrink-0 border-b border-slate-700">
-                  <span class="flex items-center truncate text-white"><i class="fa-solid fa-file-pdf text-red-400 mr-2 text-sm"></i>File PDF Đáp Án & Lời Giải Chi Tiết Của Giáo Viên</span>
+                  <span class="flex items-center truncate text-white"><i class="fa-solid fa-file-pdf text-red-400 mr-2 text-sm"></i>File PDF Đáp Án &amp; Lời Giải Chi Tiết</span>
                   <div class="flex items-center space-x-2 shrink-0">
-                    <button onclick="App.openPdfModal('${exam.title} - Lời Giải PDF', '${solPdfUrl}', '${exam.id}_sol')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
+                    <button onclick="App.openPdfModal('${(exam.title || '').replace(/'/g, "\\'")} - Lời Giải PDF', '${solPdfUrl}', '${exam.id}_sol')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
                       <i class="fa-solid fa-expand mr-1"></i>Toàn màn hình
                     </button>
-                    <a href="${solPdfUrl}" target="_blank" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-indigo-300 hover:text-white rounded text-[11px] font-semibold transition flex items-center">
-                      <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Tab mới
-                    </a>
+                    ${!this.isStandaloneApp() ? `
+                      <a href="${solPdfUrl}" target="_blank" class="hidden sm:flex px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-indigo-300 hover:text-white rounded text-[11px] font-semibold transition items-center">
+                        <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Tab mới
+                      </a>
+                    ` : ''}
                     <a href="${solPdfUrl}" download="${exam.id}_Dap_An.pdf" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white rounded text-[11px] font-semibold transition flex items-center">
                       <i class="fa-solid fa-download mr-1"></i>Tải về
                     </a>
                   </div>
                 </div>
-                <div class="flex-1 w-full h-full bg-slate-950 relative">
-                  <object data="${solPdfUrl}#toolbar=1" type="application/pdf" class="w-full h-full border-0">
-                    <iframe src="${solPdfUrl}#toolbar=1" class="w-full h-full border-0">
-                      <div class="p-6 text-center text-slate-300">
-                        <i class="fa-solid fa-file-pdf text-4xl mb-2 text-red-400"></i>
-                        <p>Trình duyệt đang tải file PDF.</p>
-                        <a href="${solPdfUrl}" target="_blank" class="mt-2 inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">Mở PDF trong tab mới</a>
-                      </div>
-                    </iframe>
-                  </object>
-                </div>
+                <div id="submissionSolPdfViewer" class="flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950"></div>
               </div>
             ` : ''}
           </div>
@@ -3163,6 +3265,10 @@ const App = {
         </button>
       </div>
     `;
+
+    if (showPdf) {
+      this.mountPdfViewer('submissionSolPdfViewer', solPdfUrl);
+    }
   },
 
   // --- VIEW: TRANG QUẢN TRỊ VIÊN / GIÁO VIÊN (ADMIN DASHBOARD) ---
@@ -3200,6 +3306,12 @@ const App = {
               <button onclick="App.goHome()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 border border-slate-700 shadow-xs cursor-pointer" title="Về trang chủ">
                 <i class="fa-solid fa-house text-indigo-400"></i>
                 <span class="hidden sm:inline">Trang chủ</span>
+              </button>
+
+              <!-- Nút Quét QR Tạo App iOS cho Học Sinh -->
+              <button id="adminIosAppBtn" onclick="App.showIosAppModal()" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 border border-indigo-500 shadow-xs cursor-pointer" title="Hiển thị mã QR để học sinh quét tạo App trên iPhone / iPad">
+                <i class="fa-solid fa-qrcode"></i>
+                <span class="hidden md:inline">App iOS / QR</span>
               </button>
 
               <!-- Chuyển nhanh Sáng/Tối & Bảng màu -->
@@ -6026,10 +6138,12 @@ const App = {
             </div>
           </div>
           <div class="flex items-center space-x-2 shrink-0">
-            <a href="${finalUrl}" target="_blank" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-indigo-300 hover:text-white flex items-center transition cursor-pointer" title="Mở trong tab mới">
-              <i class="fa-solid fa-arrow-up-right-from-square mr-1.5"></i>Tab Mới
-            </a>
-            <a href="${finalUrl}" download="Tai_Lieu_${Date.now()}.pdf" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-white flex items-center transition cursor-pointer" title="Tải về máy tính">
+            ${!this.isStandaloneApp() ? `
+              <a href="${finalUrl}" target="_blank" class="hidden sm:flex px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-indigo-300 hover:text-white items-center transition cursor-pointer" title="Mở trong tab mới">
+                <i class="fa-solid fa-arrow-up-right-from-square mr-1.5"></i>Tab Mới
+              </a>
+            ` : ''}
+            <a href="${finalUrl}" download="Tai_Lieu_${Date.now()}.pdf" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-white flex items-center transition cursor-pointer" title="Tải về máy">
               <i class="fa-solid fa-download mr-1.5"></i>Tải Về
             </a>
             <button onclick="document.getElementById('previewPdfModal').remove()" class="w-8 h-8 rounded-lg bg-slate-700 hover:bg-red-600 text-white flex items-center justify-center transition cursor-pointer">
@@ -6038,21 +6152,12 @@ const App = {
           </div>
         </div>
 
-        <!-- PDF Viewer Object & Iframe -->
-        <div class="flex-1 w-full h-full bg-slate-950 relative">
-          <object data="${finalUrl}#toolbar=1" type="application/pdf" class="w-full h-full border-0">
-            <iframe src="${finalUrl}#toolbar=1" class="w-full h-full border-0">
-              <div class="p-8 text-center text-slate-300">
-                <i class="fa-solid fa-file-pdf text-4xl text-red-500 mb-3"></i>
-                <p class="text-sm font-semibold">Trình duyệt không hỗ trợ nhúng trực tiếp plugin PDF.</p>
-                <a href="${finalUrl}" target="_blank" class="mt-3 inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">Mở PDF trong tab mới</a>
-              </div>
-            </iframe>
-          </object>
-        </div>
+        <!-- Trình xem PDF đa trang trực tiếp trong App -->
+        <div id="modalPdfViewer" class="flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950"></div>
       </div>
     `;
     document.body.appendChild(modal);
+    this.mountPdfViewer('modalPdfViewer', finalUrl);
   },
 
   async previewAdminPdf(examId) {
@@ -6997,6 +7102,436 @@ const App = {
       }
     }
     this.notify('Đặt lại mật khẩu Giáo viên thành công! Bạn có thể sử dụng mật khẩu mới ngay bây giờ.', 'success', 'Đặt lại mật khẩu hoàn tất');
+  },
+
+  // --- HỖ TRỢ QUÉT QR TẠO APP iOS (iPHONE / iPAD) & XEM ĐỀ PDF ĐA TRANG TRỰC TIẾP TRONG APP ---
+  // shortcut: iOS Safari has no programmatic install API; QR opens ?install=ios to guide Add to Home Screen, upgrade to Universal Links if a native App Store wrapper is ever shipped
+  getRecommendedAppUrl(loc = (typeof window !== 'undefined' ? window.location : null)) {
+    const fallback = `${this.PUBLIC_APP_URL}?install=ios`;
+    if (!loc || !loc.protocol || loc.protocol === 'file:') {
+      return { url: fallback, isFallbackPublic: true };
+    }
+    const host = String(loc.hostname || '').toLowerCase();
+    if (!host || host === 'localhost' || host === '127.0.0.1' || host === '[::1]') {
+      return { url: fallback, isFallbackPublic: true };
+    }
+    const cleanPath = String(loc.pathname || '/');
+    const base = `${loc.origin}${cleanPath}`;
+    return { url: `${base}?install=ios`, isFallbackPublic: false };
+  },
+
+  isIosDevice(uaStr) {
+    const ua = String(uaStr !== undefined ? uaStr : (typeof navigator !== 'undefined' ? navigator.userAgent : ''));
+    if (/iPad|iPhone|iPod/i.test(ua)) return true;
+    if (uaStr === undefined && typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) {
+      return true;
+    }
+    return false;
+  },
+
+  isInAppWebView(uaStr) {
+    const ua = String(uaStr !== undefined ? uaStr : (typeof navigator !== 'undefined' ? navigator.userAgent : ''));
+    return /Zalo|FBAN|FBAV|Messenger|Instagram|Line|TikTok/i.test(ua);
+  },
+
+  isStandaloneApp() {
+    if (typeof window === 'undefined') return false;
+    return Boolean(
+      (window.navigator && window.navigator.standalone === true) ||
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+    );
+  },
+
+  buildQrSvgHtml(targetUrl) {
+    const cleanUrl = String(targetUrl || this.PUBLIC_APP_URL).trim() || this.PUBLIC_APP_URL;
+    if (typeof qrcode === 'function') {
+      try {
+        const qr = qrcode(0, 'M');
+        qr.addData(cleanUrl);
+        qr.make();
+        return qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true })
+          .replace('<svg ', '<svg id="iosGeneratedQrSvg" class="w-full h-full block" ');
+      } catch (_) {}
+    }
+    return `
+      <div class="p-4 text-center text-xs text-slate-600 space-y-2">
+        <i class="fa-solid fa-qrcode text-3xl text-indigo-600"></i>
+        <div class="font-bold">Mở liên kết trực tiếp trên Safari:</div>
+        <div class="font-mono text-[11px] break-all text-indigo-700">${cleanUrl}</div>
+      </div>
+    `;
+  },
+
+  updateIosQrUrl(rawVal) {
+    const clean = String(rawVal || '').trim() || `${this.PUBLIC_APP_URL}?install=ios`;
+    const box = document.getElementById('iosQrSvgContainer');
+    if (box) box.innerHTML = this.buildQrSvgHtml(clean);
+  },
+
+  async copyIosAppUrl() {
+    const inp = document.getElementById('iosAppUrlInput');
+    const btn = document.getElementById('copyIosAppUrlBtn');
+    const url = (inp && inp.value.trim()) || `${this.PUBLIC_APP_URL}?install=ios`;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else if (inp) {
+        inp.select();
+        document.execCommand('copy');
+      }
+      if (btn) {
+        btn.innerHTML = '<i class="fa-solid fa-check"></i><span>Đã sao chép!</span>';
+        setTimeout(() => {
+          if (document.body.contains(btn)) {
+            btn.innerHTML = '<i class="fa-regular fa-copy"></i><span>Sao chép link</span>';
+          }
+        }, 2000);
+      }
+    } catch (_) {}
+  },
+
+  async triggerNativeInstallPrompt() {
+    if (!this._deferredInstallPrompt) return;
+    try {
+      this._deferredInstallPrompt.prompt();
+      await this._deferredInstallPrompt.userChoice;
+      this._deferredInstallPrompt = null;
+      this.closeIosAppModal();
+    } catch (_) {}
+  },
+
+  closeIosAppModal() {
+    document.getElementById('iosAppGuideModal')?.remove();
+  },
+
+  showIosAppModal(autoOpened = false) {
+    this.closeIosAppModal();
+    const rec = this.getRecommendedAppUrl();
+    const isIos = this.isIosDevice();
+    const inWebView = this.isInAppWebView();
+    const standalone = this.isStandaloneApp();
+
+    const statusBadge = standalone
+      ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"><i class="fa-solid fa-circle-check text-emerald-600"></i>Đang sử dụng trực tiếp trong App</span>`
+      : (isIos
+        ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200"><i class="fa-brands fa-apple text-indigo-700"></i>Đã mở trên iPhone/iPad • Làm Bước 2 &amp; 3 để tạo App</span>`
+        : `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-sky-50 text-sky-800 border border-sky-200"><i class="fa-solid fa-camera text-sky-600"></i>Mở Camera iPhone/iPad quét mã QR bên dưới</span>`);
+
+    const modal = document.createElement('div');
+    modal.id = 'iosAppGuideModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-slate-950/75 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="dialog-card bg-white rounded-3xl max-w-3xl w-full max-h-[92dvh] border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
+        <!-- Header -->
+        <div class="px-5 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/80 via-white to-slate-50 flex items-center justify-between gap-3 shrink-0">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
+              <i class="fa-brands fa-apple text-xl"></i>
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-sm sm:text-base font-extrabold text-slate-900 truncate">Quét Mã QR &amp; Hướng Dẫn Tạo App Trên Điện Thoại iOS</h3>
+              <p class="text-[11px] sm:text-xs text-slate-500 truncate">Cài biểu tượng App ra Màn hình chính iPhone / iPad • Xem đề PDF đa trang &amp; nộp đáp án trực tiếp</p>
+            </div>
+          </div>
+          <button type="button" onclick="App.closeIosAppModal()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer shrink-0" title="Đóng">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        <!-- Body -->
+        <div class="p-4 sm:p-6 overflow-y-auto space-y-5 text-slate-800">
+          ${autoOpened && !standalone ? `
+            <div class="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-start gap-3 text-xs text-indigo-900">
+              <i class="fa-solid fa-wand-magic-sparkles text-indigo-600 text-base mt-0.5"></i>
+              <div>
+                <div class="font-extrabold">Bạn vừa mở liên kết cài đặt từ Mã QR!</div>
+                <p class="mt-0.5 text-indigo-800">Thực hiện ngay <strong>Bước 2</strong> và <strong>Bước 3</strong> bên dưới trên trình duyệt Safari để đưa ứng dụng <strong>Khảo Thí Toán</strong> ra Màn hình chính điện thoại.</p>
+              </div>
+            </div>
+          ` : ''}
+
+          ${inWebView ? `
+            <div class="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 flex items-start gap-3 text-xs text-amber-900">
+              <i class="fa-solid fa-triangle-exclamation text-amber-600 text-base mt-0.5"></i>
+              <div>
+                <div class="font-extrabold">Lưu ý quan trọng: Bạn đang mở trong ứng dụng trung gian (Zalo / Messenger)</div>
+                <p class="mt-0.5">Hãy nhấn biểu tượng <strong>ba chấm (...)</strong> ở góc trên bên phải màn hình và chọn <strong>"Mở bằng Safari"</strong> để hiện chức năng <em>Thêm vào Màn hình chính</em> của iOS.</p>
+              </div>
+            </div>
+          ` : ''}
+
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
+            <!-- Cột Trái: Mã QR & Liên kết -->
+            <div class="md:col-span-5 ${isIos && !standalone ? 'order-2 md:order-1' : 'order-1'} bg-slate-50 rounded-2xl p-4 border border-slate-200 flex flex-col items-center text-center space-y-3">
+              ${statusBadge}
+
+              <div id="iosQrSvgContainer" class="w-48 h-48 sm:w-52 sm:h-52 bg-white p-3 rounded-2xl border-2 border-indigo-100 shadow-sm flex items-center justify-center">
+                ${this.buildQrSvgHtml(rec.url)}
+              </div>
+
+              <div class="w-full text-left space-y-1.5">
+                <label for="iosAppUrlInput" class="block text-[11px] font-bold text-slate-600">Liên kết tạo App (Có thể chỉnh sửa nếu đổi tên miền):</label>
+                <input type="text" id="iosAppUrlInput" value="${rec.url}" oninput="App.updateIosQrUrl(this.value)"
+                  class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-[11px] font-mono text-slate-800 focus:border-indigo-600 outline-none">
+                <button type="button" id="copyIosAppUrlBtn" onclick="App.copyIosAppUrl()"
+                  class="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition inline-flex items-center justify-center gap-1.5 cursor-pointer shadow-xs">
+                  <i class="fa-regular fa-copy"></i><span>Sao chép link</span>
+                </button>
+                ${this._deferredInstallPrompt ? `
+                  <button type="button" onclick="App.triggerNativeInstallPrompt()"
+                    class="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition inline-flex items-center justify-center gap-1.5 cursor-pointer shadow-xs">
+                    <i class="fa-solid fa-download"></i><span>Cài đặt App ngay trên thiết bị này</span>
+                  </button>
+                ` : ''}
+                ${rec.isFallbackPublic ? `
+                  <p class="text-[10px] text-slate-500 leading-snug pt-0.5">
+                    <i class="fa-solid fa-circle-info text-indigo-500 mr-1"></i>Đang tự động dùng địa chỉ trực tuyến công khai để điện thoại iOS quét được ngay.
+                  </p>
+                ` : ''}
+              </div>
+            </div>
+
+            <!-- Cột Phải: Hướng dẫn 4 bước tạo App trên iOS -->
+            <div class="md:col-span-7 ${isIos && !standalone ? 'order-1 md:order-2' : 'order-2'} space-y-3">
+              <div class="text-xs font-extrabold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5">
+                <i class="fa-solid fa-list-ol"></i>
+                <span>Hướng dẫn 4 bước tạo App trên iPhone / iPad (iOS)</span>
+              </div>
+
+              <div class="space-y-2.5 text-xs">
+                <div class="p-3 rounded-2xl bg-white border border-slate-200 flex items-start gap-3 shadow-2xs">
+                  <span class="w-7 h-7 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center justify-center shrink-0">1</span>
+                  <div>
+                    <div class="font-extrabold text-slate-900">Quét mã QR bằng Camera mở trong Safari</div>
+                    <p class="text-slate-600 mt-0.5 leading-relaxed">Mở ứng dụng <strong>Camera</strong> mặc định trên iPhone/iPad, hướng vào mã QR bên cạnh và chạm vào thông báo hiện ra để mở bằng trình duyệt <strong>Safari</strong>.</p>
+                  </div>
+                </div>
+
+                <div class="p-3 rounded-2xl bg-white border-2 border-indigo-200 flex items-start gap-3 shadow-2xs">
+                  <span class="w-7 h-7 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center justify-center shrink-0">2</span>
+                  <div>
+                    <div class="font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
+                      <span>Nhấn biểu tượng Chia sẻ (Share)</span>
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold text-[11px]"><i class="fa-solid fa-arrow-up-from-bracket"></i>Share</span>
+                    </div>
+                    <p class="text-slate-600 mt-0.5 leading-relaxed">Chạm vào nút <strong>Chia sẻ</strong> (ô vuông có mũi tên hướng lên) nằm ở thanh công cụ dưới cùng của Safari trên iPhone (hoặc góc trên bên phải trên iPad).</p>
+                  </div>
+                </div>
+
+                <div class="p-3 rounded-2xl bg-white border-2 border-indigo-200 flex items-start gap-3 shadow-2xs">
+                  <span class="w-7 h-7 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center justify-center shrink-0">3</span>
+                  <div>
+                    <div class="font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
+                      <span>Chọn "Thêm vào Màn hình chính"</span>
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]"><i class="fa-regular fa-square-plus"></i>Add to Home Screen</span>
+                    </div>
+                    <p class="text-slate-600 mt-0.5 leading-relaxed">Cuộn danh sách menu xuống dưới, chọn <strong>"Thêm vào Màn hình chính"</strong>, sau đó nhấn chữ <strong>"Thêm" (Add)</strong> ở góc trên bên phải màn hình.</p>
+                  </div>
+                </div>
+
+                <div class="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-200 flex items-start gap-3">
+                  <span class="w-7 h-7 rounded-xl bg-emerald-600 text-white font-extrabold flex items-center justify-center shrink-0">4</span>
+                  <div>
+                    <div class="font-extrabold text-slate-900">Mở App Khảo Thí Toán — Xem Đề PDF &amp; Nộp Bài</div>
+                    <p class="text-slate-600 mt-0.5 leading-relaxed">Biểu tượng <strong>Khảo Thí Toán</strong> xuất hiện ngay trên Màn hình chính. Học sinh mở App toàn màn hình, vuốt xem trọn bộ đề PDF nhiều trang, điền phiếu 3 phần và bấm <strong>Nộp Bài</strong> chấm điểm tức thì!</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tóm tắt quyền lợi khi dùng trên App -->
+              <div class="grid grid-cols-3 gap-2 pt-1 text-center text-[11px] font-bold">
+                <div class="p-2 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">
+                  <i class="fa-solid fa-file-pdf text-red-500 block text-sm mb-1"></i>Xem PDF đa trang
+                </div>
+                <div class="p-2 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">
+                  <i class="fa-solid fa-table-cells text-indigo-600 block text-sm mb-1"></i>Đề + Phiếu linh hoạt
+                </div>
+                <div class="p-2 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">
+                  <i class="fa-solid fa-paper-plane text-emerald-600 block text-sm mb-1"></i>Nộp &amp; Chấm ngay
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer / Thanh chỉ dẫn trực tiếp trên Safari iOS -->
+        <div class="px-5 py-3 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2 shrink-0 ios-safe-bottom">
+          ${isIos && !standalone ? `
+            <div class="text-xs font-bold text-indigo-700 flex items-center gap-2">
+              <i class="fa-solid fa-arrow-down animate-bounce text-indigo-600"></i>
+              <span>Nhấn nút <i class="fa-solid fa-arrow-up-from-bracket mx-0.5"></i> ở thanh dưới Safari &rarr; chọn "Thêm vào Màn hình chính"</span>
+            </div>
+          ` : `
+            <span class="text-[11px] text-slate-500"><i class="fa-solid fa-mobile-screen-button text-indigo-600 mr-1"></i>Tương thích hoàn toàn với iOS (iPhone / iPad) &amp; Android</span>
+          `}
+          <button type="button" onclick="App.closeIosAppModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer ml-auto">
+            Đã hiểu &amp; Đóng
+          </button>
+        </div>
+      </div>
+    `;
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) this.closeIosAppModal();
+    });
+    document.body.appendChild(modal);
+  },
+
+  // --- TRÌNH XEM ĐỀ PDF ĐA TRANG (PDF.JS CANVAS) TỐI ƯU CHO APP iOS & MỌI TRÌNH DUYỆT ---
+  normalizeExternalPdfUrl(rawUrl) {
+    const u = String(rawUrl || '').trim();
+    const driveMatch = u.match(/drive\.google\.com\/file\/d\/([^/?#]+)/i);
+    if (driveMatch) {
+      return { embedUrl: `https://drive.google.com/file/d/${driveMatch[1]}/preview`, isExternalEmbed: true };
+    }
+    return { embedUrl: u, isExternalEmbed: false };
+  },
+
+  renderPdfFallbackHtml(url) {
+    const safeUrl = String(url || '');
+    const inStandalone = this.isStandaloneApp();
+    return `
+      <object data="${safeUrl}#toolbar=1&navpanes=0" type="application/pdf" class="w-full h-full flex-1 border-0">
+        <iframe src="${safeUrl}#toolbar=1&navpanes=0" class="w-full h-full flex-1 border-0">
+          <div class="p-6 text-center text-slate-300 space-y-2">
+            <i class="fa-solid fa-file-pdf text-3xl text-red-400"></i>
+            <p class="text-xs">Không thể hiển thị trực tiếp tệp PDF này.</p>
+            ${!inStandalone ? `<a href="${safeUrl}" target="_blank" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">Mở PDF</a>` : ''}
+          </div>
+        </iframe>
+      </object>
+    `;
+  },
+
+  async mountPdfViewer(containerId, pdfUrl) {
+    if (typeof document === 'undefined') return;
+    const host = document.getElementById(containerId);
+    if (!host) return;
+
+    const norm = this.normalizeExternalPdfUrl(pdfUrl || 'de-toan-12-le-thanh-tong.pdf');
+    if (norm.isExternalEmbed || typeof window === 'undefined' || !window.pdfjsLib) {
+      host.innerHTML = `<div class="flex-1 w-full h-full flex flex-col">${this.renderPdfFallbackHtml(norm.embedUrl)}</div>`;
+      return;
+    }
+
+    host.innerHTML = `
+      <div id="${containerId}_toolbar" class="bg-slate-900/95 border-b border-slate-800 px-3 py-1.5 flex items-center justify-between text-xs text-slate-200 shrink-0">
+        <div class="flex items-center gap-1.5 font-mono text-[11px]">
+          <i class="fa-regular fa-file-lines text-indigo-400"></i>
+          <span id="${containerId}_pageInfo">Đang tải đề PDF...</span>
+        </div>
+        <div class="flex items-center gap-1">
+          <button type="button" onclick="App.zoomPdfViewer('${containerId}', -0.2)" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold flex items-center justify-center cursor-pointer" title="Thu nhỏ">
+            <i class="fa-solid fa-magnifying-glass-minus text-[11px]"></i>
+          </button>
+          <span id="${containerId}_zoomPct" class="min-w-[44px] text-center font-mono font-bold text-[11px] text-indigo-300">100%</span>
+          <button type="button" onclick="App.zoomPdfViewer('${containerId}', 0.2)" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold flex items-center justify-center cursor-pointer" title="Phóng to">
+            <i class="fa-solid fa-magnifying-glass-plus text-[11px]"></i>
+          </button>
+          <button type="button" onclick="App.zoomPdfViewer('${containerId}', 'fit')" class="px-2 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200 cursor-pointer" title="Vừa khít khung nhìn">
+            Vừa khít
+          </button>
+        </div>
+      </div>
+      <div id="${containerId}_scroll" class="pdf-viewer-scroll flex-1 w-full h-full min-h-0 overflow-auto p-2 sm:p-4 space-y-3 bg-slate-900">
+        <div class="py-12 text-center text-slate-400 text-xs space-y-2">
+          <i class="fa-solid fa-spinner fa-spin text-2xl text-indigo-400"></i>
+          <div>Đang dựng các trang PDF sắc nét...</div>
+        </div>
+      </div>
+    `;
+
+    try {
+      if (window.pdfjsLib.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+      const loadingTask = window.pdfjsLib.getDocument(norm.embedUrl);
+      const pdfDoc = await loadingTask.promise;
+      this._pdfViewers[containerId] = {
+        pdfDoc,
+        zoomFactor: 1.0,
+        url: norm.embedUrl,
+        renderToken: 0
+      };
+      await this.renderPdfPages(containerId);
+
+      const scrollEl = document.getElementById(`${containerId}_scroll`);
+      if (scrollEl) {
+        scrollEl.addEventListener('scroll', () => {
+          const pages = scrollEl.querySelectorAll('[data-pdf-page]');
+          if (!pages.length) return;
+          const mid = scrollEl.scrollTop + scrollEl.clientHeight * 0.35;
+          let cur = 1;
+          pages.forEach(p => {
+            if (p.offsetTop <= mid) cur = Number(p.getAttribute('data-pdf-page')) || cur;
+          });
+          const infoEl = document.getElementById(`${containerId}_pageInfo`);
+          if (infoEl) infoEl.textContent = `Trang ${cur} / ${pdfDoc.numPages}`;
+        }, { passive: true });
+      }
+    } catch (_) {
+      const stillHost = document.getElementById(containerId);
+      if (stillHost) {
+        stillHost.innerHTML = `<div class="flex-1 w-full h-full flex flex-col">${this.renderPdfFallbackHtml(norm.embedUrl)}</div>`;
+      }
+    }
+  },
+
+  async renderPdfPages(containerId) {
+    const vState = this._pdfViewers[containerId];
+    const scrollEl = document.getElementById(`${containerId}_scroll`);
+    if (!vState || !vState.pdfDoc || !scrollEl) return;
+
+    const token = ++vState.renderToken;
+    const pdfDoc = vState.pdfDoc;
+    const total = pdfDoc.numPages;
+
+    const zoomEl = document.getElementById(`${containerId}_zoomPct`);
+    if (zoomEl) zoomEl.textContent = `${Math.round(vState.zoomFactor * 100)}%`;
+    const infoEl = document.getElementById(`${containerId}_pageInfo`);
+    if (infoEl) infoEl.textContent = `Trang 1 / ${total}`;
+
+    const rawWidth = scrollEl.clientWidth || (typeof window !== 'undefined' ? Math.min(window.innerWidth - 16, 860) : 760);
+    const availWidth = Math.max(260, rawWidth - 20);
+    const dpr = Math.min((typeof window !== 'undefined' && window.devicePixelRatio) || 1, 2);
+
+    scrollEl.innerHTML = '';
+    for (let pageNum = 1; pageNum <= total; pageNum++) {
+      if (vState.renderToken !== token || !document.body.contains(scrollEl)) return;
+      const page = await pdfDoc.getPage(pageNum);
+      if (vState.renderToken !== token || !document.body.contains(scrollEl)) return;
+
+      const baseVp = page.getViewport({ scale: 1 });
+      const fitScale = Math.min(1.85, Math.max(0.42, availWidth / baseVp.width));
+      const cssScale = fitScale * vState.zoomFactor;
+      const renderVp = page.getViewport({ scale: cssScale * dpr });
+
+      const wrap = document.createElement('div');
+      wrap.setAttribute('data-pdf-page', String(pageNum));
+      wrap.className = 'w-full overflow-x-auto';
+
+      const canvas = document.createElement('canvas');
+      canvas.className = 'pdf-page-canvas';
+      canvas.width = Math.floor(renderVp.width);
+      canvas.height = Math.floor(renderVp.height);
+      canvas.style.width = `${Math.floor(baseVp.width * cssScale)}px`;
+      canvas.style.height = `${Math.floor(baseVp.height * cssScale)}px`;
+      wrap.appendChild(canvas);
+      scrollEl.appendChild(wrap);
+
+      const ctx = canvas.getContext('2d', { alpha: false });
+      await page.render({ canvasContext: ctx, viewport: renderVp }).promise;
+    }
+  },
+
+  zoomPdfViewer(containerId, action) {
+    const vState = this._pdfViewers[containerId];
+    if (!vState) return;
+    if (action === 'fit') {
+      vState.zoomFactor = 1.0;
+    } else {
+      vState.zoomFactor = Math.max(0.6, Math.min(2.6, Math.round((vState.zoomFactor + Number(action || 0)) * 100) / 100));
+    }
+    this.renderPdfPages(containerId);
   }
 };
 

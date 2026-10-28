@@ -1,0 +1,31 @@
+{
+  "name": "Khảo Thí & Luyện Đề Toán 6 – 12",
+  "short_name": "Khảo Thí Toán",
+  "description": "Ứng dụng xem đề PDF đa trang và nộp đáp án trực tuyến môn Toán Khối 6 – 12 chuẩn cấu trúc 3 phần.",
+  "lang": "vi",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

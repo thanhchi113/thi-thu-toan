@@ -2,10 +2,16 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
   <title>Hệ Thống Khảo Thí & Luyện Đề Toán 6 – 12 (Cấu Trúc 3 Phần GDPT 2018)</title>
   <meta name="description" content="Hệ thống kiểm tra định kì (GK1, CK1, GK2, CK2), tuyển sinh vào lớp 10 và thi thử THPT Quốc gia môn Toán Khối 6 – 12 chuẩn cấu trúc 3 phần.">
   <meta name="theme-color" content="#4f46e5">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Khảo Thí Toán">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='44' font-family='sans-serif' font-size='34' font-weight='800' text-anchor='middle' fill='white'%3E%CF%80%3C/text%3E%3C/svg%3E">
 
   <!-- Tailwind CSS CDN -->
@@ -48,6 +54,10 @@
 
   <!-- Canvas Confetti for Celebration (Hiệu ứng chúc mừng nộp bài) -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+
+  <!-- QR Code SVG Generator & Mozilla PDF.js (Hỗ trợ quét QR tạo App iOS & xem PDF đa trang trên iPhone/iPad) -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous"></script>
 
   <!-- Custom Styles -->
   <link rel="stylesheet" href="css/app.css">
