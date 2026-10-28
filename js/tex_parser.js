@@ -55,32 +55,57 @@ const TeXParser = {
       allowed_students: [],
       pdf_url: examMeta.pdf_url || '',
       tex_macros: preamble ? preamble.macros : {},
+      tex_preamble: preamble ? {
+        macros: preamble.macros,
+        tikzLibraries: preamble.tikzLibraries,
+        texPackages: preamble.texPackages,
+        tikzPreamble: preamble.tikzPreamble,
+        colors: preamble.colors,
+        pgfplotsCompat: preamble.pgfplotsCompat
+      } : null,
       part1: [],
       part2: [],
       part3: []
     };
 
-    // 1. Tìm các khối môi trường \begin{ex|bt|vd|cau} ... \end{ex|bt|vd|cau}
-    const exRegex = /\\begin\{(ex|bt|vd|cau)\}(?:\[[^\]]*\])?([\s\S]*?)\\end\{\1\}/gi;
+    // Đánh dấu vị trí các lệnh phân phần (\caulc, \cautn, \cauds, \caukq, \cautl) & tiêu đề PHẦN I..IV
+    const partHeaders = [];
+    const partRe = /\\(caulc|cautn|cauds|caukq|cautl)\b|PHẦN\s+(IV|I{1,3}|[1-4])\b/gi;
+    let pm;
+    while ((pm = partRe.exec(text)) !== null) {
+      let pNum = 1;
+      if (pm[1]) {
+        const c = pm[1].toLowerCase();
+        pNum = (c === 'cauds') ? 2 : ((c === 'caukq') ? 3 : ((c === 'cautl') ? 4 : 1));
+      } else {
+        const token = pm[2].toUpperCase();
+        pNum = (token === 'I' || token === '1') ? 1 : ((token === 'II' || token === '2') ? 2 : ((token === 'III' || token === '3') ? 3 : 4));
+      }
+      partHeaders.push({ index: pm.index, part: pNum });
+    }
+    const getSectionHintAt = (pos) => {
+      let hint = null;
+      for (const ph of partHeaders) {
+        if (ph.index <= pos) hint = ph.part;
+      }
+      return hint;
+    };
+
+    // 1. Tìm các khối môi trường \begin{ex|exrd|bt|vd|vdex|cau} ... \end{...}
+    const exRegex = /\\begin\{(ex|exrd|bt|vd|vdex|cau)\}(?:\[[^\]]*\])?([\s\S]*?)\\end\{\1\}/gi;
     let match;
     const taggedBlocks = [];
 
     while ((match = exRegex.exec(text)) !== null) {
-      taggedBlocks.push({ block: match[2].trim(), sectionHint: null, envType: match[1].toLowerCase() });
+      taggedBlocks.push({
+        block: match[2].trim(),
+        sectionHint: getSectionHintAt(match.index),
+        envType: match[1].toLowerCase()
+      });
     }
 
     // 2. Nếu không dùng môi trường ex_test, chia theo PHẦN I / II / III và Câu 1, Câu 2, Bài 1...
     if (taggedBlocks.length === 0) {
-      // Đánh dấu vị trí các tiêu đề PHẦN I, PHẦN II, PHẦN III (nếu có)
-      const partHeaders = [];
-      const partRe = /PHẦN\s+(I{1,3}|[123])\b/gi;
-      let pm;
-      while ((pm = partRe.exec(text)) !== null) {
-        const token = pm[1].toUpperCase();
-        const pNum = (token === 'I' || token === '1') ? 1 : ((token === 'II' || token === '2') ? 2 : 3);
-        partHeaders.push({ index: pm.index, part: pNum });
-      }
-
       const qStartRe = /(?:\\textbf\{\s*(?:Câu|Bài)\s+\d+\s*[:.]?\s*\}|(?:^|\n)\s*(?:Câu|Bài)\s+\d+\s*[:.])/gi;
       const starts = [];
       let qm;
@@ -92,7 +117,6 @@ const TeXParser = {
         const startPos = starts[i].idx;
         let endPos = (i + 1 < starts.length) ? starts[i + 1].idx : text.length;
 
-        // Cắt bỏ tiêu đề "PHẦN II...", "PHẦN III..." nếu nằm ở cuối câu hiện tại
         for (const ph of partHeaders) {
           if (ph.index > startPos && ph.index < endPos) {
             const lineStart = text.lastIndexOf('\n', ph.index);
@@ -100,14 +124,9 @@ const TeXParser = {
           }
         }
 
-        let sectionHint = null;
-        for (const ph of partHeaders) {
-          if (ph.index <= startPos) sectionHint = ph.part;
-        }
-
         const chunk = text.slice(startPos, endPos).trim();
         if (chunk.length > 10) {
-          taggedBlocks.push({ block: chunk, sectionHint, envType: 'plain' });
+          taggedBlocks.push({ block: chunk, sectionHint: getSectionHintAt(startPos), envType: 'plain' });
         }
       }
     }
@@ -117,6 +136,7 @@ const TeXParser = {
     let p3Index = 1;
 
     taggedBlocks.forEach(({ block: rawBlock, sectionHint }) => {
+      if (sectionHint === 4 && !/\\(?:choice|choiceTF|shortans)\b/.test(rawBlock)) return;
       let block = rawBlock;
 
       // Bóc tách lời giải \loigiai{...} bằng balanced brace
@@ -130,13 +150,13 @@ const TeXParser = {
         }
       }
 
-      // Phân loại Phần II: \choiceTF hoặc sectionHint === 2 hoặc có đủ 4 ý a) b) c) d)
+      // Phân loại Phần II: \choiceTF / \choiceTFt / \choiceTFtColor / \haibang hoặc sectionHint === 2 hoặc đủ 4 ý a) b) c) d)
       const hasPlainABCDStatements = /(?:^|\n|\\\\)\s*(?:\\textbf\{|\\underline\{)?a\)/.test(block) &&
                                      /(?:^|\n|\\\\)\s*(?:\\textbf\{|\\underline\{)?b\)/.test(block) &&
                                      /(?:^|\n|\\\\)\s*(?:\\textbf\{|\\underline\{)?c\)/.test(block) &&
                                      /(?:^|\n|\\\\)\s*(?:\\textbf\{|\\underline\{)?d\)/.test(block);
 
-      if (block.includes('\\choiceTF') || sectionHint === 2 || (!block.includes('\\choice') && hasPlainABCDStatements)) {
+      if (/\\(?:choiceTFtColor|choiceTFt|choiceTF|haibang)(?:\[[^\]]*\])?(?![A-Za-z])/.test(block) || sectionHint === 2 || (!block.includes('\\choice') && hasPlainABCDStatements)) {
         const p2Item = this.parsePart2Question(block, p2Index, loigiai, preamble);
         if (p2Item) {
           exam.part2.push(p2Item);
@@ -145,8 +165,8 @@ const TeXParser = {
         }
       }
 
-      // Phân loại Phần III: \shortans hoặc sectionHint === 3
-      if (block.includes('\\shortans') || sectionHint === 3) {
+      // Phân loại Phần III: \shortans / \shortansfix / \SA hoặc sectionHint === 3
+      if (/\\(?:shortansfix|shortans|SA)(?:\[[^\]]*\])?(?![A-Za-z])/.test(block) || sectionHint === 3) {
         const p3Item = this.parsePart3Question(block, p3Index, loigiai, preamble);
         if (p3Item) {
           exam.part3.push(p3Item);
@@ -155,7 +175,7 @@ const TeXParser = {
         }
       }
 
-      // Phần I (Trắc nghiệm 4 lựa chọn hoặc bài tập tổng quát)
+      // Phần I (Trắc nghiệm 4 lựa chọn)
       const p1Item = this.parsePart1Question(block, p1Index, loigiai, preamble);
       if (p1Item) {
         exam.part1.push(p1Item);
@@ -173,22 +193,24 @@ const TeXParser = {
       .trim();
   },
 
-  // Bóc tách Phần I: 4 phương án A, B, C, D (hỗ trợ \choice, \motcot, \haicot, \boncot và văn bản A. B. C. D.)
+  // Bóc tách Phần I: 4 phương án A, B, C, D (bảo toàn \immini khi \choice đặt bên trong \immini)
   parsePart1Question(block, id, loigiai, preamble = null) {
+    const compiler = this.getCompiler();
+    const unwrap = (s) => compiler ? compiler.unwrapChoiceBraces(s) : String(s || '').trim();
     let content = this.stripQuestionPrefix(block);
     let choices = [];
     let correct = 'A';
     const letters = ['A', 'B', 'C', 'D'];
 
-    const choiceMatch = content.match(/\\(choice|motcot|haicot|boncot)(?:\[[^\]]*\])?(?![A-Za-z])/);
+    const choiceMatch = content.match(/\\(choicefive|choicefix|choice|motcot|haicot|boncot|nammot|bahai|haiba|motnam)(?:\[[^\]]*\])?(?![A-Za-z])/);
     if (choiceMatch) {
       const choicePos = choiceMatch.index;
       const afterCmd = choicePos + choiceMatch[0].length;
-      const stem = content.substring(0, choicePos).trim();
+      const numArgs = /^(?:choicefive|nammot|bahai|haiba|motnam)$/.test(choiceMatch[1]) ? 5 : 4;
       let curr = afterCmd;
       const rawChoices = [];
 
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < numArgs; i++) {
         const brace = this.extractBalancedBrace(content, curr);
         if (brace) {
           rawChoices.push(brace.content.trim());
@@ -198,13 +220,15 @@ const TeXParser = {
         }
       }
 
-      if (rawChoices.length === 4) {
-        content = stem;
-        choices = rawChoices.map((raw, idx) => {
-          if (/\\True\b|\\true\b/.test(raw)) {
+      if (rawChoices.length >= 4) {
+        // Giữ nguyên phần đóng ngoặc & hình vẽ phía sau \choice (VD: khi \choice nằm trong \immini{...}{\begin{tikzpicture}...})
+        content = (content.substring(0, choicePos) + ' ' + content.substring(curr)).trim();
+        choices = rawChoices.slice(0, 4).map((raw, idx) => {
+          const unwrapped = unwrap(raw);
+          if (/\\True\b|\\true\b/.test(unwrapped)) {
             correct = letters[idx];
           }
-          const cleanText = raw.replace(/\\True\b|\\true\b/g, '').trim();
+          const cleanText = unwrap(unwrapped.replace(/\\True\b|\\true\b|\\sh\b(?:\[[^\]]*\])?/g, '')).trim();
           return `${letters[idx]}. ${cleanText}`;
         });
       }
@@ -258,16 +282,17 @@ const TeXParser = {
     };
   },
 
-  // Bóc tách Phần II: Trắc nghiệm Đúng/Sai (4 ý a, b, c, d)
+  // Bóc tách Phần II: Trắc nghiệm Đúng/Sai (4 ý a, b, c, d, bảo toàn \immini nếu có)
   parsePart2Question(block, id, loigiai, preamble = null) {
+    const compiler = this.getCompiler();
+    const unwrap = (s) => compiler ? compiler.unwrapChoiceBraces(s) : String(s || '').trim();
     let content = this.stripQuestionPrefix(block);
     const statements = [];
     const subLetters = ['a', 'b', 'c', 'd'];
 
-    const tfMatch = content.match(/\\choiceTF(?:\[[^\]]*\])?/);
+    const tfMatch = content.match(/\\(choiceTFtColor|choiceTFt|choiceTF|haibang)(?:\[[^\]]*\])?(?![A-Za-z])/);
     if (tfMatch) {
       const tfPos = tfMatch.index;
-      const stem = content.substring(0, tfPos).trim();
       let curr = tfPos + tfMatch[0].length;
       const rawItems = [];
 
@@ -282,11 +307,11 @@ const TeXParser = {
       }
 
       if (rawItems.length === 4) {
-        content = stem;
+        content = (content.substring(0, tfPos) + ' ' + content.substring(curr)).trim();
         for (let i = 0; i < 4; i++) {
-          const raw = rawItems[i];
-          const isCorrect = /\\True\b|\\true\b/.test(raw) || /^(?:Đúng|True)\b/i.test(raw);
-          const cleanText = raw.replace(/\\True\b|\\true\b/g, '').trim();
+          const unwrapped = unwrap(rawItems[i]);
+          const isCorrect = /\\True\b|\\true\b/.test(unwrapped) || /^(?:Đúng|True)\b/i.test(unwrapped);
+          const cleanText = unwrap(unwrapped.replace(/\\True\b|\\true\b|\\sh\b(?:\[[^\]]*\])?/g, '')).trim();
           statements.push({
             sub_id: subLetters[i],
             text: this.cleanMath(cleanText, preamble),
@@ -333,7 +358,7 @@ const TeXParser = {
     if (statements.length < 4) {
       const items = content.split('\\item').slice(1);
       if (items.length >= 4) {
-        content = content.split('\\item')[0].replace(/\\choiceTF(?:\[[^\]]*\])?/, '').trim();
+        content = content.split('\\item')[0].replace(/\\(?:choiceTFtColor|choiceTFt|choiceTF|haibang)(?:\[[^\]]*\])?/, '').trim();
         for (let i = 0; i < 4; i++) {
           const raw = items[i].trim();
           const isCorrect = /\\True\b|\\true\b/.test(raw);
@@ -364,23 +389,33 @@ const TeXParser = {
     };
   },
 
-  // Bóc tách Phần III: Trả lời ngắn (\shortans{...} hoặc Đáp án/ĐS: ...)
+  // Bóc tách Phần III: Trả lời ngắn (\shortans{...}, \SA{...}, \shortansfix{...} hoặc Đáp án/ĐS: ...)
   parsePart3Question(block, id, loigiai, preamble = null) {
+    const compiler = this.getCompiler();
     let content = this.stripQuestionPrefix(block);
-    let correct = '0';
+    let correct = '';
 
-    const shortMatch = content.match(/\\shortans(?:\[[^\]]*\])?/);
+    const shortMatch = content.match(/\\(shortansfix|shortans|SA)(?:\[[^\]]*\])?(?![A-Za-z])/);
     if (shortMatch) {
+      const cmd = shortMatch[1];
       const shortPos = shortMatch.index;
       const brace = this.extractBalancedBrace(content, shortPos + shortMatch[0].length);
-      content = content.substring(0, shortPos).trim();
       if (brace) {
-        correct = brace.content.trim().replace(/[$]/g, '').replace(/\{,\}/g, ',');
+        content = (content.substring(0, shortPos) + ' ' + content.substring(brace.endIdx + 1)).trim();
+        if (cmd !== 'shortansfix') {
+          correct = compiler
+            ? compiler.cleanShortAnsValue(brace.content)
+            : brace.content.trim().replace(/[$]/g, '').replace(/\\,|\\;/g, '').replace(/\{,\}/g, ',').replace(/\s+/g, '');
+        }
+      } else {
+        content = content.substring(0, shortPos).trim();
       }
-    } else {
-      const ansLine = (content + '\n' + (loigiai || '')).match(/(?:Đáp\s*(?:án|số)|ĐS)\s*[:=]\s*\$?([+-]?\d+(?:[.,]\d+)?(?:\s*\/\s*\d+)?)\$?/i);
+    }
+
+    if (!correct) {
+      const ansLine = (content + '\n' + (loigiai || '')).match(/(?:Đáp\s*(?:án|số)|ĐS|\\dapso\s*\{)\s*[:=]?\s*\$?([+-]?\d+(?:(?:\{,\}|[.,])\d+)?(?:\s*\/\s*\d+)?)\$?/i);
       if (ansLine) {
-        correct = ansLine[1].replace(/\s+/g, '');
+        correct = ansLine[1].replace(/\{,\}/g, ',').replace(/\s+/g, '');
         content = content.replace(/(?:\\\\|\n)?\s*(?:\\textbf\{)?(?:Đáp\s*(?:án|số)|ĐS)\s*[:=][^\\\n]*/i, '').trim();
       }
     }

@@ -180,10 +180,14 @@ const App = {
   cleanTex(text, extraMacros = null) {
     if (!text || typeof text !== 'string') return '';
     if (typeof TeXCompiler !== 'undefined') {
-      const macros = extraMacros || this.state.activeExam?.tex_macros || null;
+      const activeEx = this.state.activeExam;
+      const macros = extraMacros || activeEx?.tex_macros || null;
+      const preambleInfo = activeEx?.tex_preamble
+        ? Object.assign({}, activeEx.tex_preamble, macros ? { macros: Object.assign({}, activeEx.tex_preamble.macros, macros) } : {})
+        : (macros ? { macros, tikzLibraries: [], texPackages: [] } : null);
       return TeXCompiler.compileFragment(text, {
         inlineQuestion: true,
-        preambleInfo: macros ? { macros, tikzLibs: [], packages: [] } : null
+        preambleInfo
       });
     }
     return text.trim();
@@ -345,8 +349,9 @@ const App = {
       if (!ex.allowed_students) ex.allowed_students = [];
       if (!ex.access_type) ex.access_type = ex.allowed_all ? 'all' : (ex.allowed_grades.length ? 'grade' : 'custom');
       if (typeof TeXCompiler !== 'undefined') {
-        if (ex.tex_macros) TeXCompiler.registerMacros(ex.tex_macros);
-        else if (ex.raw_tex) TeXCompiler.extractPreamble(ex.raw_tex);
+        if (ex.tex_preamble) TeXCompiler.registerPreamble(ex.tex_preamble);
+        else if (ex.tex_macros) TeXCompiler.registerMacros(ex.tex_macros);
+        if (ex.raw_tex) TeXCompiler.extractPreamble(ex.raw_tex);
       }
     });
     this.state.exams = examsList;
@@ -4912,6 +4917,7 @@ const App = {
       exam.part2 = parsed.part2;
       exam.part3 = parsed.part3;
       exam.tex_macros = parsed.tex_macros || {};
+      exam.tex_preamble = parsed.tex_preamble || null;
     }
     this.saveData();
     document.getElementById('updatePdfModal')?.remove();
@@ -6676,6 +6682,7 @@ const App = {
       solution_pdf_name: finalSolutionPdfName,
       raw_tex: rawTex,
       tex_macros: (parsed && parsed.tex_macros) ? parsed.tex_macros : {},
+      tex_preamble: (parsed && parsed.tex_preamble) ? parsed.tex_preamble : null,
       part1: hasParsedAny ? parsed.part1 : SAMPLE_EXAM_2027.part1,
       part2: hasParsedAny ? parsed.part2 : SAMPLE_EXAM_2027.part2,
       part3: hasParsedAny ? parsed.part3 : SAMPLE_EXAM_2027.part3,
@@ -8625,6 +8632,7 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
       solution_pdf_name: 'Lời giải HTML tự động',
       raw_tex: raw,
       tex_macros: (parsed && parsed.tex_macros) ? parsed.tex_macros : {},
+      tex_preamble: (parsed && parsed.tex_preamble) ? parsed.tex_preamble : null,
       part1: hasParsedAny ? parsed.part1 : SAMPLE_EXAM_2027.part1,
       part2: hasParsedAny ? parsed.part2 : SAMPLE_EXAM_2027.part2,
       part3: hasParsedAny ? parsed.part3 : SAMPLE_EXAM_2027.part3

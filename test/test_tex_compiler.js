@@ -147,4 +147,112 @@ assert.strictEqual(TeXCompiler.isShortAnsEqual('12,5', '12.5'), true);
 assert.strictEqual(TeXCompiler.isShortAnsEqual('-0,25', '-0.250'), true);
 assert.strictEqual(TeXCompiler.isShortAnsEqual('40', '41'), false);
 
+// Regression 1: Preamble recognition (\usepackage, \RequirePackage, \usetikzlibrary, \definecolor, \colorlet, \maincolor, \tikzset)
+const fullPreambleTex = `
+\\documentclass[12pt]{article}
+\\RequirePackage[utf8]{vietnam}
+\\usepackage{amsmath,amssymb,pgfplots,tkz-tab,tkz-euclide}
+\\usetikzlibrary{calc,angles,quotes}
+\\pgfplotsset{compat=1.18}
+\\definecolor{darkblue}{HTML}{2954A3}
+\\colorlet{accent}{darkblue!80!black}
+\\renewcommand{\\maincolor}{darkblue}
+\\tikzset{>=stealth, mydot/.style={circle, fill=darkblue, inner sep=1.5pt}}
+\\begin{document}
+\\ExamBanner[\\linewidth]{SỞ GD-ĐT HÀ NỘI\\\\TRƯỜNG THPT CHU VĂN AN}{KỲ THI THỬ TỐT NGHIỆP THPT 2026\\\\Môn: TOÁN}{Thời gian: 90 phút\\\\Mã đề: 101}
+\\begin{name}{SỞ GD-ĐT TP.HCM}{ĐỀ THI THỬ LẦN 1}\\end{name}
+\\caulc
+\\begin{ex}
+\\immini[thm]{Cho tam giác $ABC$ vuông tại $A$ như hình bên.
+\\choice
+{$AB = 3$}
+{{\\True $BC = 5$}}
+{$AC = 2$}
+{$BC = 6$}}
+{\\begin{tikzpicture}
+  \\usetkzobj{all}
+  \\tkzDefPoints{0/0/A, 3/0/B, 0/4/C}
+  \\tkzDefMidPoint(B,C)\\tkzGetPoint{M}
+  \\tkzDrawPolygon(A,B,C)
+  \\tkzDrawSegments[dashed](A,M)
+  \\tkzMarkRightAngles(B,A,C)
+  \\tkzLabelPoints[below left](A)
+  \\tkzLabelPoints[below right](B)
+  \\tkzLabelPoints[above](C,M)
+  \\node[mydot] at (M) {};
+\\end{tikzpicture}}
+\\loigiai{Áp dụng định lí Pythagore: $BC = \\sqrt{3^2 + 4^2} = 5$.}
+\\end{ex}
+\\cauds
+\\begin{ex}
+\\begin{itemize}
+\\immini{
+\\item Hàm số đạt cực đại tại $x = 0$.
+\\item Đồ thị đi qua gốc tọa độ.
+}{\\begin{tikzpicture}\\draw[->, accent] (-1,0)--(2,0);\\end{tikzpicture}}
+\\item Hàm số đồng biến trên $(0; +\\infty)$.
+\\end{itemize}
+\\choiceTFt
+{\\True Đúng ý a}
+{Sai ý b}
+{\\True Đúng ý c}
+{Sai ý d}
+\\loigiai{
+\\begin{itemchoice}
+\\itemch Ý thứ nhất biến đổi:
+\\allowdisplaybreaks
+\\begin{eqnarray*}
+  f(x) = 0 &\\Leftrightarrow& \\hoac{x = 0 \\\\ x = 2.}
+\\end{eqnarray*}
+\\itemch Ý thứ hai lập bảng:
+\\begin{tabular}{|>{\\centering\\arraybackslash}p{2cm}|c|}
+\\hline
+$x$ & \\begin{tabular}{c}$0$\\\\$1$\\end{tabular} \\\\
+\\hline
+\\end{tabular}
+\\itemch Ý thứ ba đúng.
+\\itemch Ý thứ tư sai.
+\\end{itemchoice}
+}
+\\end{ex}
+\\caukq
+\\begin{ex}
+Tính chiều cao tường bao (đơn vị mét).
+\\shortans[]{$9{,}6$m}
+\\loigiai{Kết quả là $9{,}6$.}
+\\end{ex}
+\\begin{ex}
+Tìm bán kính tối ưu $r$.
+\\shortansfix[oly2]{4}
+\\loigiai{Ta tìm được $r = 1$.}
+\\end{ex}
+\\centerline{\\textcolor{\\maincolor}{\\rule[0.5ex]{2cm}{1pt}} HẾT \\textcolor{\\maincolor}{\\rule[0.5ex]{2cm}{1pt}}}
+\\end{document}
+`;
+
+const regDoc = TeXCompiler.compileDocument(fullPreambleTex);
+assert.ok(regDoc.html.includes('tex-exam-banner'), 'Must render \\ExamBanner with 3 columns + optional [\\linewidth]');
+assert.ok(regDoc.html.includes('tex-name-banner'), 'Must render \\begin{name}{...}{...}\\end{name}');
+assert.strictEqual((regDoc.html.match(/Câu 1\./g) || []).length, 3, '\\caulc, \\cauds, \\caukq must each reset Câu counter to 1');
+assert.strictEqual(regDoc.stats.tikz, 2, 'Both immini-with-choice and itemize-wrapping-immini must preserve 100% of tikzpictures');
+assert.ok(!regDoc.html.includes('tkz-euclide'), 'Unsupported tkz-euclide.sty must never be passed to TikZJax data-tex-packages');
+assert.ok(!/\\tkz(?:Def|DrawPolygon|MarkRightAngles|LabelPoints)|\\usetkzobj/.test(regDoc.html), 'tkz-euclide commands must be transpiled to native TikZ');
+assert.ok(regDoc.html.includes('\\definecolor{darkblue}{RGB}{41,84,163}'), 'Custom preamble \\definecolor must be forwarded to TikZ preamble as RGB');
+assert.ok(regDoc.html.includes('\\definecolor{accent}{RGB}'), 'xcolor \\colorlet mixing (darkblue!80!black) must be resolved to RGB for TikZ');
+assert.ok(regDoc.html.includes('mydot/.style'), 'Top-level \\tikzset styles must be forwarded to TikZ preamble');
+assert.ok(regDoc.html.includes('data-correct="9,6"'), 'cleanShortAnsValue must clean $9{,}6$m -> 9,6');
+assert.ok(!regDoc.html.includes('data-correct="4"'), '\\shortansfix[oly2]{4} box count must NOT be treated as answer key 4');
+assert.ok(regDoc.html.includes('tex-rule') && regDoc.html.includes('#2954a3'), '\\textcolor{\\maincolor}{\\rule...} must resolve \\maincolor -> darkblue -> #2954a3');
+assert.ok(!/\\(?:ExamBanner|caulc|cauds|caukq|itemch|choiceTFt|shortansfix|hoac)\b/.test(regDoc.html.replace(/<script[\s\S]*?<\/script>/g, '')), 'Zero raw LaTeX macros leaked into HTML prose');
+
+const regParsed = TeXParser.parse(fullPreambleTex);
+assert.strictEqual(regParsed.part1.length, 1);
+assert.strictEqual(regParsed.part1[0].correct_answer, 'B', 'Unwrap double-braced {{\\True ...}} choice');
+assert.ok(regParsed.part1[0].content.includes('<script type="text/tikz"'), 'TeXParser Part 1 must preserve tikzpicture when \\choice is inside \\immini');
+assert.strictEqual(regParsed.part2.length, 1);
+assert.ok(regParsed.part2[0].content.includes('<script type="text/tikz"'), 'TeXParser Part 2 must preserve tikzpicture inside \\itemize + \\immini');
+assert.strictEqual(regParsed.part3.length, 2);
+assert.strictEqual(regParsed.part3[0].correct_answer, '9,6');
+assert.strictEqual(regParsed.part3[1].correct_answer, '', '\\shortansfix[oly2]{4} box count must stay empty rather than becoming answer key 4');
+
 console.log('[OK] ALL TEX COMPILER & PARSER ASSERTIONS PASSED 100%!');
