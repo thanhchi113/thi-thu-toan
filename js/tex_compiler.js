@@ -221,10 +221,11 @@ const TeXCompiler = {
       }
     });
 
-    // Thư viện TikZ khai báo trong preamble
+    // Thư viện TikZ khai báo trong preamble hoặc đầu đoạn mã TeX
+    const declSource = info.preambleRaw || info.body;
     const libRegex = /\\usetikzlibrary\{([^}]+)\}/g;
     let m;
-    while ((m = libRegex.exec(info.preambleRaw)) !== null) {
+    while ((m = libRegex.exec(declSource)) !== null) {
       m[1].split(',').map(x => x.trim()).filter(Boolean).forEach(lib => {
         if (!info.tikzLibraries.includes(lib)) info.tikzLibraries.push(lib);
       });
@@ -278,13 +279,13 @@ const TeXCompiler = {
         info.macros[name] = bodyVal;
       }
     };
-    parseNewCommands(info.preambleRaw);
+    parseNewCommands(declSource);
 
     // \DeclareMathOperator(*){ \cmd }{ text }
     const opRe = /\\DeclareMathOperator(\*?)\s*/g;
-    while ((m = opRe.exec(info.preambleRaw)) !== null) {
+    while ((m = opRe.exec(declSource)) !== null) {
       const isStar = m[1] === '*';
-      const parsed = this.parseCommandArgs(info.preambleRaw, m.index + m[0].length, 2, false);
+      const parsed = this.parseCommandArgs(declSource, m.index + m[0].length, 2, false);
       if (parsed) {
         const name = parsed.args[0].trim();
         const opText = parsed.args[1].trim();
@@ -296,10 +297,10 @@ const TeXCompiler = {
 
     // \def\foo{...} hoặc \def\foo#1{...} đơn giản trong preamble
     const defRe = /\\def\s*(\\[A-Za-z]+)((?:#[1-9])*)\s*\{/g;
-    while ((m = defRe.exec(info.preambleRaw)) !== null) {
+    while ((m = defRe.exec(declSource)) !== null) {
       const name = m[1];
       if (name.includes('@') || BLOCKED_MACROS.has(name)) continue;
-      const brace = this.extractBalanced(info.preambleRaw, m.index + m[0].length - 1, '{', '}');
+      const brace = this.extractBalanced(declSource, m.index + m[0].length - 1, '{', '}');
       if (brace) {
         const bodyVal = brace.content.trim();
         if (!/\\(?:begin|end|tikz|draw|newpage|catcode|csname|expandafter)/.test(bodyVal)) {
@@ -315,7 +316,7 @@ const TeXCompiler = {
   // Chuẩn hóa ký tự tiếng Việt / Unicode bên trong khối TikZ để tex.wasm (OT1/CM) không bao giờ lỗi inputenc
   sanitizeTikzSource(tikzSrc) {
     let s = String(tikzSrc || '').trim();
-    s = s.replace(/\\vv\{/g, '\\vec{');
+    s = s.replace(/\\vv\{/g, '\\vec{').replace(/\\(?:wideparen|arc)\{/g, '\\widehat{');
     s = s.replace(/−/g, '-').replace(/–/g, '--').replace(/—/g, '---');
     s = s.replace(/×/g, '\\times ').replace(/÷/g, '\\div ').replace(/±/g, '\\pm ');
     s = s.replace(/∞/g, '\\infty ').replace(/≤/g, '\\le ').replace(/≥/g, '\\ge ').replace(/≠/g, '\\ne ');
@@ -353,6 +354,7 @@ const TeXCompiler = {
     }
 
     if (/\\tkzTab/i.test(code)) pkgs.add('tkz-tab');
+    if (/\\tkz(?:Def|Draw|Label|Mark|Inter|Calc|Get|Clip|Fill)/i.test(code)) pkgs.add('tkz-euclide');
     if (/\\begin\{axis\}|\\begin\{semilogxaxis\}|\\begin\{semilogyaxis\}|\\begin\{loglogaxis\}|\\addplot/i.test(code)) pkgs.add('pgfplots');
     if (/\\begin\{circuitikz\}|\\draw[\s\S]*?\bto\[[A-Za-z]/i.test(code)) pkgs.add('circuitikz');
     if (/\\chemfig|\\chemname|\\schemestart/i.test(code)) pkgs.add('chemfig');
@@ -396,6 +398,14 @@ const TeXCompiler = {
     const libAttr = Array.from(libs).join(',');
     const preambleParts = [];
     if (pkgs.has('pgfplots')) preambleParts.push('\\pgfplotsset{compat=1.16}');
+    const mergedMacros = Object.assign({}, this.activeMacros, preambleInfo?.macros || {});
+    Object.keys(mergedMacros).forEach((mName) => {
+      if (!sanitized.includes(mName)) return;
+      const mBody = this.sanitizeTikzSource(mergedMacros[mName]);
+      const argNums = (mBody.match(/#[1-9]/g) || []).map(x => Number(x[1]));
+      const argCount = argNums.length ? Math.max(...argNums) : 0;
+      preambleParts.push(`\\providecommand{${mName}}${argCount ? `[${argCount}]` : ''}{${mBody}}`);
+    });
     const preambleAttr = preambleParts.length ? ` data-add-to-preamble="${this.escapeAttr(preambleParts.join(' '))}"` : '';
     const isWide = pkgs.has('tkz-tab') || /espcl|\\tkzTabInit/.test(code);
 
@@ -593,10 +603,31 @@ const TeXCompiler = {
     return `<div class="tex-table-wrap my-3 overflow-x-auto"><table class="tex-table">${trs}</table></div>`;
   },
 
-  // Bóc tách và render \choice, \choiceTF, \shortans bên trong môi trường bài tập (chế độ tài liệu HTML)
-  compileExChoicesInDoc(blockText, compileInlineFn) {
+  buildLoigiaiHtml(lgContentHtml, ansSummaryText = '', openByDefault = false) {
+    if (!lgContentHtml && !ansSummaryText) return '';
+    const ansBadge = ansSummaryText
+      ? `<div class="tex-loigiai-ans-row mb-2"><span class="tex-loigiai-ans-badge"><i class="fa-solid fa-circle-check mr-1"></i>${ansSummaryText}</span></div>`
+      : '';
+    const detailBody = lgContentHtml
+      ? `<div class="tex-loigiai-content">${lgContentHtml}</div>`
+      : '';
+    return `<details class="tex-loigiai mt-3.5"${openByDefault ? ' open' : ''}><summary class="tex-loigiai-summary"><span class="tex-loigiai-btn"><i class="fa-solid fa-lightbulb mr-1.5 text-amber-500"></i><span class="tex-lg-closed-txt">Xem lời giải chi tiết</span><span class="tex-lg-open-txt">Thu gọn lời giải</span><i class="fa-solid fa-chevron-down tex-lg-chevron ml-1.5 text-[10px]"></i></span></summary><div class="tex-loigiai-body">${ansBadge}${detailBody}</div></details>`;
+  },
+
+  isAlreadyCompiledHtml(str) {
+    if (!str || typeof str !== 'string') return false;
+    const withoutTikzScript = str.replace(/<script\s+type="text\/tikz"[\s\S]*?<\/script>/gi, '');
+    const hasCompiledMarkup = /<(?:div|table|article|details|ul|ol|pre|blockquote|figure|h[1-4]|span)\b[^>]*class="[^"]*\b(?:tex-|math-svg-container)/i.test(withoutTikzScript);
+    if (!hasCompiledMarkup) return false;
+    return !/\\(?:begin\{(?:ex|bt|vd|cau|tikzpicture|circuitikz|tabular|tabularx|longtable|eqnarray|align|enumerate|itemize|listEX)\}|immini|choice|choiceTF|shortans|loigiai)/.test(withoutTikzScript);
+  },
+
+  // Bóc tách và render \choice, \choiceTF, \shortans tương tác trực tiếp bên trong môi trường bài tập
+  compileExChoicesInDoc(blockText, compileInlineFn, qMeta = {}) {
     let s = blockText;
     let extraHtml = '';
+    let ansSummary = '';
+    const qId = qMeta.qId || 1;
 
     // 1. \choiceTF[...]{a}{b}{c}{d}
     const tfMatch = s.match(/\\choiceTF(?:\[[^\]]*\])?/);
@@ -605,15 +636,22 @@ const TeXCompiler = {
       const parsed = this.parseCommandArgs(s, pos + 9, 4, true);
       if (parsed) {
         const letters = ['a', 'b', 'c', 'd'];
+        const ansParts = [];
         const itemsHtml = parsed.args.map((raw, idx) => {
           const isTrue = /\\True\b|\\true\b/.test(raw);
           const clean = raw.replace(/\\True\b|\\true\b/g, '').trim();
-          return `<div class="tex-tf-item" data-correct="${isTrue ? 'true' : 'false'}">
+          ansParts.push(`${letters[idx]}) ${isTrue ? 'Đúng' : 'Sai'}`);
+          return `<div class="tex-tf-item" data-part="p2" data-qid="${qId}" data-sub="${letters[idx]}" data-correct="${isTrue ? 'true' : 'false'}">
             <span class="tex-tf-label">${letters[idx]})</span>
-            <div class="tex-tf-text flex-1">${compileInlineFn(clean)}</div>
+            <div class="tex-tf-text flex-1 min-w-0">${compileInlineFn(clean)}</div>
+            <div class="tex-tf-controls flex items-center gap-1 shrink-0">
+              <button type="button" class="tex-tf-btn" data-tf-val="true">Đúng</button>
+              <button type="button" class="tex-tf-btn" data-tf-val="false">Sai</button>
+            </div>
             <span class="tex-ans-pill ${isTrue ? 'tex-ans-true' : 'tex-ans-false'}">${isTrue ? 'Đúng' : 'Sai'}</span>
           </div>`;
         }).join('');
+        ansSummary = `Đáp án chuẩn: ${ansParts.join(' • ')}`;
         extraHtml += `<div class="tex-tf-list mt-3 space-y-1.5">${itemsHtml}</div>`;
         s = s.slice(0, pos) + s.slice(parsed.endIdx);
       }
@@ -630,14 +668,17 @@ const TeXCompiler = {
         let cols = 2;
         if (cmd === 'motcot' || parsed.opt === '1') cols = 1;
         else if (cmd === 'boncot' || parsed.opt === '4') cols = 4;
+        let corrLetter = '';
         const choicesHtml = parsed.args.map((raw, idx) => {
           const isTrue = /\\True\b|\\true\b/.test(raw);
+          if (isTrue) corrLetter = letters[idx];
           const clean = raw.replace(/\\True\b|\\true\b/g, '').trim();
-          return `<div class="tex-choice-item ${isTrue ? 'tex-choice-correct' : ''}">
+          return `<div class="tex-choice-item ${isTrue ? 'tex-choice-correct' : ''}" data-part="p1" data-qid="${qId}" data-choice="${letters[idx]}"${isTrue ? ' data-correct="1"' : ''}>
             <span class="tex-choice-letter">${letters[idx]}.</span>
-            <span class="tex-choice-body">${compileInlineFn(clean)}</span>
+            <span class="tex-choice-body flex-1 min-w-0">${compileInlineFn(clean)}</span>
           </div>`;
         }).join('');
+        if (corrLetter) ansSummary = `Chọn đáp án ${corrLetter}`;
         extraHtml += `<div class="tex-choices-grid tex-choices-cols-${cols} mt-3">${choicesHtml}</div>`;
         s = s.slice(0, pos) + s.slice(parsed.endIdx);
       }
@@ -649,8 +690,15 @@ const TeXCompiler = {
       const pos = saMatch.index;
       const parsed = this.parseCommandArgs(s, pos + 9, 1, true);
       if (parsed) {
-        const ansClean = parsed.args[0].replace(/^\$+|\$+$/g, '').trim();
-        extraHtml += `<div class="tex-shortans-box mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-amber-200 bg-amber-50/70 text-xs">
+        const ansClean = parsed.args[0].replace(/^\$+|\$+$/g, '').replace(/\{,\}/g, ',').trim();
+        ansSummary = `Đáp số chuẩn: ${this.escapeHtml(ansClean)}`;
+        extraHtml += `<div class="tex-shortans-interact mt-3 flex flex-wrap items-center gap-2" data-part="p3" data-qid="${qId}" data-correct="${this.escapeAttr(ansClean)}">
+          <label class="text-xs font-bold text-slate-600"><i class="fa-solid fa-keyboard mr-1 text-indigo-600"></i>Nhập đáp số:</label>
+          <input type="text" maxlength="12" placeholder="Điền kết quả..." class="tex-shortans-input px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-xs font-mono font-bold text-slate-800 w-36 focus:border-indigo-500 outline-none">
+          <button type="button" class="tex-shortans-check-btn px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer transition">Kiểm tra</button>
+          <span class="tex-shortans-feedback text-xs font-bold"></span>
+        </div>
+        <div class="tex-shortans-box mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-amber-200 bg-amber-50/70 text-xs">
           <span class="font-bold text-amber-800"><i class="fa-solid fa-pen-to-square mr-1"></i>Đáp số trả lời ngắn:</span>
           <span class="tex-shortans-val font-mono font-extrabold text-amber-900 px-2 py-0.5 rounded bg-white border border-amber-300">${this.escapeHtml(ansClean)}</span>
         </div>`;
@@ -658,18 +706,24 @@ const TeXCompiler = {
       }
     }
 
-    return { bodyRest: s, extraHtml };
+    return { bodyRest: s, extraHtml, ansSummary };
   },
 
   // Biên dịch một đoạn/khối LaTeX sang HTML (dùng chung cho cả câu hỏi lẻ lẫn toàn bộ tài liệu .tex)
   compileFragment(rawTex, options = {}) {
     if (!rawTex || typeof rawTex !== 'string') return '';
 
+    const isRoot = !options._vault;
+    if (isRoot && this.isAlreadyCompiledHtml(rawTex)) {
+      return rawTex.trim();
+    }
+
     const preambleInfo = options.preambleInfo || null;
-    const counters = options.counters || { ex: 0, bt: 0, vd: 0, dl: 0, dn: 0, dang: 0, section: 0, subsection: 0, chapter: 0 };
+    const counters = options.counters || { ex: 0, bt: 0, vd: 0, dl: 0, dn: 0, dang: 0, section: 0, subsection: 0, chapter: 0, p1: 0, p2: 0, p3: 0 };
+    if (counters.p1 === undefined) { counters.p1 = 0; counters.p2 = 0; counters.p3 = 0; }
+    const openSolutions = Boolean(options.openSolutions);
 
     // Dùng chung 1 kho Vault xuyên suốt các lời gọi đệ quy để không bao giờ HTML-escape lại bảng/hình/công thức con
-    const isRoot = !options._vault;
     const vault = options._vault || [];
     const putVault = (content) => {
       const key = `@@TXV_${vault.length}_END@@`;
@@ -810,27 +864,40 @@ const TeXCompiler = {
         const num = meta.counter ? (++counters[meta.counter]) : '';
         let body = rawBody.trim();
 
-        // Tách \loigiai{...} nếu có
-        let loigiaiHtml = '';
+        // Tách \loigiai{...} trước khi phân tích lựa chọn
+        let lgContent = '';
         const lgPos = body.indexOf('\\loigiai');
         if (lgPos !== -1) {
           const lgBox = this.extractBalanced(body, lgPos + 8, '{', '}');
           if (lgBox) {
-            const lgContent = this.compileFragment(lgBox.content.trim(), subOpts());
-            loigiaiHtml = `<details class="tex-loigiai mt-3" open><summary class="tex-loigiai-summary"><i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Lời giải chi tiết</summary><div class="tex-loigiai-body">${lgContent}</div></details>`;
+            lgContent = this.compileFragment(lgBox.content.trim(), subOpts());
             body = body.slice(0, lgPos) + body.slice(lgBox.endIdx + 1);
           }
         }
 
-        const { bodyRest, extraHtml } = this.compileExChoicesInDoc(body, (frag) =>
-          this.compileFragment(frag, subOpts({ inlineQuestion: true }))
+        let qPart = '';
+        let qId = 0;
+        if (['ex', 'cau', 'bt', 'vd'].includes(key)) {
+          if (body.includes('\\choiceTF')) qPart = 'p2';
+          else if (body.includes('\\shortans')) qPart = 'p3';
+          else qPart = 'p1';
+          qId = ++counters[qPart];
+        }
+
+        const { bodyRest, extraHtml, ansSummary } = this.compileExChoicesInDoc(
+          body,
+          (frag) => this.compileFragment(frag, subOpts({ inlineQuestion: true })),
+          { qPart, qId: qId || num || 1 }
         );
 
+        const loigiaiHtml = this.buildLoigiaiHtml(lgContent, ansSummary, openSolutions);
         const compiledStem = this.compileFragment(bodyRest, subOpts({ inlineQuestion: true }));
         const optBadge = optTitle ? ` <span class="tex-env-opt">(${this.compileFragment(optTitle, subOpts({ inlineQuestion: true }))})</span>` : '';
         const headerLabel = `${meta.prefix}${num ? ' ' + num : ''}.${optBadge}`;
+        const qAttrs = qPart ? ` data-qpart="${qPart}" data-qid="${qId}" id="html_q_${qPart}_${qId}"` : '';
+        const statusSpan = qPart ? '<span class="tex-q-status hidden"></span>' : '';
 
-        return putVault(`<article class="tex-env ${meta.cls} my-4"><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid ${meta.icon} mr-1.5"></i>${headerLabel}</span></div><div class="tex-env-body">${compiledStem}${extraHtml}${loigiaiHtml}</div></article>`);
+        return putVault(`<article class="tex-env ${meta.cls} my-4"${qAttrs}><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid ${meta.icon} mr-1.5"></i>${headerLabel}</span>${statusSpan}</div><div class="tex-env-body">${compiledStem}${extraHtml}${loigiaiHtml}</div></article>`);
       });
     }
 
@@ -838,7 +905,7 @@ const TeXCompiler = {
     if (s.includes('\\loigiai')) {
       s = this.replaceCommand(s, 'loigiai', 1, true, (_opt, lgBody) => {
         const lgContent = this.compileFragment(lgBody, subOpts());
-        return putVault(`<details class="tex-loigiai mt-3" open><summary class="tex-loigiai-summary"><i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Lời giải chi tiết</summary><div class="tex-loigiai-body">${lgContent}</div></details>`);
+        return putVault(this.buildLoigiaiHtml(lgContent, '', openSolutions));
       });
     }
 
@@ -974,10 +1041,42 @@ const TeXCompiler = {
       s = s.replace(/\\maketitle\b/g, '');
     }
 
-    // Bước 11: Loại bỏ các lệnh điều khiển trang / file đáp án không hiển thị
+    // Bước 11: Loại bỏ các lệnh điều khiển trang / khai báo đầu snippet / file đáp án không hiển thị
     // Riêng \Opensolutionfile{ans}[Ans/Dapan] có tham số tùy chọn ở CUỐI sau {ans}
     s = s.replace(/\\Opensolutionfile\s*\{[^}]*\}\s*(?:\[[^\]]*\])?/gi, '');
-    ['Closesolutionfile', 'Readsolutionfile', 'pagestyle', 'thispagestyle', 'pagenumbering', 'bibliographystyle', 'input', 'include', 'label', 'ref', 'eqref'].forEach(cmd => {
+    for (const defCmd of ['newcommand', 'renewcommand', 'providecommand', 'DeclareMathOperator']) {
+      let defGuard = 0;
+      const defRe = new RegExp(`\\\\${defCmd}\\*?`, 'g');
+      let dm;
+      while ((dm = defRe.exec(s)) !== null && defGuard++ < 30) {
+        let p = dm.index + dm[0].length;
+        while (p < s.length && /\s/.test(s[p])) p++;
+        if (s[p] === '{') {
+          const b1 = this.extractBalanced(s, p, '{', '}');
+          if (!b1) break;
+          p = b1.endIdx + 1;
+        } else if (s[p] === '\\') {
+          p++;
+          while (p < s.length && /[A-Za-z@]/.test(s[p])) p++;
+        } else break;
+        while (p < s.length) {
+          while (p < s.length && /\s/.test(s[p])) p++;
+          if (s[p] === '[') {
+            const optB = this.extractBalanced(s, p, '[', ']');
+            if (!optB) break;
+            p = optB.endIdx + 1;
+          } else break;
+        }
+        if (s[p] === '{') {
+          const b2 = this.extractBalanced(s, p, '{', '}');
+          if (b2) {
+            s = s.slice(0, dm.index) + s.slice(b2.endIdx + 1);
+            defRe.lastIndex = dm.index;
+          }
+        }
+      }
+    }
+    ['documentclass', 'usepackage', 'usetikzlibrary', 'geometry', 'pgfplotsset', 'title', 'author', 'date', 'Closesolutionfile', 'Readsolutionfile', 'pagestyle', 'thispagestyle', 'pagenumbering', 'bibliographystyle', 'input', 'include', 'label', 'ref', 'eqref'].forEach(cmd => {
       if (cmd === 'ref' || cmd === 'eqref') {
         s = this.replaceCommand(s, cmd, 1, false, (_opt, r) => putVault(`<span class="font-mono text-indigo-600">(${this.escapeHtml(restoreVault(r))})</span>`));
       } else {
@@ -1063,6 +1162,9 @@ const TeXCompiler = {
          .replace(/\\\{/g, '@@ESC_LB@@')
          .replace(/\\\}/g, '@@ESC_RB@@');
 
+    // Bảo vệ các thẻ HTML định dạng an toàn đã được biên dịch từ bước trước (giữ nguyên tính lũy đẳng mà vẫn escape "a < b")
+    s = s.replace(/<\/?(?:strong|em|br|hr|p|ul|ol|li|div|span|table|thead|tbody|tr|td|th|article|details|summary|pre|code|blockquote|figure|figcaption|header|h[1-4]|i|button|input|label)(?:\s+(?:class|style|colspan|rowspan|open|type|maxlength|placeholder|data-[a-z0-9-]+)(?:="[^"]*")?)*\s*\/?>/gi, m => putVault(m));
+
     // Gỡ bỏ cặp ngoặc nhọn nhóm đơn thuần {\bf ...} -> ... còn sót trong văn xuôi
     let braceCleanup = 0;
     while (/\{([^{}]*)\}/.test(s) && braceCleanup++ < 5) {
@@ -1122,34 +1224,52 @@ const TeXCompiler = {
 
     const preamble = this.extractPreamble(rawTex);
     const body = preamble.body;
+    const openSolutions = Boolean(options.openSolutions);
+    const docCls = openSolutions ? 'tex-doc reveal-all-answers' : 'tex-doc';
 
     // Đếm thống kê nhanh trên tài liệu
     const tikzCount = (body.match(/\\begin\{(?:tikzpicture|circuitikz)\}|\\chemfig/g) || []).length;
     const tableCount = (body.match(/\\begin\{(?:tabular|tabularx|longtable)\}/g) || []).length;
-    const exCount = (body.match(/\\begin\{(?:ex|bt|vd|cau)\}/gi) || []).length ||
-                    (body.match(/(?:\\textbf\{Câu\s+\d+[:.]?\}|(?:^|\n)\s*Câu\s+\d+[:.])/gi) || []).length;
+    const envExCount = (body.match(/\\begin\{(?:ex|bt|vd|cau)\}/gi) || []).length;
+    const plainExCount = (body.match(/(?:\\textbf\{\s*(?:Câu|Bài)\s+\d+\s*[:.]?\s*\}|(?:^|\n)\s*(?:Câu|Bài)\s+\d+\s*[:.])/gi) || []).length;
+    const exCount = envExCount || plainExCount;
     const mathCount = (body.match(/\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\\begin\{(?:eqnarray|align|gather|equation)\*?\}|\$[^$\n]+\$/g) || []).length;
 
     let html = '';
+    const parserObj = (typeof TeXParser !== 'undefined' && TeXParser)
+      ? TeXParser
+      : (typeof require === 'function' ? (() => { try { return require('./tex_parser.js'); } catch (_) { return null; } })() : null);
 
-    // Nếu người dùng chọn engine thuần latex.js và file không chứa macro ex_test/TikZ đặc thù
     if (options.engine === 'latexjs' && typeof window !== 'undefined' && window.latexjs && tikzCount === 0 && !/\\(?:begin\{(?:ex|bt|vd|eqnarray)|immini|choice|loigiai|heva|hoac)/.test(body)) {
       try {
         const gen = new window.latexjs.HtmlGenerator({ hyphenate: false });
         const doc = window.latexjs.parse(rawTex, { generator: gen });
         const wrapper = document.createElement('div');
         wrapper.appendChild(doc.domFragment());
-        html = `<div class="tex-doc">${wrapper.innerHTML}</div>`;
+        html = `<div class="${docCls}">${wrapper.innerHTML}</div>`;
       } catch (_err) {
-        html = `<div class="tex-doc">${this.compileFragment(body, { preambleInfo: preamble, alreadyStrippedComments: true })}</div>`;
+        html = `<div class="${docCls}">${this.compileFragment(body, { preambleInfo: preamble, alreadyStrippedComments: true, openSolutions })}</div>`;
       }
-    } else {
+    } else if (
+      envExCount === 0 &&
+      plainExCount > 0 &&
+      parserObj &&
+      /\\(?:choice|choiceTF|shortans|loigiai)\b|(?:^|\n|\\\\)\s*\*?\s*(?:\\textbf\{|\\underline\{)?\*?[A-Da-d][.)]/m.test(body)
+    ) {
+      const parsedExam = parserObj.parse(rawTex, { title: preamble.title || '' });
+      if ((parsedExam.part1.length + parsedExam.part2.length + parsedExam.part3.length) > 0) {
+        html = this.compileExamDataFallbackHtml(parsedExam, { openSolutions, preambleInfo: preamble, hideTitle: !preamble.title });
+      }
+    }
+
+    if (!html) {
       const compiledBody = this.compileFragment(body, {
         preambleInfo: preamble,
         alreadyStrippedComments: true,
-        inlineQuestion: false
+        inlineQuestion: false,
+        openSolutions
       });
-      html = `<div class="tex-doc">${compiledBody}</div>`;
+      html = `<div class="${docCls}">${compiledBody}</div>`;
     }
 
     // Tự động suy luận tiêu đề tài liệu nếu chưa có \title
@@ -1193,14 +1313,238 @@ const TeXCompiler = {
     });
   },
 
+  // So sánh đáp số trả lời ngắn chuẩn hóa dấu phẩy/chấm & sai số số thực
+  isShortAnsEqual(userVal, correctVal) {
+    const norm = (v) => String(v ?? '').trim().replace(/\s+/g, '').replace(/,/g, '.');
+    const u = norm(userVal);
+    const c = norm(correctVal);
+    if (!u || !c) return false;
+    if (u.toLowerCase() === c.toLowerCase()) return true;
+    const un = Number(u);
+    const cn = Number(c);
+    return Number.isFinite(un) && Number.isFinite(cn) && Math.abs(un - cn) < 1e-6;
+  },
+
+  // Gắn sự kiện tương tác trực tiếp trên câu hỏi HTML (hỗ trợ cả mode='practice' tự chấm và mode='exam' đồng bộ phiếu làm bài)
+  bindInteractiveDom(rootEl, opts = {}) {
+    if (!rootEl || typeof rootEl.addEventListener !== 'function') return;
+    rootEl._texInteractOpts = Object.assign({ mode: 'practice' }, opts);
+    if (rootEl._texInteractBound) return;
+    rootEl._texInteractBound = true;
+
+    const setStatusBadge = (card, text, tone) => {
+      const st = card ? card.querySelector('.tex-q-status') : null;
+      if (!st) return;
+      if (!text) {
+        st.textContent = '';
+        st.className = 'tex-q-status hidden';
+        return;
+      }
+      const clsMap = {
+        right: 'tex-q-status tex-q-status-right',
+        wrong: 'tex-q-status tex-q-status-wrong',
+        info: 'tex-q-status tex-q-status-info'
+      };
+      st.className = clsMap[tone] || clsMap.info;
+      st.textContent = text;
+    };
+
+    const evaluateShortAns = (wrap) => {
+      if (!wrap) return;
+      const inp = wrap.querySelector('.tex-shortans-input');
+      const fb = wrap.querySelector('.tex-shortans-feedback');
+      const card = wrap.closest('.tex-env');
+      if (!inp) return;
+      const val = inp.value.trim();
+      const corr = wrap.dataset.correct;
+      if (!val) {
+        inp.classList.remove('is-right', 'is-wrong');
+        if (fb) fb.textContent = '';
+        setStatusBadge(card, '', '');
+        return;
+      }
+      if (corr === undefined || corr === '') {
+        setStatusBadge(card, `Đã điền: ${val}`, 'info');
+        return;
+      }
+      const ok = this.isShortAnsEqual(val, corr);
+      inp.classList.toggle('is-right', ok);
+      inp.classList.toggle('is-wrong', !ok);
+      if (fb) {
+        fb.className = ok ? 'tex-shortans-feedback text-xs font-bold text-emerald-600' : 'tex-shortans-feedback text-xs font-bold text-rose-600';
+        fb.textContent = ok ? 'Chính xác!' : `Chưa đúng (Đáp số: ${corr})`;
+      }
+      setStatusBadge(card, ok ? 'Chính xác' : `Sai • Đáp số: ${corr}`, ok ? 'right' : 'wrong');
+    };
+
+    rootEl.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return;
+      const curOpts = rootEl._texInteractOpts || { mode: 'practice' };
+
+      const choiceEl = e.target.closest('.tex-choice-item[data-choice]');
+      if (choiceEl && rootEl.contains(choiceEl)) {
+        const qId = Number(choiceEl.dataset.qid) || 1;
+        const letter = choiceEl.dataset.choice;
+        const grid = choiceEl.closest('.tex-choices-grid') || choiceEl.parentElement;
+        const card = choiceEl.closest('.tex-env');
+        if (grid) {
+          grid.querySelectorAll('.tex-choice-item').forEach(el => {
+            el.classList.remove('tex-choice-selected', 'tex-choice-user-right', 'tex-choice-user-wrong', 'tex-choice-reveal-correct');
+          });
+        }
+        if (curOpts.mode === 'exam') {
+          choiceEl.classList.add('tex-choice-selected');
+          setStatusBadge(card, `Đã chọn ${letter}`, 'info');
+          if (typeof curOpts.onPart1 === 'function') curOpts.onPart1(qId, letter);
+        } else {
+          const corrEl = grid ? grid.querySelector('.tex-choice-item[data-correct="1"]') : null;
+          if (!corrEl) {
+            choiceEl.classList.add('tex-choice-selected');
+            setStatusBadge(card, `Đã chọn ${letter}`, 'info');
+          } else if (choiceEl === corrEl) {
+            choiceEl.classList.add('tex-choice-user-right');
+            setStatusBadge(card, `Chính xác (${letter})`, 'right');
+          } else {
+            choiceEl.classList.add('tex-choice-user-wrong');
+            corrEl.classList.add('tex-choice-reveal-correct');
+            setStatusBadge(card, `Chưa đúng • Đáp án: ${corrEl.dataset.choice || ''}`, 'wrong');
+          }
+        }
+        return;
+      }
+
+      const tfBtn = e.target.closest('.tex-tf-btn[data-tf-val]');
+      if (tfBtn && rootEl.contains(tfBtn)) {
+        const tfItem = tfBtn.closest('.tex-tf-item');
+        if (!tfItem) return;
+        const qId = Number(tfItem.dataset.qid) || 1;
+        const sub = tfItem.dataset.sub || 'a';
+        const valStr = tfBtn.dataset.tfVal;
+        const boolVal = valStr === 'true';
+        const card = tfItem.closest('.tex-env');
+
+        tfItem.querySelectorAll('.tex-tf-btn').forEach(b => {
+          b.classList.remove('is-selected-true', 'is-selected-false', 'is-right', 'is-wrong');
+        });
+        tfBtn.classList.add(boolVal ? 'is-selected-true' : 'is-selected-false');
+        tfItem.dataset.userVal = valStr;
+
+        if (curOpts.mode === 'exam') {
+          const list = tfItem.closest('.tex-tf-list');
+          const doneCnt = list ? list.querySelectorAll('.tex-tf-item[data-user-val]').length : 1;
+          setStatusBadge(card, `Đã chọn ${doneCnt}/4 ý`, 'info');
+          if (typeof curOpts.onPart2 === 'function') curOpts.onPart2(qId, sub, boolVal);
+        } else if (tfItem.dataset.correct !== undefined) {
+          const isRight = tfItem.dataset.correct === valStr;
+          tfBtn.classList.add(isRight ? 'is-right' : 'is-wrong');
+          tfItem.classList.toggle('tex-tf-row-right', isRight);
+          tfItem.classList.toggle('tex-tf-row-wrong', !isRight);
+          const list = tfItem.closest('.tex-tf-list');
+          if (list) {
+            const rows = Array.from(list.querySelectorAll('.tex-tf-item'));
+            const answered = rows.filter(r => r.dataset.userVal !== undefined);
+            const rightCnt = answered.filter(r => r.dataset.userVal === r.dataset.correct).length;
+            setStatusBadge(card, `Đúng ${rightCnt}/${rows.length} ý (${answered.length}/${rows.length} đã chọn)`, rightCnt === rows.length ? 'right' : (rightCnt === answered.length ? 'info' : 'wrong'));
+          }
+        }
+        return;
+      }
+
+      const checkBtn = e.target.closest('.tex-shortans-check-btn');
+      if (checkBtn && rootEl.contains(checkBtn)) {
+        evaluateShortAns(checkBtn.closest('.tex-shortans-interact'));
+      }
+    });
+
+    rootEl.addEventListener('input', (e) => {
+      const inp = e.target.closest('.tex-shortans-input');
+      if (!inp || !rootEl.contains(inp)) return;
+      const wrap = inp.closest('.tex-shortans-interact');
+      const card = inp.closest('.tex-env');
+      const curOpts = rootEl._texInteractOpts || { mode: 'practice' };
+      if (curOpts.mode === 'exam') {
+        const qId = Number(wrap?.dataset.qid) || 1;
+        const cleanVal = inp.value.replace(/[^0-9.,\-/]/g, '').slice(0, 6);
+        if (inp.value !== cleanVal) inp.value = cleanVal;
+        setStatusBadge(card, cleanVal ? `Đáp số: ${cleanVal}` : '', 'info');
+        if (typeof curOpts.onPart3 === 'function') curOpts.onPart3(qId, cleanVal);
+      } else {
+        inp.classList.remove('is-right', 'is-wrong');
+        const fb = wrap ? wrap.querySelector('.tex-shortans-feedback') : null;
+        if (fb) fb.textContent = '';
+      }
+    });
+
+    rootEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const inp = e.target.closest('.tex-shortans-input');
+      if (!inp || !rootEl.contains(inp)) return;
+      const curOpts = rootEl._texInteractOpts || { mode: 'practice' };
+      if (curOpts.mode !== 'exam') {
+        e.preventDefault();
+        evaluateShortAns(inp.closest('.tex-shortans-interact'));
+      }
+    });
+
+    rootEl.addEventListener('toggle', (e) => {
+      const det = e.target;
+      if (det && det.classList && det.classList.contains('tex-loigiai') && det.open && typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('resize'));
+      }
+    }, true);
+  },
+
+  toggleAllSolutions(rootEl, forceOpen = null) {
+    if (!rootEl) return false;
+    const list = Array.from(rootEl.querySelectorAll('details.tex-loigiai'));
+    const docEl = rootEl.classList?.contains('tex-doc') ? rootEl : rootEl.querySelector('.tex-doc');
+    const nextOpen = forceOpen !== null
+      ? Boolean(forceOpen)
+      : (list.length ? list.some(d => !d.open) : !(docEl && docEl.classList.contains('reveal-all-answers')));
+    list.forEach(d => { d.open = nextOpen; });
+    if (docEl) docEl.classList.toggle('reveal-all-answers', nextOpen);
+    return nextOpen;
+  },
+
+  resetPracticeState(rootEl) {
+    if (!rootEl) return;
+    rootEl.querySelectorAll('.tex-choice-selected, .tex-choice-user-right, .tex-choice-user-wrong, .tex-choice-reveal-correct').forEach(el => {
+      el.classList.remove('tex-choice-selected', 'tex-choice-user-right', 'tex-choice-user-wrong', 'tex-choice-reveal-correct');
+    });
+    rootEl.querySelectorAll('.tex-tf-btn').forEach(btn => {
+      btn.classList.remove('is-selected-true', 'is-selected-false', 'is-right', 'is-wrong');
+    });
+    rootEl.querySelectorAll('.tex-tf-item').forEach(row => {
+      delete row.dataset.userVal;
+      row.classList.remove('tex-tf-row-right', 'tex-tf-row-wrong');
+    });
+    rootEl.querySelectorAll('.tex-shortans-input').forEach(inp => {
+      inp.value = '';
+      inp.classList.remove('is-right', 'is-wrong');
+    });
+    rootEl.querySelectorAll('.tex-shortans-feedback').forEach(fb => {
+      fb.textContent = '';
+      fb.className = 'tex-shortans-feedback text-xs font-bold';
+    });
+    rootEl.querySelectorAll('.tex-q-status').forEach(st => {
+      st.textContent = '';
+      st.className = 'tex-q-status hidden';
+    });
+    this.toggleAllSolutions(rootEl, false);
+  },
+
   // Loại bỏ hoàn toàn dấu vết đáp án & lời giải khỏi HTML khi hiển thị hoặc tải đề trong giờ thi
   stripHtmlAnswers(html) {
     if (!html) return '';
     return String(html)
       .replace(/<details\s+[^>]*\btex-loigiai\b[^>]*>[\s\S]*?<\/details>/gi, '')
       .replace(/<div\s+[^>]*\btex-shortans-box\b[^>]*>[\s\S]*?<\/div>/gi, '')
+      .replace(/<button\s+[^>]*\btex-shortans-check-btn\b[^>]*>[\s\S]*?<\/button>/gi, '')
+      .replace(/<span\s+[^>]*\btex-shortans-feedback\b[^>]*>[\s\S]*?<\/span>/gi, '')
       .replace(/<span\s+[^>]*\btex-ans-pill\b[^>]*>[\s\S]*?<\/span>/gi, '')
-      .replace(/\btex-choice-correct\b/g, '');
+      .replace(/\sdata-correct="[^"]*"/gi, '')
+      .replace(/\btex-choice-correct\b/g, '')
+      .replace(/\breveal-all-answers\b/g, '');
   },
 
   // Bóc tách mã nguồn TeX nhúng sẵn từ file .html đã xuất bởi hệ thống (nếu có)
@@ -1211,24 +1555,30 @@ const TeXCompiler = {
     return m[1].replace(/<\\\/script/gi, '</script').trim();
   },
 
-  // Tạo tài liệu HTML chuẩn từ dữ liệu câu hỏi 3 phần (dự phòng khi đề thi không lưu raw_tex)
-  compileExamDataFallbackHtml(ex) {
+  // Tạo tài liệu HTML tương tác chuẩn từ dữ liệu câu hỏi 3 phần (dự phòng khi đề thi không lưu đầy đủ raw_tex)
+  compileExamDataFallbackHtml(ex, options = {}) {
     if (!ex) return '<div class="tex-doc"></div>';
-    const renderQ = (frag) => this.compileFragment(String(frag || ''), { inlineQuestion: true });
-    let partsHtml = `<div class="tex-maketitle text-center my-4 pb-3 border-b border-slate-200"><h1 class="text-xl font-extrabold text-slate-900">${this.escapeHtml(ex.title || 'Đề Thi Môn Toán')}</h1></div>`;
+    const openSolutions = Boolean(options.openSolutions);
+    const preambleInfo = options.preambleInfo || (ex.tex_macros ? { macros: ex.tex_macros, tikzLibs: [], packages: [] } : null);
+    const renderQ = (frag) => this.compileFragment(String(frag || ''), { inlineQuestion: true, preambleInfo });
+    let partsHtml = options.hideTitle
+      ? ''
+      : `<div class="tex-maketitle text-center my-4 pb-3 border-b border-slate-200"><h1 class="text-xl font-extrabold text-slate-900">${this.escapeHtml(ex.title || 'Đề Thi Môn Toán')}</h1></div>`;
 
     if (Array.isArray(ex.part1) && ex.part1.length > 0) {
       partsHtml += `<h2 class="tex-section-heading mt-5 mb-2.5">PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn</h2>`;
       ex.part1.forEach(q => {
         const letters = ['A', 'B', 'C', 'D'];
-        const choicesHtml = `<div class="tex-choices-grid tex-choices-cols-2">${(q.choices || []).map((c, idx) => {
+        const corrLetter = q.correct_answer || '';
+        const choicesHtml = `<div class="tex-choices-grid tex-choices-cols-2 mt-3">${(q.choices || []).map((c, idx) => {
           const letter = letters[idx] || '';
-          const isCorr = q.correct_answer === letter;
-          const cleanChoice = String(c || '').replace(/^[A-D]\.\s*/, '');
-          return `<div class="tex-choice-item ${isCorr ? 'tex-choice-correct' : ''}"><span class="tex-choice-letter">${letter}.</span><span class="tex-choice-body">${renderQ(cleanChoice)}</span></div>`;
+          const isCorr = corrLetter === letter;
+          const cleanChoice = String(c || '').replace(/^[A-D][.:]\s*/, '');
+          return `<div class="tex-choice-item ${isCorr ? 'tex-choice-correct' : ''}" data-part="p1" data-qid="${q.id}" data-choice="${letter}"${isCorr ? ' data-correct="1"' : ''}><span class="tex-choice-letter">${letter}.</span><span class="tex-choice-body flex-1 min-w-0">${renderQ(cleanChoice)}</span></div>`;
         }).join('')}</div>`;
-        const lgHtml = q.explanation ? `<details class="tex-loigiai mt-3" open><summary class="tex-loigiai-summary"><i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Lời giải chi tiết</summary><div class="tex-loigiai-body">${renderQ(q.explanation)}</div></details>` : '';
-        partsHtml += `<article class="tex-env tex-env-ex my-4"><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Câu ${q.id}.</span></div><div class="tex-env-body">${renderQ(q.content)}${choicesHtml}${lgHtml}</div></article>`;
+        const ansSummary = corrLetter ? `Chọn đáp án ${corrLetter}` : '';
+        const lgHtml = this.buildLoigiaiHtml(q.explanation ? renderQ(q.explanation) : '', ansSummary, openSolutions);
+        partsHtml += `<article class="tex-env tex-env-ex my-4" data-qpart="p1" data-qid="${q.id}" id="html_q_p1_${q.id}"><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Câu ${q.id}.</span><span class="tex-q-status hidden"></span></div><div class="tex-env-body">${renderQ(q.content)}${choicesHtml}${lgHtml}</div></article>`;
       });
     }
 
@@ -1236,31 +1586,40 @@ const TeXCompiler = {
       partsHtml += `<h2 class="tex-section-heading mt-5 mb-2.5">PHẦN II. Câu trắc nghiệm Đúng / Sai</h2>`;
       ex.part2.forEach(q => {
         const stList = q.statements || q.items || [];
-        const tfHtml = `<div class="tex-tf-list space-y-1.5 mt-2.5">${stList.map(st => {
-          const subId = st.sub_id || st.key || '';
-          const badge = st.correct ? '<span class="tex-ans-pill tex-ans-true">Đúng</span>' : '<span class="tex-ans-pill tex-ans-false">Sai</span>';
-          return `<div class="tex-tf-item"><span class="tex-tf-label">${subId})</span><div class="tex-tf-body flex-1">${renderQ(st.text)}</div>${badge}</div>`;
+        const ansParts = [];
+        const tfHtml = `<div class="tex-tf-list space-y-1.5 mt-3">${stList.map((st, idx) => {
+          const subId = st.sub_id || st.key || ['a', 'b', 'c', 'd'][idx] || '';
+          const hasKey = st.correct !== undefined && st.correct !== null;
+          const isTrue = Boolean(st.correct);
+          if (hasKey) ansParts.push(`${subId}) ${isTrue ? 'Đúng' : 'Sai'}`);
+          const badge = `<span class="tex-ans-pill ${isTrue ? 'tex-ans-true' : 'tex-ans-false'}">${isTrue ? 'Đúng' : 'Sai'}</span>`;
+          return `<div class="tex-tf-item" data-part="p2" data-qid="${q.id}" data-sub="${subId}"${hasKey ? ` data-correct="${isTrue ? 'true' : 'false'}"` : ''}><span class="tex-tf-label">${subId})</span><div class="tex-tf-text flex-1 min-w-0">${renderQ(st.text)}</div><div class="tex-tf-controls flex items-center gap-1 shrink-0"><button type="button" class="tex-tf-btn" data-tf-val="true">Đúng</button><button type="button" class="tex-tf-btn" data-tf-val="false">Sai</button></div>${badge}</div>`;
         }).join('')}</div>`;
-        const lgHtml = q.explanation ? `<details class="tex-loigiai mt-3" open><summary class="tex-loigiai-summary"><i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Lời giải chi tiết</summary><div class="tex-loigiai-body">${renderQ(q.explanation)}</div></details>` : '';
-        partsHtml += `<article class="tex-env tex-env-ex my-4"><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Câu ${q.id}.</span></div><div class="tex-env-body">${renderQ(q.content)}${tfHtml}${lgHtml}</div></article>`;
+        const ansSummary = ansParts.length ? `Đáp án chuẩn: ${ansParts.join(' • ')}` : '';
+        const lgHtml = this.buildLoigiaiHtml(q.explanation ? renderQ(q.explanation) : '', ansSummary, openSolutions);
+        partsHtml += `<article class="tex-env tex-env-ex my-4" data-qpart="p2" data-qid="${q.id}" id="html_q_p2_${q.id}"><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Câu ${q.id}.</span><span class="tex-q-status hidden"></span></div><div class="tex-env-body">${renderQ(q.content)}${tfHtml}${lgHtml}</div></article>`;
       });
     }
 
     if (Array.isArray(ex.part3) && ex.part3.length > 0) {
       partsHtml += `<h2 class="tex-section-heading mt-5 mb-2.5">PHẦN III. Câu trắc nghiệm trả lời ngắn</h2>`;
       ex.part3.forEach(q => {
-        const ansHtml = q.correct_answer !== undefined && q.correct_answer !== ''
-          ? `<div class="tex-shortans-box"><span class="tex-shortans-label">Đáp án:</span><span class="tex-shortans-val">${this.escapeHtml(String(q.correct_answer))}</span></div>`
+        const hasAns = q.correct_answer !== undefined && q.correct_answer !== null && String(q.correct_answer).trim() !== '';
+        const ansClean = hasAns ? String(q.correct_answer).trim() : '';
+        const interactHtml = `<div class="tex-shortans-interact mt-3 flex flex-wrap items-center gap-2" data-part="p3" data-qid="${q.id}"${hasAns ? ` data-correct="${this.escapeAttr(ansClean)}"` : ''}><label class="text-xs font-bold text-slate-600"><i class="fa-solid fa-keyboard mr-1 text-indigo-600"></i>Nhập đáp số:</label><input type="text" maxlength="12" placeholder="Điền kết quả..." class="tex-shortans-input px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-xs font-mono font-bold text-slate-800 w-36 focus:border-indigo-500 outline-none"><button type="button" class="tex-shortans-check-btn px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer transition">Kiểm tra</button><span class="tex-shortans-feedback text-xs font-bold"></span></div>`;
+        const ansHtml = hasAns
+          ? `<div class="tex-shortans-box mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-amber-200 bg-amber-50/70 text-xs"><span class="font-bold text-amber-800"><i class="fa-solid fa-pen-to-square mr-1"></i>Đáp số trả lời ngắn:</span><span class="tex-shortans-val font-mono font-extrabold text-amber-900 px-2 py-0.5 rounded bg-white border border-amber-300">${this.escapeHtml(ansClean)}</span></div>`
           : '';
-        const lgHtml = q.explanation ? `<details class="tex-loigiai mt-3" open><summary class="tex-loigiai-summary"><i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Lời giải chi tiết</summary><div class="tex-loigiai-body">${renderQ(q.explanation)}</div></details>` : '';
-        partsHtml += `<article class="tex-env tex-env-ex my-4"><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Câu ${q.id}.</span></div><div class="tex-env-body">${renderQ(q.content)}${ansHtml}${lgHtml}</div></article>`;
+        const ansSummary = hasAns ? `Đáp số chuẩn: ${this.escapeHtml(ansClean)}` : '';
+        const lgHtml = this.buildLoigiaiHtml(q.explanation ? renderQ(q.explanation) : '', ansSummary, openSolutions);
+        partsHtml += `<article class="tex-env tex-env-ex my-4" data-qpart="p3" data-qid="${q.id}" id="html_q_p3_${q.id}"><div class="tex-env-header"><span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Câu ${q.id}.</span><span class="tex-q-status hidden"></span></div><div class="tex-env-body">${renderQ(q.content)}${interactHtml}${ansHtml}${lgHtml}</div></article>`;
       });
     }
 
-    return `<div class="tex-doc">${partsHtml}</div>`;
+    return `<div class="tex-doc${openSolutions ? ' reveal-all-answers' : ''}">${partsHtml}</div>`;
   },
 
-  // Xuất file .html độc lập hoàn chỉnh (nhúng CDN KaTeX + mhchem + @rod2ik/tikzjax + CSS + nút ẩn/hiện lời giải)
+  // Xuất file .html độc lập hoàn chỉnh (nhúng CDN KaTeX + mhchem + @rod2ik/tikzjax + CSS + tương tác tự kiểm tra & xem lời giải từng câu)
   buildStandaloneHtml(rawTex, customTitle = '', options = {}) {
     const lockAnswers = Boolean(options.lockAnswers);
     const res = rawTex && String(rawTex).trim()
@@ -1289,6 +1648,79 @@ const TeXCompiler = {
       maxRetries: 1,
       restartWorkerOnFail: true
     };
+    window.toggleStandaloneSolutions = function() {
+      var list = Array.prototype.slice.call(document.querySelectorAll('details.tex-loigiai'));
+      var doc = document.querySelector('.tex-doc');
+      var nextOpen = list.length ? list.some(function(d){ return !d.open; }) : !(doc && doc.classList.contains('reveal-all-answers'));
+      list.forEach(function(d){ d.open = nextOpen; });
+      if (doc) doc.classList.toggle('reveal-all-answers', nextOpen);
+    };
+    window.resetStandalonePractice = function() {
+      document.querySelectorAll('.tex-choice-selected,.tex-choice-user-right,.tex-choice-user-wrong,.tex-choice-reveal-correct').forEach(function(el){
+        el.classList.remove('tex-choice-selected','tex-choice-user-right','tex-choice-user-wrong','tex-choice-reveal-correct');
+      });
+      document.querySelectorAll('.tex-tf-btn').forEach(function(b){ b.classList.remove('is-selected-true','is-selected-false','is-right','is-wrong'); });
+      document.querySelectorAll('.tex-shortans-input').forEach(function(i){ i.value=''; i.classList.remove('is-right','is-wrong'); });
+      document.querySelectorAll('.tex-shortans-feedback,.tex-q-status').forEach(function(s){ s.textContent=''; });
+      document.querySelectorAll('details.tex-loigiai').forEach(function(d){ d.open = false; });
+      var doc = document.querySelector('.tex-doc');
+      if (doc) doc.classList.remove('reveal-all-answers');
+    };
+    window.addEventListener('DOMContentLoaded', function() {
+      var p = new URLSearchParams(window.location.search);
+      if (p.get('mode') === 'exam') {
+        var tb = document.querySelector('.toolbar');
+        if (tb) tb.remove();
+      }
+      if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '\\\\[', right: '\\\\]', display: true },
+            { left: '$', right: '$', display: false },
+            { left: '\\\\(', right: '\\\\)', display: false }
+          ],
+          macros: ${macrosJson},
+          ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option', 'svg'],
+          ignoredClasses: ['tikzjax-wrapper', 'katex'],
+          throwOnError: false,
+          strict: false
+        });
+      }
+      document.body.addEventListener('click', function(e) {
+        var c = e.target.closest('.tex-choice-item[data-choice]');
+        if (c) {
+          var g = c.closest('.tex-choices-grid') || c.parentElement;
+          g.querySelectorAll('.tex-choice-item').forEach(function(el){ el.classList.remove('tex-choice-selected','tex-choice-user-right','tex-choice-user-wrong','tex-choice-reveal-correct'); });
+          var corr = g.querySelector('.tex-choice-item[data-correct="1"]');
+          if (!corr) c.classList.add('tex-choice-selected');
+          else if (c === corr) c.classList.add('tex-choice-user-right');
+          else { c.classList.add('tex-choice-user-wrong'); corr.classList.add('tex-choice-reveal-correct'); }
+          return;
+        }
+        var tf = e.target.closest('.tex-tf-btn[data-tf-val]');
+        if (tf) {
+          var row = tf.closest('.tex-tf-item');
+          row.querySelectorAll('.tex-tf-btn').forEach(function(b){ b.classList.remove('is-selected-true','is-selected-false','is-right','is-wrong'); });
+          tf.classList.add(tf.dataset.tfVal === 'true' ? 'is-selected-true' : 'is-selected-false');
+          if (row.dataset.correct !== undefined) tf.classList.add(row.dataset.correct === tf.dataset.tfVal ? 'is-right' : 'is-wrong');
+          return;
+        }
+        var chk = e.target.closest('.tex-shortans-check-btn');
+        if (chk) {
+          var w = chk.closest('.tex-shortans-interact');
+          var inp = w && w.querySelector('.tex-shortans-input');
+          var fb = w && w.querySelector('.tex-shortans-feedback');
+          if (!inp || !w.dataset.correct) return;
+          var u = inp.value.trim().replace(/\\s+/g,'').replace(/,/g,'.');
+          var k = w.dataset.correct.trim().replace(/\\s+/g,'').replace(/,/g,'.');
+          var ok = u && (u.toLowerCase() === k.toLowerCase() || (isFinite(Number(u)) && isFinite(Number(k)) && Math.abs(Number(u)-Number(k)) < 1e-6));
+          inp.classList.toggle('is-right', Boolean(ok));
+          inp.classList.toggle('is-wrong', !ok);
+          if (fb) fb.textContent = ok ? 'Chính xác!' : ('Chưa đúng (Đáp số: ' + w.dataset.correct + ')');
+        }
+      });
+    });
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/mhchem.min.js" crossorigin="anonymous"></script>
@@ -1321,22 +1753,43 @@ const TeXCompiler = {
     .tex-td-bl { border-left: 1px solid var(--border); } .tex-td-br { border-right: 1px solid var(--border); }
     .tex-tr-bt td { border-top: 1px solid var(--border); } .tex-tr-bb td { border-bottom: 1px solid var(--border); }
     .tex-env { border: 1px solid var(--border); border-radius: 1rem; padding: 1rem 1.2rem; margin: 1rem 0; background: var(--card); }
-    .tex-env-header { margin-bottom: 0.45rem; }
+    .tex-env-header { margin-bottom: 0.45rem; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
     .tex-env-badge { display: inline-flex; align-items: center; font-weight: 800; font-size: 0.85rem; color: var(--accent); background: var(--accent-soft); padding: 0.2rem 0.65rem; border-radius: 0.5rem; }
     .tex-choices-grid { display: grid; gap: 0.5rem; margin-top: 0.75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .tex-choices-cols-1 { grid-template-columns: 1fr; }
     .tex-choices-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .tex-choice-item { padding: 0.45rem 0.7rem; border: 1px solid var(--border); border-radius: 0.6rem; display: flex; gap: 0.4rem; }
-    body.show-answers .tex-choice-correct { border-color: #10b981; background: rgba(16,185,129,0.1); font-weight: 700; }
+    .tex-choice-item { padding: 0.5rem 0.75rem; border: 1.5px solid var(--border); border-radius: 0.65rem; display: flex; gap: 0.45rem; cursor: pointer; transition: all 0.15s; }
+    .tex-choice-item:hover { border-color: var(--accent); }
+    .tex-choice-selected { border-color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+    .tex-choice-user-right, .tex-doc.reveal-all-answers .tex-choice-correct, .tex-choice-reveal-correct { border-color: #10b981; background: rgba(16,185,129,0.12); font-weight: 700; }
+    .tex-choice-user-wrong { border-color: #f43f5e; background: rgba(244,63,94,0.1); }
     .tex-choice-letter, .tex-tf-label, .tex-li-marker { font-weight: 800; color: var(--accent); flex-shrink: 0; }
-    .tex-tf-item { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.4rem 0.65rem; border: 1px solid var(--border); border-radius: 0.6rem; }
+    .tex-tf-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.7rem; border: 1px solid var(--border); border-radius: 0.65rem; margin-top: 0.4rem; }
+    .tex-tf-text { flex: 1; min-width: 0; }
+    .tex-tf-controls { display: flex; gap: 0.3rem; flex-shrink: 0; }
+    .tex-tf-btn { border: 1px solid var(--border); background: var(--card); color: var(--muted); border-radius: 0.45rem; padding: 0.2rem 0.55rem; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
+    .tex-tf-btn.is-selected-true, .tex-tf-btn.is-right { border-color: #10b981; background: #d1fae5; color: #065f46; }
+    .tex-tf-btn.is-selected-false { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+    .tex-tf-btn.is-wrong { border-color: #f43f5e; background: #ffe4e6; color: #9f1239; }
+    .tex-shortans-interact { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
+    .tex-shortans-input { padding: 0.35rem 0.65rem; border: 1.5px solid var(--border); border-radius: 0.55rem; font-family: monospace; font-weight: 700; width: 9rem; background: var(--card); color: var(--text); }
+    .tex-shortans-input.is-right { border-color: #10b981; background: rgba(16,185,129,0.1); }
+    .tex-shortans-input.is-wrong { border-color: #f43f5e; background: rgba(244,63,94,0.08); }
+    .tex-shortans-check-btn { border: 0; background: var(--accent); color: #fff; padding: 0.38rem 0.8rem; border-radius: 0.55rem; font-size: 0.78rem; font-weight: 700; cursor: pointer; }
     .tex-ans-pill, .tex-shortans-box { display: none; }
-    body.show-answers .tex-ans-pill { display: inline-block; font-size: 0.72rem; font-weight: 800; padding: 0.1rem 0.5rem; border-radius: 999px; }
+    .tex-doc.reveal-all-answers .tex-ans-pill { display: inline-block; font-size: 0.72rem; font-weight: 800; padding: 0.1rem 0.5rem; border-radius: 999px; }
     .tex-ans-true { background: #d1fae5; color: #065f46; } .tex-ans-false { background: #ffe4e6; color: #9f1239; }
-    body.show-answers .tex-shortans-box { display: inline-flex; margin-top: 0.65rem; gap: 0.4rem; font-size: 0.85rem; font-weight: 700; }
+    .tex-doc.reveal-all-answers .tex-shortans-box { display: inline-flex; margin-top: 0.65rem; gap: 0.4rem; font-size: 0.85rem; font-weight: 700; }
     .tex-loigiai { margin-top: 0.85rem; border-top: 1px dashed var(--border); padding-top: 0.65rem; }
-    body:not(.show-answers) .tex-loigiai { display: none; }
-    .tex-loigiai-summary { cursor: pointer; font-weight: 700; font-size: 0.85rem; color: #059669; }
+    .tex-loigiai-summary { list-style: none; cursor: pointer; display: inline-flex; }
+    .tex-loigiai-summary::-webkit-details-marker { display: none; }
+    .tex-loigiai-btn { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.8rem; border-radius: 999px; border: 1px solid #a7f3d0; background: #ecfdf5; color: #047857; font-weight: 700; font-size: 0.8rem; }
+    .tex-loigiai .tex-lg-open-txt { display: none; }
+    .tex-loigiai[open] .tex-lg-closed-txt { display: none; }
+    .tex-loigiai[open] .tex-lg-open-txt { display: inline; }
+    .tex-loigiai[open] .tex-lg-chevron { transform: rotate(180deg); }
+    .tex-loigiai-body { margin-top: 0.65rem; padding: 0.85rem 1rem; border-radius: 0.85rem; border: 1px solid #a7f3d0; background: rgba(16,185,129,0.05); }
+    .tex-loigiai-ans-badge { display: inline-flex; align-items: center; padding: 0.2rem 0.65rem; border-radius: 999px; background: #10b981; color: #fff; font-size: 0.78rem; font-weight: 800; }
     .tex-list { list-style: none; padding-left: 0.25rem; margin: 0.5rem 0; }
     .tex-li { display: flex; align-items: flex-start; gap: 0.5rem; margin: 0.25rem 0; }
     .tex-circlenum { display: inline-flex; width: 1.35rem; height: 1.35rem; border-radius: 999px; border: 1.5px solid currentColor; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; }
@@ -1345,43 +1798,16 @@ const TeXCompiler = {
     @media print { .toolbar { display: none !important; } .container { border: 0; box-shadow: none; margin: 0; max-width: 100%; } }
   </style>
 </head>
-<body class="${lockAnswers ? '' : 'show-answers'}">
+<body>
   <div class="toolbar">
     <div class="toolbar-title"><i class="fa-solid fa-book-open-reader" style="margin-right:6px;color:var(--accent)"></i>${this.escapeHtml(docTitle)}</div>
     <div class="toolbar-actions">
-      ${lockAnswers ? '' : '<button class="btn" onclick="document.body.classList.toggle(\'show-answers\')"><i class="fa-solid fa-eye"></i> Ẩn / Hiện lời giải &amp; đáp án</button>'}
+      ${lockAnswers ? '' : '<button class="btn" onclick="toggleStandaloneSolutions()"><i class="fa-solid fa-lightbulb"></i> Mở / Thu gọn tất cả lời giải</button><button class="btn" onclick="resetStandalonePractice()"><i class="fa-solid fa-rotate-left"></i> Làm lại câu hỏi</button>'}
       <button class="btn" onclick="const h=document.documentElement;h.setAttribute('data-theme',h.getAttribute('data-theme')==='dark'?'light':'dark')"><i class="fa-solid fa-circle-half-stroke"></i> Sáng / Tối</button>
       <button class="btn" onclick="window.print()"><i class="fa-solid fa-print"></i> In / Lưu PDF</button>
     </div>
   </div>
   <main class="container">${finalBodyHtml}</main>${embeddedSourceTag}
-  <script>
-    (function() {
-      var p = new URLSearchParams(window.location.search);
-      if (p.get('mode') === 'exam') {
-        document.body.classList.remove('show-answers');
-        var tb = document.querySelector('.toolbar');
-        if (tb) tb.remove();
-      }
-    })();
-    window.addEventListener('DOMContentLoaded', function() {
-      if (typeof renderMathInElement === 'function') {
-        renderMathInElement(document.body, {
-          delimiters: [
-            { left: '$$', right: '$$', display: true },
-            { left: '\\\\[', right: '\\\\]', display: true },
-            { left: '$', right: '$', display: false },
-            { left: '\\\\(', right: '\\\\)', display: false }
-          ],
-          macros: ${macrosJson},
-          ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option', 'svg'],
-          ignoredClasses: ['tikzjax-wrapper', 'katex'],
-          throwOnError: false,
-          strict: false
-        });
-      }
-    });
-  </script>
 </body>
 </html>`;
   }

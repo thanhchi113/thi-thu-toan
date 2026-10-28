@@ -103,5 +103,48 @@ const fallbackHtml = TeXCompiler.compileExamDataFallbackHtml({
 assert.ok(fallbackHtml.includes('tex-choice-correct') && fallbackHtml.includes('tex-shortans-box') && fallbackHtml.includes('tex-loigiai'));
 const fallbackStudentHtml = TeXCompiler.stripHtmlAnswers(fallbackHtml);
 assert.ok(!fallbackStudentHtml.includes('tex-choice-correct') && !fallbackStudentHtml.includes('tex-shortans-box') && !fallbackStudentHtml.includes('tex-loigiai'));
+assert.ok(!fallbackStudentHtml.includes('data-correct='), 'stripHtmlAnswers must strip data-correct attributes');
+assert.ok(!fallbackStudentHtml.includes('tex-shortans-check-btn'), 'stripHtmlAnswers must remove practice check button in exam mode');
+assert.ok(fallbackStudentHtml.includes('tex-shortans-input') && fallbackStudentHtml.includes('tex-tf-btn'), 'stripHtmlAnswers must keep interactive inputs/buttons for Exam Room');
+
+// Idempotency & safe < escaping check
+const onceFrag = TeXCompiler.compileFragment('Cho $a < b$ và x < y. \\begin{tikzpicture}\\draw (0,0)--(1,1);\\end{tikzpicture}');
+assert.ok(onceFrag.includes('x &lt; y'), 'Raw < in prose must be escaped');
+const twiceFrag = TeXCompiler.compileFragment(onceFrag);
+assert.strictEqual(twiceFrag, onceFrag, 'compileFragment must be 100% idempotent when called on already-compiled HTML');
+
+// Snippet preamble forwarding (without \begin{document}) & interactive Parts I/II/III
+const snippetTex = `
+\\usetikzlibrary{calc}
+\\newcommand{\\myseg}[1]{\\overline{#1}}
+\\begin{ex}
+Xét mệnh đề đúng sai với $\\myseg{AB}$:
+\\begin{tikzpicture}\\draw (0,0) -- ($(1,0)+(0,1)$);\\end{tikzpicture}
+\\choiceTF
+{\\True Mệnh đề a đúng}
+{Mệnh đề b sai}
+{\\True Mệnh đề c đúng}
+{Mệnh đề d sai}
+\\loigiai{Giải thích chi tiết từng ý a, b, c, d.}
+\\end{ex}
+\\begin{ex}
+Tính giá trị $\\myseg{CD}$ làm tròn đến hàng phần mười.
+\\shortans[]{12,5}
+\\loigiai{Ta tính được kết quả là $12{,}5$.}
+\\end{ex}
+`;
+const snippetCompiled = TeXCompiler.compileDocument(snippetTex);
+assert.ok(!snippetCompiled.html.includes('\\newcommand'), 'Snippet preamble declarations must be stripped from output body');
+assert.ok(snippetCompiled.html.includes('\\myseg'), 'Custom macro must be forwarded into TikZ preamble or math');
+assert.ok(snippetCompiled.html.includes('tex-tf-btn') && snippetCompiled.html.includes('data-part="p2"'), 'choiceTF must emit interactive Đúng/Sai buttons');
+assert.ok(snippetCompiled.html.includes('tex-shortans-input') && snippetCompiled.html.includes('data-correct="12,5"'), 'shortans must emit interactive input with data-correct');
+assert.ok(snippetCompiled.html.includes('Xem lời giải chi tiết') && snippetCompiled.html.includes('tex-loigiai-ans-badge'), 'loigiai must emit clear expandable solution button and answer badge');
+
+// Plain "Câu 1:" auto-upgrade in compileDocument & short-answer numeric equivalence
+const plainTexDoc = TeXCompiler.compileDocument('Câu 1: Đạo hàm của $x^2$ là\nA. $x$\n*B. $2x$\nC. $2$\nD. $x^3$\nLời giải: $(x^2)\' = 2x$.');
+assert.ok(plainTexDoc.html.includes('data-choice="B"') && plainTexDoc.html.includes('Xem lời giải chi tiết'), 'Plain Câu 1 TeX must auto-upgrade to interactive HTML with solution');
+assert.strictEqual(TeXCompiler.isShortAnsEqual('12,5', '12.5'), true);
+assert.strictEqual(TeXCompiler.isShortAnsEqual('-0,25', '-0.250'), true);
+assert.strictEqual(TeXCompiler.isShortAnsEqual('40', '41'), false);
 
 console.log('[OK] ALL TEX COMPILER & PARSER ASSERTIONS PASSED 100%!');

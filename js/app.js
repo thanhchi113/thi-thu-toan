@@ -177,10 +177,14 @@ const App = {
   },
 
   // Làm sạch comment % LaTeX và biên dịch mảnh TeX / bảng / eqnarray* / immini / TikZJax sang HTML
-  cleanTex(text) {
+  cleanTex(text, extraMacros = null) {
     if (!text || typeof text !== 'string') return '';
     if (typeof TeXCompiler !== 'undefined') {
-      return TeXCompiler.compileFragment(text, { inlineQuestion: true });
+      const macros = extraMacros || this.state.activeExam?.tex_macros || null;
+      return TeXCompiler.compileFragment(text, {
+        inlineQuestion: true,
+        preambleInfo: macros ? { macros, tikzLibs: [], packages: [] } : null
+      });
     }
     return text.trim();
   },
@@ -1990,10 +1994,10 @@ const App = {
                 ${attemptsCount > 0 ? `
                   <div class="flex flex-wrap items-center gap-1.5">
                     <button onclick="App.viewSubmissionDetail('${latestSub.id}')" class="px-3 py-1.5 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-xl transition flex items-center cursor-pointer">
-                      <i class="fa-solid fa-eye mr-1.5"></i>Xem lại (${latestSub.scoreResult.totalScore}đ)
+                      <i class="fa-solid fa-eye mr-1.5"></i>Chi tiết &amp; Lời giải (${latestSub.scoreResult.totalScore}đ)
                     </button>
-                    <button onclick="App.previewExamHtmlModal('${ex.id}')" class="px-3 py-1.5 text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100 rounded-xl transition flex items-center cursor-pointer" title="Xem đề thi bản HTML">
-                      <i class="fa-solid fa-file-code mr-1.5"></i>Xem Đề HTML
+                    <button onclick="App.previewExamHtmlModal('${ex.id}', '${this.canStudentViewExamAnswers(ex) ? 'practice' : 'exam'}')" class="px-3 py-1.5 text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100 rounded-xl transition flex items-center cursor-pointer" title="Tương tác trực tiếp trên đề HTML & xem lời giải từng câu">
+                      <i class="fa-solid fa-lightbulb mr-1.5"></i>${this.canStudentViewExamAnswers(ex) ? 'Luyện tập & Lời giải' : 'Xem Đề HTML'}
                     </button>
                     <button onclick="App.confirmRetakeExam('${ex.id}')" class="px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs transition flex items-center cursor-pointer">
                       <i class="fa-solid fa-rotate-right mr-1.5"></i>Thi Lại (Lần ${attemptsCount + 1})
@@ -2271,11 +2275,30 @@ const App = {
 
   toggleFlag(qType, qId) {
     const key = `${qType}_${qId}`;
-    this.state.answers.flagged[key] = !this.state.answers.flagged[key];
-    this.render();
+    const nextVal = !this.state.answers.flagged[key];
+    this.state.answers.flagged[key] = nextVal;
+    const flagBtn = document.getElementById(`flag_btn_${qType}_${qId}`);
+    if (flagBtn) {
+      flagBtn.className = `ml-2 text-xs cursor-pointer ${nextVal ? 'text-amber-500' : 'text-slate-300 hover:text-amber-500'}`;
+    }
+    document.querySelectorAll(`[id="qmat_${qType}_${qId}"]`).forEach(btn => {
+      btn.classList.toggle('flagged', nextVal);
+    });
   },
 
   scrollToQuestion(elementId) {
+    const m = String(elementId || '').match(/^quiz_(p[123])_(\d+)$/);
+    const htmlScroll = document.getElementById('splitHtmlExamScroll');
+    if (m && htmlScroll) {
+      if (this.state.activeSectionTab !== m[1]) this.setSectionTab(m[1]);
+      const htmlCard = document.getElementById(`html_q_${m[1]}_${m[2]}`);
+      if (htmlCard) {
+        htmlCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        htmlCard.classList.add('ring-2', 'ring-indigo-500');
+        setTimeout(() => htmlCard.classList.remove('ring-2', 'ring-indigo-500'), 1500);
+        return;
+      }
+    }
     if (this.state.examViewMode !== 'quiz') {
       this.state.examViewMode = 'quiz';
       this.render();
@@ -2430,7 +2453,7 @@ const App = {
         <div class="lg:hidden fixed bottom-6 left-6 z-40">
           <button onclick="App.toggleMobileDrawer()" class="px-4 py-2.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-2xl flex items-center space-x-2 border-2 border-white">
             <i class="fa-solid fa-list-check"></i>
-            <span>Bảng Câu (${progress.answered}/${progress.total})</span>
+            <span id="mobileDrawerBtnCount">Bảng Câu (${progress.answered}/${progress.total})</span>
           </button>
         </div>
 
@@ -2441,7 +2464,7 @@ const App = {
             <div class="flex items-center space-x-2">
               <i class="fa-solid fa-list-check text-indigo-600 text-base"></i>
               <h3 class="font-bold text-slate-900 text-sm">Bảng Điều Hướng Câu Hỏi</h3>
-              <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">${progress.answered}/${progress.total} câu</span>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 exam-progress-counter">Đã làm: ${progress.answered}/${progress.total} câu (${progress.percentage}%)</span>
             </div>
             <button onclick="App.toggleMobileDrawer()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center">
               <i class="fa-solid fa-xmark text-sm"></i>
@@ -2455,7 +2478,58 @@ const App = {
     `;
 
     this.updateTimerDisplay();
+    this.bindActiveExamHtmlInteractions();
     this.renderMathFormulas();
+  },
+
+  bindActiveExamHtmlInteractions() {
+    const htmlScroll = document.getElementById('splitHtmlExamScroll');
+    if (!htmlScroll || typeof TeXCompiler === 'undefined') return;
+    TeXCompiler.bindInteractiveDom(htmlScroll, {
+      mode: 'exam',
+      onPart1: (qId, choice) => {
+        if (this.state.activeSectionTab !== 'p1') this.setSectionTab('p1');
+        this.selectPart1Answer(qId, choice);
+      },
+      onPart2: (qId, subId, boolVal) => {
+        if (this.state.activeSectionTab !== 'p2') this.setSectionTab('p2');
+        this.selectPart2Answer(qId, subId, boolVal);
+      },
+      onPart3: (qId, valStr) => {
+        if (this.state.activeSectionTab !== 'p3') this.setSectionTab('p3');
+        this.setPart3DirectValue(qId, valStr, true);
+      }
+    });
+    this.syncAllAnswersToHtmlDoc(htmlScroll);
+  },
+
+  syncAllAnswersToHtmlDoc(rootEl) {
+    const host = rootEl || document.getElementById('splitHtmlExamScroll');
+    if (!host || !this.state.answers) return;
+    Object.entries(this.state.answers.part1 || {}).forEach(([qId, choice]) => {
+      if (!choice) return;
+      host.querySelectorAll(`.tex-choice-item[data-part="p1"][data-qid="${qId}"]`).forEach(el => {
+        el.classList.toggle('tex-choice-selected', el.dataset.choice === choice);
+      });
+    });
+    Object.entries(this.state.answers.part2 || {}).forEach(([qId, subObj]) => {
+      Object.entries(subObj || {}).forEach(([sub, boolVal]) => {
+        const row = host.querySelector(`.tex-tf-item[data-part="p2"][data-qid="${qId}"][data-sub="${sub}"]`);
+        if (!row) return;
+        row.dataset.userVal = boolVal ? 'true' : 'false';
+        row.querySelectorAll('.tex-tf-btn').forEach(btn => {
+          btn.classList.remove('is-selected-true', 'is-selected-false');
+          if (btn.dataset.tfVal === String(boolVal)) {
+            btn.classList.add(boolVal ? 'is-selected-true' : 'is-selected-false');
+          }
+        });
+      });
+    });
+    Object.entries(this.state.answers.part3 || {}).forEach(([qId, arr]) => {
+      const valStr = Array.isArray(arr) ? arr.join('').trim() : String(arr || '').trim();
+      const inp = host.querySelector(`.tex-shortans-interact[data-part="p3"][data-qid="${qId}"] .tex-shortans-input`);
+      if (inp && inp.value !== valStr) inp.value = valStr;
+    });
   },
 
   toggleMobileDrawer() {
@@ -2483,7 +2557,7 @@ const App = {
         <div class="bg-slate-950 text-slate-300 text-xs px-4 py-2 flex items-center justify-between border-b border-slate-800 shrink-0">
           <span class="flex items-center font-bold text-white">
             <i class="fa-solid ${useHtmlView ? 'fa-file-code text-emerald-400' : 'fa-file-pdf text-red-400'} mr-2"></i>
-            ${useHtmlView ? 'Đề thi HTML tương tác (Đã khóa đáp án trong giờ thi)' : 'Đề thi PDF gốc (Hiển thị trực tiếp)'}
+            ${useHtmlView ? 'Đề thi HTML tương tác trực tiếp (Bấm chọn đáp án ngay trên đề hoặc phiếu bên phải)' : 'Đề thi PDF gốc (Hiển thị trực tiếp)'}
           </span>
           <div class="flex items-center space-x-3">
             ${useHtmlView ? `
@@ -2586,7 +2660,7 @@ const App = {
                           <span class="w-6 h-6 rounded-md bg-indigo-100 text-indigo-700 inline-flex items-center justify-center mr-2 text-xs shrink-0">${q.id}</span>
                           <div class="katex-render">${this.cleanTex(q.content)}</div>
                         </div>
-                        <button onclick="App.toggleFlag('p1', ${q.id})" class="ml-2 text-xs ${isFlagged ? 'text-amber-500' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại">
+                        <button id="flag_btn_p1_${q.id}" onclick="App.toggleFlag('p1', ${q.id})" class="ml-2 text-xs cursor-pointer ${isFlagged ? 'text-amber-500' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại">
                           <i class="fa-solid fa-bookmark text-base"></i>
                         </button>
                       </div>
@@ -2598,8 +2672,8 @@ const App = {
                           return `
                             <div id="quiz_opt_${q.id}_${letter}" onclick="App.selectPart1Answer(${q.id}, '${letter}')" 
                               class="option-card p-3 rounded-xl border text-left text-xs sm:text-sm font-medium transition flex items-center space-x-2 ${isSelected ? 'selected' : 'bg-white border-slate-200 text-slate-700'}">
-                              <span class="w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold ${isSelected ? 'border-white text-white' : 'border-slate-300 text-slate-500'}">${letter}</span>
-                              <div class="katex-render truncate">${this.cleanTex(c.replace(/^[A-D]\.\s*/, ''))}</div>
+                              <span class="w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold shrink-0 ${isSelected ? 'border-white text-white' : 'border-slate-300 text-slate-500'}">${letter}</span>
+                              <div class="katex-render min-w-0 flex-1">${this.cleanTex(c.replace(/^[A-D]\.\s*/, ''))}</div>
                             </div>
                           `;
                         }).join('')}
@@ -2616,7 +2690,7 @@ const App = {
                 <h3 class="text-base sm:text-lg font-bold text-indigo-900">
                   PHẦN II. Câu trắc nghiệm Đúng/Sai
                 </h3>
-                <span class="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full font-semibold">4 câu • 4.0 điểm</span>
+                <span class="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full font-semibold">${ex.part2.length} câu • 4.0 điểm</span>
               </div>
 
               <div class="space-y-6">
@@ -2630,7 +2704,7 @@ const App = {
                           <span class="w-6 h-6 rounded-md bg-emerald-100 text-emerald-800 inline-flex items-center justify-center mr-2 text-xs shrink-0">${q.id}</span>
                           <div class="katex-render">${this.cleanTex(q.content)}</div>
                         </div>
-                        <button onclick="App.toggleFlag('p2', ${q.id})" class="ml-2 text-xs ${isFlagged ? 'text-amber-500' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại">
+                        <button id="flag_btn_p2_${q.id}" onclick="App.toggleFlag('p2', ${q.id})" class="ml-2 text-xs cursor-pointer ${isFlagged ? 'text-amber-500' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại">
                           <i class="fa-solid fa-bookmark text-base"></i>
                         </button>
                       </div>
@@ -2641,9 +2715,9 @@ const App = {
                           const ans = this.state.answers.part2[q.id]?.[subId];
                           return `
                             <div class="p-2.5 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-3 text-xs sm:text-sm">
-                              <div class="flex items-center space-x-2">
-                                <span class="font-bold text-indigo-600 uppercase font-mono">${subId})</span>
-                                <div class="katex-render text-slate-800">${this.cleanTex(st.text)}</div>
+                              <div class="flex items-center space-x-2 min-w-0 flex-1">
+                                <span class="font-bold text-indigo-600 uppercase font-mono shrink-0">${subId})</span>
+                                <div class="katex-render text-slate-800 min-w-0 flex-1">${this.cleanTex(st.text)}</div>
                               </div>
                               <div class="flex items-center space-x-1.5 shrink-0">
                                 <button id="quiz_tf_${q.id}_${subId}_true" onclick="App.selectPart2Answer(${q.id}, '${subId}', true)" class="tf-btn px-3 py-1 rounded-lg text-xs font-bold border ${ans === true ? 'selected-true' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-emerald-50'}">Đúng</button>
@@ -2665,7 +2739,7 @@ const App = {
                 <h3 class="text-base sm:text-lg font-bold text-indigo-900">
                   PHẦN III. Câu trắc nghiệm trả lời ngắn
                 </h3>
-                <span class="text-xs bg-amber-50 text-amber-800 px-2.5 py-1 rounded-full font-semibold">6 câu • 3.0 điểm (Phiếu 4 ô ký tự)</span>
+                <span class="text-xs bg-amber-50 text-amber-800 px-2.5 py-1 rounded-full font-semibold">${ex.part3.length} câu • 3.0 điểm (Phiếu 4 ô ký tự)</span>
               </div>
 
               <div class="space-y-6">
@@ -2679,7 +2753,7 @@ const App = {
                           <span class="w-6 h-6 rounded-md bg-amber-100 text-amber-800 inline-flex items-center justify-center mr-2 text-xs shrink-0">${q.id}</span>
                           <div class="katex-render">${this.cleanTex(q.content)}</div>
                         </div>
-                        <button onclick="App.toggleFlag('p3', ${q.id})" class="ml-2 text-xs ${isFlagged ? 'text-amber-500' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại">
+                        <button id="flag_btn_p3_${q.id}" onclick="App.toggleFlag('p3', ${q.id})" class="ml-2 text-xs cursor-pointer ${isFlagged ? 'text-amber-500' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại">
                           <i class="fa-solid fa-bookmark text-base"></i>
                         </button>
                       </div>
@@ -2929,6 +3003,38 @@ const App = {
     }
   },
 
+  setPart3DirectValue(qId, rawStr, fromHtmlInput = false) {
+    const clean = String(rawStr || '').trim();
+    const arr = [0, 1, 2, 3].map(i => clean[i] || '');
+    for (let i = 4; i < clean.length; i++) arr.push(clean[i]);
+    this.state.answers.part3[qId] = arr;
+
+    [0, 1, 2, 3].forEach(b => {
+      const ch = arr[b] || '';
+      ['split_box_', 'box_'].forEach(pref => {
+        const inp = document.getElementById(`${pref}${qId}_${b}`);
+        if (inp) {
+          inp.value = ch;
+          inp.classList.toggle('box-digit-filled', Boolean(ch));
+        }
+      });
+    });
+
+    if (!fromHtmlInput) {
+      const htmlInp = document.querySelector(`#splitHtmlExamScroll .tex-shortans-interact[data-part="p3"][data-qid="${qId}"] .tex-shortans-input`);
+      if (htmlInp && htmlInp.value !== clean) htmlInp.value = clean;
+    }
+
+    this.updatePaletteMatrixButton('p3', qId, clean.length > 0);
+    this.updateProgressUi();
+  },
+
+  syncPart3BoxesToHtmlInput(qId) {
+    const str = (this.state.answers.part3[qId] || []).join('').trim();
+    const htmlInp = document.querySelector(`#splitHtmlExamScroll .tex-shortans-interact[data-part="p3"][data-qid="${qId}"] .tex-shortans-input`);
+    if (htmlInp && htmlInp.value !== str) htmlInp.value = str;
+  },
+
   handleBoxInput(event, qId, boxIdx, prefix = 'box_') {
     const val = event.target.value.slice(-1);
     event.target.value = val;
@@ -2949,6 +3055,7 @@ const App = {
     }
 
     const str = (this.state.answers.part3[qId] || []).join('').trim();
+    this.syncPart3BoxesToHtmlInput(qId);
     this.updatePaletteMatrixButton('p3', qId, str.length > 0);
     this.updateProgressUi();
   },
@@ -2962,6 +3069,7 @@ const App = {
         prevInput.classList.remove('box-digit-filled');
         this.state.answers.part3[qId][boxIdx - 1] = '';
         const str = (this.state.answers.part3[qId] || []).join('').trim();
+        this.syncPart3BoxesToHtmlInput(qId);
         this.updatePaletteMatrixButton('p3', qId, str.length > 0);
         this.updateProgressUi();
       }
@@ -3010,6 +3118,7 @@ const App = {
     }
 
     const str = (this.state.answers.part3[qId] || []).join('').trim();
+    this.syncPart3BoxesToHtmlInput(qId);
     this.updatePaletteMatrixButton('p3', qId, str.length > 0);
     this.updateProgressUi();
   },
@@ -3034,17 +3143,22 @@ const App = {
       }
     });
 
-    // 2. Cập nhật bên Web Quiz Mode
+    // 2. Cập nhật trực tiếp trên Đề HTML bên trái
+    document.querySelectorAll(`#splitHtmlExamScroll .tex-choice-item[data-part="p1"][data-qid="${qId}"]`).forEach(el => {
+      el.classList.toggle('tex-choice-selected', el.dataset.choice === choice);
+    });
+
+    // 3. Cập nhật bên Web Quiz Mode
     ['A', 'B', 'C', 'D'].forEach(opt => {
       const card = document.getElementById(`quiz_opt_${qId}_${opt}`);
       if (card) {
         const span = card.querySelector('span');
         if (opt === choice) {
           card.className = 'option-card selected p-3 rounded-xl border text-left text-xs sm:text-sm font-medium transition flex items-center space-x-2';
-          if (span) span.className = 'w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold border-white text-white';
+          if (span) span.className = 'w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold shrink-0 border-white text-white';
         } else {
           card.className = 'option-card bg-white border-slate-200 text-slate-700 p-3 rounded-xl border text-left text-xs sm:text-sm font-medium transition flex items-center space-x-2';
-          if (span) span.className = 'w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold border-slate-300 text-slate-500';
+          if (span) span.className = 'w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold shrink-0 border-slate-300 text-slate-500';
         }
       }
     });
@@ -3073,7 +3187,19 @@ const App = {
       }
     }
 
-    // 2. Cập nhật bên Web Quiz Mode
+    // 2. Cập nhật trực tiếp trên Đề HTML bên trái
+    const htmlRow = document.querySelector(`#splitHtmlExamScroll .tex-tf-item[data-part="p2"][data-qid="${qId}"][data-sub="${subId}"]`);
+    if (htmlRow) {
+      htmlRow.dataset.userVal = String(boolVal);
+      htmlRow.querySelectorAll('.tex-tf-btn').forEach(btn => {
+        btn.classList.remove('is-selected-true', 'is-selected-false');
+        if (btn.dataset.tfVal === String(boolVal)) {
+          btn.classList.add(boolVal ? 'is-selected-true' : 'is-selected-false');
+        }
+      });
+    }
+
+    // 3. Cập nhật bên Web Quiz Mode
     const qTrue = document.getElementById(`quiz_tf_${qId}_${subId}_true`);
     const qFalse = document.getElementById(`quiz_tf_${qId}_${subId}_false`);
     if (qTrue && qFalse) {
@@ -3108,6 +3234,8 @@ const App = {
     counterEls.forEach(el => {
       el.textContent = `Đã làm: ${p.answered}/${p.total} câu (${p.percentage}%)`;
     });
+    const mobBtn = document.getElementById('mobileDrawerBtnCount');
+    if (mobBtn) mobBtn.textContent = `Bảng Câu (${p.answered}/${p.total})`;
   },
 
   confirmSubmitExam() {
@@ -3272,7 +3400,7 @@ const App = {
       ? 'pdf'
       : (this.state.submissionDetailSolMode === 'html' ? 'html' : (preferHtmlSol ? 'html' : 'pdf'));
     const showSolPane = canViewAnswers && !this.state.hideSolutionPdfInDetail;
-    const compiledSolHtml = (showSolPane && solMode === 'html' && !solHtmlBlobUrl) ? this.buildExamHtmlDoc(exam, false) : '';
+    const compiledSolHtml = (showSolPane && solMode === 'html' && !solHtmlBlobUrl) ? this.buildExamHtmlDoc(exam, false, true) : '';
 
     // Tạo bảng tóm tắt phiếu trả lời & kết quả chấm 3 phần (Gọn gàng, khoa học)
     const answerSheetSummaryHtml = `
@@ -3462,6 +3590,36 @@ const App = {
             </div>
           </div>
 
+          <!-- Thanh chuyển chế độ: Chi Tiết Từng Câu & Lời Giải <-> Bảng Phiếu Điểm & Đề Gốc -->
+          <div class="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
+              <button type="button" onclick="App.setSubmissionReviewTab('detailed', '${subId}')" class="px-3.5 py-2 rounded-lg transition flex items-center gap-1.5 cursor-pointer ${(this.state.submissionReviewTab || 'detailed') === 'detailed' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
+                <i class="fa-solid fa-list-check"></i><span>Chi Tiết Từng Câu &amp; Lời Giải</span>
+              </button>
+              <button type="button" onclick="App.setSubmissionReviewTab('split', '${subId}')" class="px-3.5 py-2 rounded-lg transition flex items-center gap-1.5 cursor-pointer ${this.state.submissionReviewTab === 'split' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
+                <i class="fa-solid fa-table-columns"></i><span>Bảng Phiếu Điểm &amp; Đề Gốc</span>
+              </button>
+            </div>
+
+            ${(this.state.submissionReviewTab || 'detailed') === 'detailed' ? `
+              <div class="flex flex-wrap items-center gap-2 text-xs">
+                <div class="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 font-bold">
+                  <button type="button" onclick="App.setSubmissionQuestionFilter('all', '${subId}')" class="px-2.5 py-1.5 rounded-lg transition cursor-pointer ${(this.state.submissionQuestionFilter || 'all') === 'all' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'}">Tất cả</button>
+                  <button type="button" onclick="App.setSubmissionQuestionFilter('wrong', '${subId}')" class="px-2.5 py-1.5 rounded-lg transition cursor-pointer ${this.state.submissionQuestionFilter === 'wrong' ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'}">Câu sai / Bỏ trống</button>
+                  <button type="button" onclick="App.setSubmissionQuestionFilter('right', '${subId}')" class="px-2.5 py-1.5 rounded-lg transition cursor-pointer ${this.state.submissionQuestionFilter === 'right' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'}">Câu đúng</button>
+                </div>
+                ${canViewAnswers ? `
+                  <button type="button" onclick="if (typeof TeXCompiler !== 'undefined') TeXCompiler.toggleAllSolutions(document.getElementById('detailedReviewCardsHost'))" class="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold transition flex items-center gap-1.5 cursor-pointer">
+                    <i class="fa-solid fa-lightbulb text-amber-500"></i><span>Mở / Thu gọn tất cả lời giải</span>
+                  </button>
+                  <button type="button" onclick="App.previewExamHtmlModal('${exam.id}', 'practice')" class="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold transition flex items-center gap-1.5 cursor-pointer">
+                    <i class="fa-solid fa-rotate-right"></i><span>Làm thử lại trên Đề HTML</span>
+                  </button>
+                ` : ''}
+              </div>
+            ` : ''}
+          </div>
+
           ${!canViewAnswers ? `
             <!-- Cảnh báo khóa đáp án -->
             <div class="p-5 bg-amber-50 border border-amber-200 rounded-2xl flex items-center space-x-3 text-amber-900 shadow-xs">
@@ -3475,76 +3633,82 @@ const App = {
             </div>
           ` : ''}
 
-          <!-- VÙNG HIỂN THỊ MỞ RỘNG: PHIẾU ĐIỂM + TRÌNH XEM LỜI GIẢI HTML / PDF -->
-          <div class="flex flex-col ${showSolPane ? 'lg:flex-row items-start' : 'items-center'} gap-6">
-            <!-- Phiếu chấm điểm và đối chiếu đáp án -->
-            <div class="${showSolPane ? 'w-full lg:w-[420px] shrink-0' : 'w-full max-w-4xl mx-auto'}">
-              ${answerSheetSummaryHtml}
+          ${(this.state.submissionReviewTab || 'detailed') === 'detailed' ? `
+            <div id="detailedReviewCardsHost" class="max-w-5xl mx-auto w-full space-y-6">
+              ${this.renderDetailedQuestionReviewHtml(exam, sub, canViewAnswers)}
             </div>
-
-            ${showSolPane ? `
-              <!-- Trình xem Đáp án & Lời giải chi tiết (Bản HTML tương tác + Bản PDF gốc) -->
-              <div class="w-full flex-1 min-w-[340px] h-[calc(100vh-170px)] min-h-[750px] ${solMode === 'html' ? 'bg-slate-100 border-slate-200' : 'bg-slate-900 border-slate-700'} rounded-2xl border shadow-xl overflow-hidden flex flex-col">
-                <div class="px-4 py-2.5 bg-slate-800 text-white flex flex-wrap items-center justify-between gap-2 text-xs font-bold shrink-0 border-b border-slate-700">
-                  <div class="flex items-center gap-2 min-w-0">
-                    <i class="fa-solid ${solMode === 'html' ? 'fa-file-code text-emerald-400' : 'fa-file-pdf text-red-400'} text-sm"></i>
-                    <span class="truncate">${solMode === 'html' ? 'Đề Thi &amp; Lời Giải Chi Tiết (Bản HTML)' : 'File PDF Đáp Án &amp; Lời Giải Gốc'}</span>
-                    ${solPdfUrl ? `
-                      <div class="flex items-center bg-slate-900 rounded-lg p-0.5 border border-slate-700 text-[11px] ml-1">
-                        <button type="button" onclick="App.setSubmissionDetailSolMode('html', '${subId}')" class="px-2 py-0.5 rounded transition cursor-pointer ${solMode === 'html' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:text-white'}">Bản HTML</button>
-                        <button type="button" onclick="App.setSubmissionDetailSolMode('pdf', '${subId}')" class="px-2 py-0.5 rounded transition cursor-pointer ${solMode === 'pdf' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'}">Bản PDF</button>
-                      </div>
-                    ` : ''}
-                  </div>
-                  <div class="flex items-center space-x-2 shrink-0">
-                    ${solMode === 'html' ? `
-                      <button type="button" onclick="App.previewExamHtmlModal('${exam.id}', 'solution')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
-                        <i class="fa-solid fa-expand mr-1"></i>Toàn màn hình
-                      </button>
-                      <button type="button" onclick="App.downloadExamHtml('${exam.id}', true)" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
-                        <i class="fa-solid fa-download mr-1"></i>Tải .html
-                      </button>
-                    ` : `
-                      <button type="button" onclick="App.openPdfModal('${exam.title.replace(/'/g, "\\'")} - Lời Giải PDF', '${solPdfUrl}', '${exam.id}_sol')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
-                        <i class="fa-solid fa-expand mr-1"></i>Toàn màn hình
-                      </button>
-                      <a href="${solPdfUrl}" target="_blank" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-indigo-300 hover:text-white rounded text-[11px] font-semibold transition flex items-center">
-                        <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Tab mới
-                      </a>
-                      <a href="${solPdfUrl}" download="${exam.id}_Dap_An.pdf" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white rounded text-[11px] font-semibold transition flex items-center">
-                        <i class="fa-solid fa-download mr-1"></i>Tải PDF
-                      </a>
-                    `}
-                  </div>
-                </div>
-                ${solMode === 'html' ? (
-                  solHtmlBlobUrl ? `
-                    <div class="flex-1 w-full h-full bg-white relative">
-                      <iframe src="${solHtmlBlobUrl}" onload="App.syncUploadedExamIframe(this, false)" class="w-full h-full border-0"></iframe>
-                    </div>
-                  ` : `
-                    <div class="flex-1 w-full overflow-y-auto p-4 sm:p-6">
-                      <div class="max-w-4xl mx-auto bg-white text-slate-800 rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-8">
-                        ${compiledSolHtml}
-                      </div>
-                    </div>
-                  `
-                ) : `
-                  <div class="flex-1 w-full h-full bg-slate-950 relative">
-                    <object data="${solPdfUrl}#toolbar=1" type="application/pdf" class="w-full h-full border-0">
-                      <iframe src="${solPdfUrl}#toolbar=1" class="w-full h-full border-0">
-                        <div class="p-6 text-center text-slate-300">
-                          <i class="fa-solid fa-file-pdf text-4xl mb-2 text-red-400"></i>
-                          <p>Trình duyệt đang tải file PDF.</p>
-                          <a href="${solPdfUrl}" target="_blank" class="mt-2 inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">Mở PDF trong tab mới</a>
-                        </div>
-                      </iframe>
-                    </object>
-                  </div>
-                `}
+          ` : `
+            <!-- VÙNG HIỂN THỊ MỞ RỘNG: PHIẾU ĐIỂM + TRÌNH XEM LỜI GIẢI HTML / PDF -->
+            <div class="flex flex-col ${showSolPane ? 'lg:flex-row items-start' : 'items-center'} gap-6">
+              <!-- Phiếu chấm điểm và đối chiếu đáp án -->
+              <div class="${showSolPane ? 'w-full lg:w-[420px] shrink-0' : 'w-full max-w-4xl mx-auto'}">
+                ${answerSheetSummaryHtml}
               </div>
-            ` : ''}
-          </div>
+
+              ${showSolPane ? `
+                <!-- Trình xem Đáp án & Lời giải chi tiết (Bản HTML tương tác + Bản PDF gốc) -->
+                <div class="w-full flex-1 min-w-[340px] h-[calc(100vh-170px)] min-h-[750px] ${solMode === 'html' ? 'bg-slate-100 border-slate-200' : 'bg-slate-900 border-slate-700'} rounded-2xl border shadow-xl overflow-hidden flex flex-col">
+                  <div class="px-4 py-2.5 bg-slate-800 text-white flex flex-wrap items-center justify-between gap-2 text-xs font-bold shrink-0 border-b border-slate-700">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <i class="fa-solid ${solMode === 'html' ? 'fa-file-code text-emerald-400' : 'fa-file-pdf text-red-400'} text-sm"></i>
+                      <span class="truncate">${solMode === 'html' ? 'Đề Thi &amp; Lời Giải Chi Tiết (Bản HTML)' : 'File PDF Đáp Án &amp; Lời Giải Gốc'}</span>
+                      ${solPdfUrl ? `
+                        <div class="flex items-center bg-slate-900 rounded-lg p-0.5 border border-slate-700 text-[11px] ml-1">
+                          <button type="button" onclick="App.setSubmissionDetailSolMode('html', '${subId}')" class="px-2 py-0.5 rounded transition cursor-pointer ${solMode === 'html' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:text-white'}">Bản HTML</button>
+                          <button type="button" onclick="App.setSubmissionDetailSolMode('pdf', '${subId}')" class="px-2 py-0.5 rounded transition cursor-pointer ${solMode === 'pdf' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'}">Bản PDF</button>
+                        </div>
+                      ` : ''}
+                    </div>
+                    <div class="flex items-center space-x-2 shrink-0">
+                      ${solMode === 'html' ? `
+                        <button type="button" onclick="App.previewExamHtmlModal('${exam.id}', 'solution')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
+                          <i class="fa-solid fa-expand mr-1"></i>Toàn màn hình
+                        </button>
+                        <button type="button" onclick="App.downloadExamHtml('${exam.id}', true)" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
+                          <i class="fa-solid fa-download mr-1"></i>Tải .html
+                        </button>
+                      ` : `
+                        <button type="button" onclick="App.openPdfModal('${exam.title.replace(/'/g, "\\'")} - Lời Giải PDF', '${solPdfUrl}', '${exam.id}_sol')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
+                          <i class="fa-solid fa-expand mr-1"></i>Toàn màn hình
+                        </button>
+                        <a href="${solPdfUrl}" target="_blank" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-indigo-300 hover:text-white rounded text-[11px] font-semibold transition flex items-center">
+                          <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Tab mới
+                        </a>
+                        <a href="${solPdfUrl}" download="${exam.id}_Dap_An.pdf" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white rounded text-[11px] font-semibold transition flex items-center">
+                          <i class="fa-solid fa-download mr-1"></i>Tải PDF
+                        </a>
+                      `}
+                    </div>
+                  </div>
+                  ${solMode === 'html' ? (
+                    solHtmlBlobUrl ? `
+                      <div class="flex-1 w-full h-full bg-white relative">
+                        <iframe src="${solHtmlBlobUrl}" onload="App.syncUploadedExamIframe(this, false)" class="w-full h-full border-0"></iframe>
+                      </div>
+                    ` : `
+                      <div class="flex-1 w-full overflow-y-auto p-4 sm:p-6">
+                        <div id="splitSolHtmlHost" class="max-w-4xl mx-auto bg-white text-slate-800 rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-8">
+                          ${compiledSolHtml}
+                        </div>
+                      </div>
+                    `
+                  ) : `
+                    <div class="flex-1 w-full h-full bg-slate-950 relative">
+                      <object data="${solPdfUrl}#toolbar=1" type="application/pdf" class="w-full h-full border-0">
+                        <iframe src="${solPdfUrl}#toolbar=1" class="w-full h-full border-0">
+                          <div class="p-6 text-center text-slate-300">
+                            <i class="fa-solid fa-file-pdf text-4xl mb-2 text-red-400"></i>
+                            <p>Trình duyệt đang tải file PDF.</p>
+                            <a href="${solPdfUrl}" target="_blank" class="mt-2 inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">Mở PDF trong tab mới</a>
+                          </div>
+                        </iframe>
+                      </object>
+                    </div>
+                  `}
+                </div>
+              ` : ''}
+            </div>
+          `}
         </div>
 
         <!-- Floating Scroll-To-Top Button (Hình tròn có mũi tên ở góc phải màn hình) -->
@@ -3554,7 +3718,191 @@ const App = {
       </div>
     `;
 
-    this.renderMathFormulas();
+    const splitSolHost = document.getElementById('splitSolHtmlHost');
+    if (splitSolHost && typeof TeXCompiler !== 'undefined') {
+      TeXCompiler.bindInteractiveDom(splitSolHost, { mode: 'practice' });
+    }
+    this.renderMathFormulas(container, exam.tex_macros);
+  },
+
+  setSubmissionReviewTab(tab, subId) {
+    this.state.submissionReviewTab = tab;
+    this.viewSubmissionDetail(subId);
+  },
+
+  setSubmissionQuestionFilter(filter, subId) {
+    this.state.submissionQuestionFilter = filter;
+    this.viewSubmissionDetail(subId);
+  },
+
+  renderDetailedQuestionReviewHtml(exam, sub, canViewAnswers) {
+    const macros = exam.tex_macros || null;
+    const fmt = (txt) => this.cleanTex(txt, macros);
+    const qFilter = this.state.submissionQuestionFilter || 'all';
+    const openSol = canViewAnswers && !this.state.hideSolutionPdfInDetail;
+    const buildLg = (expRaw, ansBadge) => {
+      if (!canViewAnswers || typeof TeXCompiler === 'undefined') return '';
+      return TeXCompiler.buildLoigiaiHtml(expRaw ? fmt(expRaw) : '', ansBadge, openSol);
+    };
+
+    let sectionsHtml = '';
+
+    // Phần I
+    const p1Cards = (exam.part1 || []).map(q => {
+      const userChoice = sub.answers.part1?.[q.id] || '';
+      const isRight = Boolean(userChoice && userChoice === q.correct_answer);
+      if (qFilter === 'wrong' && isRight) return '';
+      if (qFilter === 'right' && !isRight) return '';
+
+      const statusBadge = isRight
+        ? `<span class="tex-q-status tex-q-status-right"><i class="fa-solid fa-check mr-1"></i>Đúng (+0.25đ) • Chọn ${userChoice}</span>`
+        : `<span class="tex-q-status tex-q-status-wrong"><i class="fa-solid fa-xmark mr-1"></i>${userChoice ? `Sai • Bạn chọn ${userChoice}` : 'Bỏ trống'}${canViewAnswers && q.correct_answer ? ` • Đáp án: ${q.correct_answer}` : ''} (0đ)</span>`;
+
+      const choicesHtml = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-3">${(q.choices || []).map((c, idx) => {
+        const letter = ['A', 'B', 'C', 'D'][idx];
+        const isUser = userChoice === letter;
+        const isCorr = canViewAnswers && q.correct_answer === letter;
+        let cls = 'border-slate-200 bg-slate-50/70 text-slate-700';
+        let tag = '';
+        if (isCorr && isUser) {
+          cls = 'border-emerald-500 bg-emerald-50 text-emerald-950 font-semibold';
+          tag = '<span class="ml-auto text-[11px] font-extrabold text-emerald-700 shrink-0"><i class="fa-solid fa-circle-check mr-1"></i>Bạn chọn đúng</span>';
+        } else if (isCorr) {
+          cls = 'border-emerald-500 bg-emerald-50/80 text-emerald-950 font-semibold';
+          tag = '<span class="ml-auto text-[11px] font-extrabold text-emerald-700 shrink-0"><i class="fa-solid fa-check mr-1"></i>Đáp án đúng</span>';
+        } else if (isUser) {
+          cls = canViewAnswers ? 'border-rose-400 bg-rose-50 text-rose-950 font-semibold' : 'border-indigo-500 bg-indigo-50 text-indigo-950 font-semibold';
+          tag = `<span class="ml-auto text-[11px] font-extrabold ${canViewAnswers ? 'text-rose-600' : 'text-indigo-700'} shrink-0"><i class="fa-solid ${canViewAnswers ? 'fa-circle-xmark' : 'fa-user-check'} mr-1"></i>Bạn chọn</span>`;
+        }
+        return `<div class="p-3 rounded-xl border-1.5 flex items-baseline gap-2 text-xs sm:text-sm ${cls}">
+          <span class="font-extrabold text-indigo-700 shrink-0">${letter}.</span>
+          <div class="min-w-0 flex-1">${fmt(String(c || '').replace(/^[A-D][.:]\s*/, ''))}</div>
+          ${tag}
+        </div>`;
+      }).join('')}</div>`;
+
+      const lgHtml = buildLg(q.explanation, q.correct_answer ? `Chọn đáp án ${q.correct_answer}` : '');
+      return `<article class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-xs space-y-2">
+        <div class="tex-env-header">
+          <span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Phần I • Câu ${q.id}.</span>
+          ${statusBadge}
+        </div>
+        <div class="text-sm text-slate-800 leading-relaxed">${fmt(q.content)}${choicesHtml}${lgHtml}</div>
+      </article>`;
+    }).filter(Boolean).join('');
+
+    if (p1Cards) {
+      sectionsHtml += `<div class="space-y-4">
+        <div class="flex items-center justify-between px-1">
+          <h3 class="text-sm sm:text-base font-extrabold text-indigo-950 flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-indigo-600 text-white inline-flex items-center justify-center text-xs">I</span>PHẦN I. Trắc nghiệm 4 phương án lựa chọn</h3>
+          <span class="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full">${sub.scoreResult.part1.score}/${sub.scoreResult.part1.maxScore ?? 3} điểm</span>
+        </div>
+        ${p1Cards}
+      </div>`;
+    }
+
+    // Phần II
+    const p2Cards = (exam.part2 || []).map(q => {
+      const qAns = sub.answers.part2?.[q.id] || {};
+      const stList = q.statements || q.items || [];
+      let correctCount = 0;
+      const ansSummaryParts = [];
+      stList.forEach(st => {
+        const subId = st.sub_id || st.key;
+        if (qAns[subId] === st.correct) correctCount++;
+        ansSummaryParts.push(`${subId}) ${st.correct ? 'Đúng' : 'Sai'}`);
+      });
+      const isFullRight = stList.length > 0 && correctCount === stList.length;
+      if (qFilter === 'wrong' && isFullRight) return '';
+      if (qFilter === 'right' && !isFullRight) return '';
+      const pts = GradingSystem.part2Scale[correctCount] ?? 0;
+
+      const statusBadge = `<span class="tex-q-status ${isFullRight ? 'tex-q-status-right' : (correctCount > 0 ? 'tex-q-status-info' : 'tex-q-status-wrong')}">Đúng ${correctCount}/${stList.length} ý (+${pts}đ)</span>`;
+
+      const rowsHtml = `<div class="space-y-2 mt-3">${stList.map(st => {
+        const subId = st.sub_id || st.key;
+        const userVal = qAns[subId];
+        const hasPicked = userVal === true || userVal === false;
+        const isMatch = hasPicked && userVal === st.correct;
+        const rowCls = canViewAnswers
+          ? (isMatch ? 'border-emerald-300 bg-emerald-50/50' : 'border-rose-300 bg-rose-50/50')
+          : 'border-slate-200 bg-slate-50/60';
+        return `<div class="p-3 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm ${rowCls}">
+          <div class="flex items-baseline gap-2 min-w-0 flex-1">
+            <span class="font-mono font-extrabold text-indigo-700 shrink-0">${subId})</span>
+            <div class="min-w-0 flex-1 text-slate-800">${fmt(st.text)}</div>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0 text-[11px] font-bold">
+            <span class="px-2.5 py-1 rounded-lg border ${hasPicked ? (canViewAnswers ? (isMatch ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-rose-100 border-rose-300 text-rose-800') : 'bg-indigo-100 border-indigo-200 text-indigo-800') : 'bg-slate-100 border-slate-200 text-slate-500'}">
+              Bạn chọn: ${userVal === true ? 'Đúng' : (userVal === false ? 'Sai' : 'Bỏ trống')}
+            </span>
+            ${canViewAnswers ? `<span class="px-2.5 py-1 rounded-lg bg-emerald-600 text-white">Đáp án: ${st.correct ? 'Đúng' : 'Sai'}</span>` : ''}
+          </div>
+        </div>`;
+      }).join('')}</div>`;
+
+      const lgHtml = buildLg(q.explanation, ansSummaryParts.length ? `Đáp án chuẩn: ${ansSummaryParts.join(' • ')}` : '');
+      return `<article class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-xs space-y-2">
+        <div class="tex-env-header">
+          <span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Phần II • Câu ${q.id}.</span>
+          ${statusBadge}
+        </div>
+        <div class="text-sm text-slate-800 leading-relaxed">${fmt(q.content)}${rowsHtml}${lgHtml}</div>
+      </article>`;
+    }).filter(Boolean).join('');
+
+    if (p2Cards) {
+      sectionsHtml += `<div class="space-y-4">
+        <div class="flex items-center justify-between px-1">
+          <h3 class="text-sm sm:text-base font-extrabold text-indigo-950 flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-emerald-600 text-white inline-flex items-center justify-center text-xs">II</span>PHẦN II. Trắc nghiệm Đúng / Sai</h3>
+          <span class="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">${sub.scoreResult.part2.score}/${sub.scoreResult.part2.maxScore ?? 4} điểm</span>
+        </div>
+        ${p2Cards}
+      </div>`;
+    }
+
+    // Phần III
+    const p3Cards = (exam.part3 || []).map(q => {
+      const userVal = String(sub.answers.part3?.[q.id] ?? '').trim();
+      const isMatch = GradingSystem.isShortAnsMatch(userVal, q.correct_answer);
+      if (qFilter === 'wrong' && isMatch) return '';
+      if (qFilter === 'right' && !isMatch) return '';
+
+      const statusBadge = isMatch
+        ? `<span class="tex-q-status tex-q-status-right"><i class="fa-solid fa-check mr-1"></i>Đúng (+0.5đ)</span>`
+        : `<span class="tex-q-status tex-q-status-wrong"><i class="fa-solid fa-xmark mr-1"></i>${userVal ? 'Chưa đúng' : 'Bỏ trống'} (0đ)</span>`;
+
+      const ansBar = `<div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span class="px-3 py-1.5 rounded-xl border font-mono font-bold ${userVal ? (canViewAnswers ? (isMatch ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-rose-50 border-rose-300 text-rose-800') : 'bg-indigo-50 border-indigo-200 text-indigo-800') : 'bg-slate-100 border-slate-200 text-slate-500'}">
+          Kết quả bạn điền: ${userVal ? TeXCompiler.escapeHtml(userVal) : 'Bỏ trống'}
+        </span>
+        ${canViewAnswers ? `<span class="px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-mono font-extrabold">Đáp số chuẩn: ${TeXCompiler.escapeHtml(String(q.correct_answer ?? ''))}</span>` : ''}
+      </div>`;
+
+      const lgHtml = buildLg(q.explanation, q.correct_answer !== undefined ? `Đáp số chuẩn: ${TeXCompiler.escapeHtml(String(q.correct_answer))}` : '');
+      return `<article class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-xs space-y-2">
+        <div class="tex-env-header">
+          <span class="tex-env-badge"><i class="fa-solid fa-circle-question mr-1.5"></i>Phần III • Câu ${q.id}.</span>
+          ${statusBadge}
+        </div>
+        <div class="text-sm text-slate-800 leading-relaxed">${fmt(q.content)}${ansBar}${lgHtml}</div>
+      </article>`;
+    }).filter(Boolean).join('');
+
+    if (p3Cards) {
+      sectionsHtml += `<div class="space-y-4">
+        <div class="flex items-center justify-between px-1">
+          <h3 class="text-sm sm:text-base font-extrabold text-indigo-950 flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-amber-600 text-white inline-flex items-center justify-center text-xs">III</span>PHẦN III. Trắc nghiệm trả lời ngắn</h3>
+          <span class="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1 rounded-full">${sub.scoreResult.part3.score}/${sub.scoreResult.part3.maxScore ?? 3} điểm</span>
+        </div>
+        ${p3Cards}
+      </div>`;
+    }
+
+    if (!sectionsHtml) {
+      return `<div class="bg-white rounded-2xl p-8 text-center border border-slate-200 text-slate-500 text-sm font-semibold">Không có câu hỏi nào thuộc bộ lọc hiện tại.</div>`;
+    }
+    return `<div class="tex-doc space-y-8">${sectionsHtml}</div>`;
   },
 
   // --- VIEW: TRANG QUẢN TRỊ VIÊN / GIÁO VIÊN (ADMIN DASHBOARD) ---
@@ -4519,12 +4867,56 @@ const App = {
           </div>
         </div>
 
+        <!-- 3. Dán trực tiếp mã LaTeX để tự động biên dịch sang Đề HTML kèm hình vẽ -->
+        <div class="border border-indigo-200 rounded-2xl p-4 bg-indigo-50/30 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-800 flex items-center">
+              <i class="fa-solid fa-code text-indigo-600 mr-1.5"></i>3. Dán trực tiếp mã LaTeX (.tex)
+            </span>
+            <span class="text-[10px] text-indigo-600 font-semibold">Tự động chuyển sang HTML &amp; TikZ SVG</span>
+          </div>
+          <textarea id="updateExamTexInput" rows="4" spellcheck="false" placeholder="Dán mã LaTeX đề thi (kèm tikzpicture, tkz-tab, \\choice, \\choiceTF, \\shortans, \\loigiai)..." class="w-full p-2.5 border border-slate-200 rounded-xl font-mono text-xs bg-white text-slate-800 outline-none focus:border-indigo-500"></textarea>
+          <button type="button" onclick="App.handleDirectTexCodeUpdate('${examId}')" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer">
+            <i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Cập nhật mã LaTeX &amp; Chuyển sang Đề HTML
+          </button>
+        </div>
+
         <div class="pt-2 text-right">
           <button type="button" onclick="document.getElementById('updatePdfModal').remove()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-semibold text-slate-700 cursor-pointer">Đóng</button>
         </div>
       </div>
     `;
     document.body.appendChild(modal);
+    const texTa = document.getElementById('updateExamTexInput');
+    if (texTa && exam.raw_tex) texTa.value = exam.raw_tex;
+  },
+
+  handleDirectTexCodeUpdate(examId) {
+    const exam = this.state.exams.find(e => e.id === examId);
+    const raw = document.getElementById('updateExamTexInput')?.value || '';
+    if (!exam || !raw.trim()) {
+      this.notify('Vui lòng dán mã LaTeX trước khi cập nhật.', 'warning');
+      return;
+    }
+    exam.raw_tex = raw;
+    exam.pdf_url = 'tex:' + examId;
+    exam.pdf_name = `${(exam.title || examId).replace(/\s+/g, '_')}.html (TeX)`;
+    exam.default_view_mode = 'html';
+    if (!this.hasRealPdfFile(exam.solution_pdf_url)) {
+      exam.solution_pdf_url = 'tex:' + examId + '_sol';
+      exam.solution_pdf_name = 'Lời giải HTML từ TeX';
+    }
+    const parsed = TeXParser.parse(raw);
+    if (parsed && (parsed.part1.length || parsed.part2.length || parsed.part3.length)) {
+      exam.part1 = parsed.part1;
+      exam.part2 = parsed.part2;
+      exam.part3 = parsed.part3;
+      exam.tex_macros = parsed.tex_macros || {};
+    }
+    this.saveData();
+    document.getElementById('updatePdfModal')?.remove();
+    this.render();
+    this.notify(`Đã chuyển mã LaTeX sang Đề HTML tương tác kèm hình vẽ cho "${exam.title}"!`, 'success', 'Cập nhật LaTeX thành công');
   },
 
   async handleDirectPdfUpdate(event, examId, type = 'question') {
@@ -5957,29 +6349,32 @@ const App = {
             <div id="solutionPdfSelectedBadge" class="text-xs text-emerald-700 font-semibold hidden"></div>
           </div>
 
-          <!-- UPLOAD VÀ BÓC TÁCH FILE .TEX -->
-          <div class="border border-slate-200 rounded-2xl p-4 bg-slate-50 space-y-2">
-            <div class="flex items-center justify-between">
+          <!-- UPLOAD VÀ TỰ ĐỘNG CHUYỂN ĐỔI MÃ LATEX (.TEX) SANG HTML + HÌNH VẼ SVG -->
+          <div class="border border-indigo-200 rounded-2xl p-4 bg-indigo-50/30 space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <label class="text-xs font-bold text-slate-800 flex items-center">
-                <i class="fa-solid fa-file-code text-indigo-600 mr-1.5"></i>3. Mã Nguồn TeX (Bóc tách câu hỏi 3 phần):
+                <i class="fa-solid fa-file-code text-indigo-600 mr-1.5"></i>3. Mã Nguồn LaTeX (Dán vào sẽ tự động chuyển sang HTML &amp; vẽ hình TikZ):
               </label>
-              <div class="flex items-center space-x-2">
-                <input type="file" id="texFileInput" accept=".tex,.txt" class="hidden" onchange="App.handleTexFileSelect(event)">
-                <button type="button" onclick="document.getElementById('texFileInput').click()" class="text-xs text-emerald-700 font-bold hover:underline cursor-pointer">
-                  <i class="fa-solid fa-upload mr-1"></i>Chọn file .tex từ máy
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" onclick="document.getElementById('newExamTexCode').value = App.getSampleStudioTex(); App.onNewExamTexInput(true);" class="text-xs px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-600 hover:text-indigo-700 font-semibold cursor-pointer">
+                  Mẫu LaTeX
                 </button>
-                <button type="button" onclick="App.parsePreviewTex()" class="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-md font-bold hover:bg-indigo-700 cursor-pointer">
-                  <i class="fa-solid fa-wand-magic-sparkles mr-1"></i>Phân tích & Xem trước
+                <input type="file" id="texFileInput" accept=".tex,.txt,.ltx" class="hidden" onchange="App.handleTexFileSelect(event)">
+                <button type="button" onclick="document.getElementById('texFileInput').click()" class="text-xs text-emerald-700 font-bold hover:underline cursor-pointer">
+                  <i class="fa-solid fa-upload mr-1"></i>Chọn file .tex
+                </button>
+                <button type="button" onclick="App.parsePreviewTex('html')" class="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-md font-bold hover:bg-indigo-700 cursor-pointer">
+                  <i class="fa-solid fa-wand-magic-sparkles mr-1"></i>Xem trước HTML &amp; Hình vẽ
                 </button>
               </div>
             </div>
 
             <div id="texSelectedBadge" class="text-xs text-emerald-600 font-semibold hidden"></div>
-            <textarea id="newExamTexCode" rows="6" placeholder="Dán mã nguồn TeX vào đây hoặc chọn file .tex từ máy tính..." class="w-full p-3 border rounded-xl font-mono text-xs bg-white text-slate-800">${SAMPLE_EXAM_2027.raw_tex}</textarea>
+            <textarea id="newExamTexCode" rows="6" spellcheck="false" oninput="App.onNewExamTexInput()" placeholder="Dán trực tiếp mã LaTeX bất kì vào đây (hỗ trợ đầy đủ tikzpicture, tkz-tab, pgfplots, immini, eqnarray*, \\choice, \\choiceTF, \\shortans, \\loigiai) — Hệ thống tự động biên dịch sang HTML kèm hình vẽ tương tác!" class="w-full p-3 border border-slate-200 rounded-xl font-mono text-xs bg-white text-slate-800 focus:border-indigo-500 outline-none"></textarea>
           </div>
 
-          <!-- Xem trước kết quả TeX -->
-          <div id="texPreviewContainer" class="hidden p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 space-y-3 max-h-60 overflow-y-auto">
+          <!-- Xem trước kết quả TeX -> HTML tương tác -->
+          <div id="texPreviewContainer" class="hidden p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 space-y-3 max-h-[460px] overflow-y-auto">
             <div id="texParseStatus" class="text-xs font-bold text-indigo-900"></div>
             <div id="texParsedItems" class="space-y-2 text-xs"></div>
           </div>
@@ -6075,14 +6470,46 @@ const App = {
     reader.readAsText(file, 'utf-8');
   },
 
-  parsePreviewTex(viewMode = 'questions') {
-    const raw = document.getElementById('newExamTexCode').value;
+  onNewExamTexInput(immediate = false) {
+    const raw = document.getElementById('newExamTexCode')?.value || '';
+    if (raw.trim() && !this.state.tempSelectedPdfFile) {
+      const modeSel = document.getElementById('newExamDefaultMode');
+      if (modeSel) modeSel.value = 'html';
+      const pdfUrlInput = document.getElementById('newExamPdfUrl');
+      if (pdfUrlInput && (!pdfUrlInput.value.trim() || pdfUrlInput.value === 'de-toan-12-le-thanh-tong.pdf')) {
+        pdfUrlInput.value = 'tex:auto';
+      }
+      const titleInput = document.getElementById('newExamTitle');
+      if (titleInput && !titleInput.value.trim() && typeof TeXCompiler !== 'undefined') {
+        const pre = TeXCompiler.extractPreamble(raw);
+        const inferred = pre.title
+          ? pre.title.replace(/\\[A-Za-z]+\s*|\{|\}/g, '').trim()
+          : ((pre.body.match(/\\(?:chapter|section)\*?\{([^}]+)\}/) || [])[1] || '').replace(/\\[A-Za-z]+\s*|\{|\}/g, '').trim();
+        if (inferred) titleInput.value = inferred;
+      }
+    }
+    clearTimeout(this._newExamTexDebounce);
+    if (!raw.trim()) {
+      document.getElementById('texPreviewContainer')?.classList.add('hidden');
+      return;
+    }
+    if (immediate) {
+      this.parsePreviewTex('html');
+    } else {
+      this._newExamTexDebounce = setTimeout(() => this.parsePreviewTex('html'), 420);
+    }
+  },
+
+  parsePreviewTex(viewMode = 'html') {
+    const raw = document.getElementById('newExamTexCode')?.value || '';
+    if (!raw.trim()) return;
     const parsed = TeXParser.parse(raw);
     this.state.tempParsedExam = parsed;
 
     const previewContainer = document.getElementById('texPreviewContainer');
     const statusEl = document.getElementById('texParseStatus');
     const itemsEl = document.getElementById('texParsedItems');
+    if (!previewContainer || !statusEl || !itemsEl) return;
 
     previewContainer.classList.remove('hidden');
     const docRes = (typeof TeXCompiler !== 'undefined') ? TeXCompiler.compileDocument(raw) : null;
@@ -6091,7 +6518,7 @@ const App = {
     statusEl.innerHTML = `
       <div class="flex flex-wrap items-center justify-between gap-2">
         <span class="text-emerald-700 font-bold inline-flex items-center gap-1">
-          <i class="fa-solid fa-check"></i>${hasParsedQ ? 'Biên dịch &amp; bóc tách thành công:' : 'Đã biên dịch tài liệu TeX sang HTML:'}
+          <i class="fa-solid fa-check"></i>${hasParsedQ ? 'Đã tự động chuyển LaTeX sang HTML tương tác:' : 'Đã biên dịch tài liệu LaTeX sang HTML:'}
         </span>
         <div class="flex flex-wrap items-center gap-1.5">
           ${hasParsedQ ? `
@@ -6101,7 +6528,7 @@ const App = {
           ` : ''}
           ${docRes ? `<span class="bg-teal-100 text-teal-800 px-2 py-0.5 rounded font-mono">TikZ: ${docRes.stats.tikz} • Bảng: ${docRes.stats.tables}</span>` : ''}
           <button type="button" onclick="App.parsePreviewTex('${viewMode === 'html' ? 'questions' : 'html'}')" class="px-2 py-0.5 rounded bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-bold cursor-pointer">
-            <i class="fa-solid ${viewMode === 'html' ? 'fa-list-check' : 'fa-code'} mr-1"></i>${viewMode === 'html' ? 'Xem câu bóc tách' : 'Xem toàn bộ HTML'}
+            <i class="fa-solid ${viewMode === 'html' ? 'fa-list-check' : 'fa-code'} mr-1"></i>${viewMode === 'html' ? 'Xem bóc tách' : 'Xem Đề HTML tương tác'}
           </button>
           <button type="button" onclick="App.exportCompiledTexHtml(document.getElementById('newExamTexCode').value, document.getElementById('newExamTitle')?.value || 'De_Thi_TeX')" class="px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 font-bold cursor-pointer">
             <i class="fa-solid fa-download mr-1"></i>Tải .html
@@ -6112,7 +6539,8 @@ const App = {
 
     if (viewMode === 'html' || (!hasParsedQ && docRes)) {
       itemsEl.innerHTML = `<div class="p-4 bg-white rounded-xl border border-slate-200 text-slate-800">${docRes ? docRes.html : ''}</div>`;
-      this.renderMathFormulas(itemsEl);
+      if (typeof TeXCompiler !== 'undefined') TeXCompiler.bindInteractiveDom(itemsEl, { mode: 'practice' });
+      this.renderMathFormulas(itemsEl, parsed?.tex_macros);
       return;
     }
 
@@ -6140,7 +6568,7 @@ const App = {
       }
 
       itemsEl.innerHTML = previewHtml;
-      this.renderMathFormulas(itemsEl);
+      this.renderMathFormulas(itemsEl, parsed?.tex_macros);
     } else {
       itemsEl.innerHTML = '';
     }
@@ -6160,7 +6588,7 @@ const App = {
     const accessMode = document.getElementById('newExamAccess')?.value || 'all';
     let defaultMode = document.getElementById('newExamDefaultMode')?.value || 'pdf';
     const checkedStudents = Array.from(document.querySelectorAll('#createExamModal input[name="newExamStudentCheck"]:checked')).map(cb => cb.value);
-    let rawTex = document.getElementById('newExamTexCode').value;
+    let rawTex = (document.getElementById('newExamTexCode')?.value || '').trim();
     const examId = 'EXAM-' + Date.now();
 
     let finalPdfUrl = 'de-toan-12-le-thanh-tong.pdf';
@@ -6183,8 +6611,8 @@ const App = {
       }
     } else {
       const inputUrl = document.getElementById('newExamPdfUrl').value.trim();
-      const useTexHtml = defaultMode === 'html' && (inputUrl === 'tex:auto' || inputUrl === 'de-toan-12-le-thanh-tong.pdf' || !inputUrl);
-      if (useTexHtml || inputUrl === 'tex:auto' || (!inputUrl && rawTex && rawTex.trim() !== SAMPLE_EXAM_2027.raw_tex.trim())) {
+      const useTexHtml = Boolean(rawTex) || (defaultMode === 'html' && (inputUrl === 'tex:auto' || inputUrl === 'de-toan-12-le-thanh-tong.pdf' || !inputUrl));
+      if (useTexHtml || inputUrl === 'tex:auto') {
         finalPdfUrl = 'tex:' + examId;
         finalPdfName = `${title.replace(/\s+/g, '_')}.html (TeX)`;
         defaultMode = 'html';
@@ -6224,7 +6652,7 @@ const App = {
       }
     }
 
-    const parsed = TeXParser.parse(rawTex);
+    const parsed = rawTex ? TeXParser.parse(rawTex) : null;
     const hasParsedAny = Boolean(parsed && (parsed.part1.length > 0 || parsed.part2.length > 0 || parsed.part3.length > 0));
 
     const finalExam = {
@@ -6413,7 +6841,7 @@ const App = {
         const lockAnswers = Boolean(this.state.activeExam && !found.isSolutionView);
         const htmlBody = lockAnswers
           ? TeXCompiler.stripHtmlAnswers(res.html)
-          : res.html.replace('<div class="tex-doc">', '<div class="tex-doc" id="modalTexDocView">');
+          : res.html.replace('<div class="tex-doc', '<div id="modalTexDocView" class="tex-doc');
 
         const modal = document.createElement('div');
         modal.id = 'previewPdfModal';
@@ -6427,15 +6855,18 @@ const App = {
                 </span>
                 <div class="truncate">
                   <h3 class="text-sm font-bold text-white truncate">${title}</h3>
-                  <p class="text-[11px] text-slate-400 truncate">Biên dịch trực tiếp từ LaTeX sang HTML (KaTeX + TikZJax SVG)</p>
+                  <p class="text-[11px] text-slate-400 truncate">Tương tác trực tiếp câu hỏi &amp; xem lời giải từng câu (KaTeX + TikZJax SVG)</p>
                 </div>
               </div>
-              <div class="flex items-center space-x-2 shrink-0">
+              <div class="flex flex-wrap items-center gap-2 shrink-0">
                 ${!lockAnswers ? `
-                  <button onclick="document.getElementById('modalTexDocView')?.classList.toggle('hide-tex-answers')" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-emerald-300 hover:text-white flex items-center transition cursor-pointer">
-                    <i class="fa-solid fa-eye mr-1.5"></i>Ẩn / Hiện lời giải
+                  <button type="button" onclick="TeXCompiler.toggleAllSolutions(document.getElementById('modalTexDocView'))" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-emerald-300 hover:text-white flex items-center transition cursor-pointer">
+                    <i class="fa-solid fa-lightbulb mr-1.5 text-amber-400"></i>Mở / Thu gọn lời giải
                   </button>
-                  <button onclick="App.exportCompiledTexByRef('${pdfUrl}', '${storageId || ''}', '${title.replace(/'/g, "\\'")}')" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white flex items-center transition cursor-pointer">
+                  <button type="button" onclick="TeXCompiler.resetPracticeState(document.getElementById('modalTexDocView'))" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-slate-200 hover:text-white flex items-center transition cursor-pointer">
+                    <i class="fa-solid fa-rotate-left mr-1.5"></i>Làm lại
+                  </button>
+                  <button type="button" onclick="App.exportCompiledTexByRef('${pdfUrl}', '${storageId || ''}', '${title.replace(/'/g, "\\'")}')" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white flex items-center transition cursor-pointer">
                     <i class="fa-solid fa-download mr-1.5"></i>Tải .html
                   </button>
                 ` : ''}
@@ -6445,14 +6876,15 @@ const App = {
               </div>
             </div>
             <div class="flex-1 w-full overflow-y-auto bg-slate-100 p-3 sm:p-6">
-              <div class="max-w-4xl mx-auto bg-white text-slate-800 rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-8">
+              <div id="modalTexDocHost" class="max-w-4xl mx-auto bg-white text-slate-800 rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-8">
                 ${htmlBody}
               </div>
             </div>
           </div>
         `;
         document.body.appendChild(modal);
-        this.renderMathFormulas(modal);
+        if (!lockAnswers) TeXCompiler.bindInteractiveDom(document.getElementById('modalTexDocHost'), { mode: 'practice' });
+        this.renderMathFormulas(modal, res.preamble?.macros);
         return;
       }
     }
@@ -6845,6 +7277,11 @@ const App = {
             </div>
           </div>
 
+          <div class="border border-emerald-200 rounded-xl p-3 bg-emerald-50/30 space-y-1.5">
+            <label class="block text-xs font-bold text-slate-700"><i class="fa-solid fa-code text-emerald-600 mr-1"></i>Hoặc dán trực tiếp mã LaTeX (.tex) để tự động chuyển sang HTML &amp; Hình vẽ:</label>
+            <textarea id="newHwTexInput" rows="4" spellcheck="false" oninput="App.onNewHwTexInput()" placeholder="Dán mã LaTeX chuyên đề / bài tập kèm tikzpicture, tkz-tab, \\choice, \\loigiai..." class="w-full p-2.5 border border-slate-300 rounded-xl font-mono text-xs bg-white focus:border-emerald-600 outline-none"></textarea>
+          </div>
+
           <div class="pt-3 border-t border-slate-100 flex justify-end space-x-2.5">
             <button type="button" onclick="document.getElementById('addHomeworkModal').remove()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-semibold text-slate-700 cursor-pointer transition">Hủy</button>
             <button type="submit" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition inline-flex items-center gap-1.5 cursor-pointer">
@@ -7009,6 +7446,18 @@ const App = {
     }
   },
 
+  onNewHwTexInput() {
+    const raw = document.getElementById('newHwTexInput')?.value || '';
+    const titleInput = document.getElementById('newHwTitle');
+    if (raw.trim() && titleInput && !titleInput.value.trim() && typeof TeXCompiler !== 'undefined') {
+      const pre = TeXCompiler.extractPreamble(raw);
+      const inferred = pre.title
+        ? pre.title.replace(/\\[A-Za-z]+\s*|\{|\}/g, '').trim()
+        : ((pre.body.match(/\\(?:chapter|section)\*?\{([^}]+)\}/) || [])[1] || '').replace(/\\[A-Za-z]+\s*|\{|\}/g, '').trim();
+      if (inferred) titleInput.value = inferred;
+    }
+  },
+
   async handleAddHomeworkSubmit() {
     const title = document.getElementById('newHwTitle').value.trim();
     const desc = document.getElementById('newHwDesc').value.trim();
@@ -7016,23 +7465,24 @@ const App = {
     const accessType = document.getElementById('newHwAccess')?.value || 'all';
     const pickedIds = Array.from(document.querySelectorAll('input[name="newHwStudentPick"]:checked')).map(el => el.value);
     const file = this.state.tempSelectedHwFile;
-    const rawTexText = this.state.tempSelectedHwTexText;
+    const pastedTex = (document.getElementById('newHwTexInput')?.value || '').trim();
+    const rawTexText = pastedTex || this.state.tempSelectedHwTexText;
     const hwId = 'HW-' + Date.now();
 
     let pdfUrl = 'dethi_toan_thpt_2027_ma101.pdf';
     let fileName = `Chuyen_De_Khoi_${grade}.pdf`;
     let fileSize = '2.5 MB';
 
-    if (file && /\.html?$/i.test(file.name)) {
+    if (file && /\.html?$/i.test(file.name) && !pastedTex) {
       fileName = file.name;
       fileSize = Math.max(1, Math.round(file.size / 1024)) + ' KB (HTML)';
       if (typeof PDFStorage !== 'undefined') {
         await PDFStorage.savePdf(hwId + '_html', file);
         pdfUrl = 'idb_html:' + hwId + '_html';
       }
-    } else if (file && /\.(tex|txt)$/i.test(file.name) && rawTexText) {
-      fileName = file.name;
-      fileSize = Math.max(1, Math.round(file.size / 1024)) + ' KB (TeX -> HTML)';
+    } else if (rawTexText) {
+      fileName = (file && /\.(tex|txt)$/i.test(file.name)) ? file.name : `${title.replace(/\s+/g, '_')}.tex`;
+      fileSize = Math.max(1, Math.round(new Blob([rawTexText]).size / 1024)) + ' KB (TeX -> HTML)';
       pdfUrl = 'tex:' + hwId;
     } else if (file) {
       fileName = file.name;
@@ -7691,9 +8141,10 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
             <textarea
               id="studioTexInput"
               spellcheck="false"
+              oninput="App.onStudioTexInput()"
               ondragover="event.preventDefault()"
               ondrop="App.handleStudioTexDrop(event)"
-              placeholder="Dán nội dung bất kì file .tex nào vào đây hoặc kéo-thả file .tex từ máy tính..."
+              placeholder="Dán nội dung bất kì file .tex nào vào đây hoặc kéo-thả file .tex từ máy tính... Hệ thống sẽ tự động biên dịch sang HTML tương tác & hình vẽ SVG ngay lập tức."
               class="flex-1 w-full p-4 bg-slate-950 text-emerald-300 font-mono text-xs leading-relaxed outline-none resize-none"
             ></textarea>
           </div>
@@ -7768,6 +8219,13 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
     reader.readAsText(file, 'utf-8');
   },
 
+  onStudioTexInput() {
+    clearTimeout(this._studioTexTimer);
+    this._studioTexTimer = setTimeout(() => {
+      if (document.getElementById('studioTexInput')) this.compileStudioTexNow();
+    }, 400);
+  },
+
   compileStudioTexNow() {
     if (typeof TeXCompiler === 'undefined') return;
     const raw = document.getElementById('studioTexInput')?.value || '';
@@ -7796,10 +8254,16 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
     }
 
     host.innerHTML = res.html || '<p class="text-xs text-slate-400 italic text-center py-8">Hãy dán mã LaTeX hoặc chọn một file .tex để biên dịch sang HTML.</p>';
-    this.renderMathFormulas(host);
+    TeXCompiler.bindInteractiveDom(host, { mode: 'practice' });
+    this.renderMathFormulas(host, res.preamble?.macros);
   },
 
   toggleStudioTexAnswers() {
+    const host = document.getElementById('studioTexPreviewHost');
+    if (host && typeof TeXCompiler !== 'undefined') {
+      TeXCompiler.toggleAllSolutions(host);
+      return;
+    }
     const doc = document.querySelector('#studioTexPreviewHost .tex-doc');
     if (doc) doc.classList.toggle('hide-tex-answers');
   },
@@ -7905,13 +8369,19 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
     }
   },
 
-  buildExamHtmlDoc(exam, lockAnswers = false) {
+  buildExamHtmlDoc(exam, lockAnswers = false, openSolutions = false) {
     if (!exam || typeof TeXCompiler === 'undefined') return '';
     let html = '';
+    const structuredTotal = (exam.part1?.length || 0) + (exam.part2?.length || 0) + (exam.part3?.length || 0);
     if (exam.raw_tex && exam.raw_tex.trim()) {
-      html = TeXCompiler.compileDocument(exam.raw_tex).html;
+      const compiled = TeXCompiler.compileDocument(exam.raw_tex, { openSolutions });
+      if (structuredTotal > 0 && compiled.stats.questions < structuredTotal) {
+        html = TeXCompiler.compileExamDataFallbackHtml(exam, { openSolutions, preambleInfo: compiled.preamble });
+      } else {
+        html = compiled.html;
+      }
     } else {
-      html = TeXCompiler.compileExamDataFallbackHtml(exam);
+      html = TeXCompiler.compileExamDataFallbackHtml(exam, { openSolutions });
     }
     return lockAnswers ? TeXCompiler.stripHtmlAnswers(html) : html;
   },
@@ -7943,7 +8413,10 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
       return;
     }
 
-    const precompiledHtml = (!exam.raw_tex || !exam.raw_tex.trim())
+    const structuredTotal = (exam.part1?.length || 0) + (exam.part2?.length || 0) + (exam.part3?.length || 0);
+    const compiledCheck = (exam.raw_tex && exam.raw_tex.trim()) ? TeXCompiler.compileDocument(exam.raw_tex) : null;
+    const useFallback = !compiledCheck || (structuredTotal > 0 && compiledCheck.stats.questions < structuredTotal);
+    const precompiledHtml = useFallback
       ? this.buildExamHtmlDoc(exam, !allowAns)
       : null;
     const fullHtml = TeXCompiler.buildStandaloneHtml(exam.raw_tex || '', exam.title, {
@@ -7995,8 +8468,11 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
 
     const studentHasSubmitted = !isAdmin && !this.state.activeExam && this.state.submissions.some(s => s.examId === examId && s.studentId === u?.studentId);
     const canSeeSolutions = isAdmin || (studentHasSubmitted && this.canStudentViewExamAnswers(exam));
-    const viewMode = (initialMode === 'solution' && canSeeSolutions) ? 'solution' : 'exam';
-    const lockAnswers = viewMode !== 'solution';
+    const viewMode = !canSeeSolutions
+      ? 'exam'
+      : (initialMode === 'exam' ? 'exam' : (initialMode === 'solution' ? 'solution' : 'practice'));
+    const lockAnswers = viewMode === 'exam';
+    const openSolutions = viewMode === 'solution';
     const inActiveExam = Boolean(this.state.activeExam && this.state.activeExam.id === examId);
 
     let uploadedBlobUrl = null;
@@ -8007,7 +8483,12 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
       uploadedBlobUrl = await this.getSanitizedHtmlBlobUrl(targetKey, lockAnswers);
     }
 
-    const compiledHtml = uploadedBlobUrl ? '' : this.buildExamHtmlDoc(exam, lockAnswers);
+    const compiledHtml = uploadedBlobUrl ? '' : this.buildExamHtmlDoc(exam, lockAnswers, openSolutions);
+    const modeDesc = lockAnswers
+      ? 'Chế độ Đề Thi Học Sinh (Đã ẩn toàn bộ đáp án & lời giải)'
+      : (openSolutions
+        ? 'Chế độ Đáp Án & Lời Giải Đầy Đủ (Đã mở sẵn mọi lời giải)'
+        : 'Chế độ Luyện Tập Tương Tác (Click trực tiếp đáp án để kiểm tra & bấm Xem lời giải từng câu)');
 
     const modal = document.createElement('div');
     modal.id = 'examHtmlPreviewModal';
@@ -8022,7 +8503,7 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
             <div class="min-w-0">
               <h3 class="text-sm sm:text-base font-extrabold text-white truncate">${exam.title}</h3>
               <p class="text-[11px] text-slate-300 truncate">
-                Khối ${exam.grade || 12} • ${exam.time_minutes || 90} phút • ${lockAnswers ? 'Chế độ Đề Thi Học Sinh (Đã ẩn đáp án & lời giải)' : 'Chế độ Đáp Án & Lời Giải Chi Tiết'}
+                Khối ${exam.grade || 12} • ${exam.time_minutes || 90} phút • ${modeDesc}
               </p>
             </div>
           </div>
@@ -8030,16 +8511,24 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
           <div class="flex flex-wrap items-center gap-2 shrink-0">
             ${canSeeSolutions ? `
               <div class="flex items-center bg-slate-900 rounded-xl p-0.5 border border-slate-700 text-xs font-bold">
-                <button type="button" onclick="App.previewExamHtmlModal('${exam.id}', 'exam')" class="px-3 py-1.5 rounded-lg transition cursor-pointer ${lockAnswers ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-300 hover:text-white'}">
-                  <i class="fa-solid fa-user-graduate mr-1"></i>Bản Đề Thi
+                <button type="button" onclick="App.previewExamHtmlModal('${exam.id}', 'exam')" class="px-2.5 py-1.5 rounded-lg transition cursor-pointer ${viewMode === 'exam' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-300 hover:text-white'}">
+                  <i class="fa-solid fa-user-graduate mr-1"></i>Đề Thi
                 </button>
-                <button type="button" onclick="App.previewExamHtmlModal('${exam.id}', 'solution')" class="px-3 py-1.5 rounded-lg transition cursor-pointer ${!lockAnswers ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-300 hover:text-white'}">
-                  <i class="fa-solid fa-check-double mr-1"></i>Bản Lời Giải
+                <button type="button" onclick="App.previewExamHtmlModal('${exam.id}', 'practice')" class="px-2.5 py-1.5 rounded-lg transition cursor-pointer ${viewMode === 'practice' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-300 hover:text-white'}">
+                  <i class="fa-solid fa-hand-pointer mr-1"></i>Tương Tác &amp; Lời Giải
+                </button>
+                <button type="button" onclick="App.previewExamHtmlModal('${exam.id}', 'solution')" class="px-2.5 py-1.5 rounded-lg transition cursor-pointer ${viewMode === 'solution' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-300 hover:text-white'}">
+                  <i class="fa-solid fa-lightbulb mr-1"></i>Mở Hết Lời Giải
                 </button>
               </div>
+              ${!lockAnswers && !uploadedBlobUrl ? `
+                <button type="button" onclick="if (typeof TeXCompiler !== 'undefined') TeXCompiler.resetPracticeState(document.getElementById('examHtmlModalDocHost'))" class="px-2.5 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-xs font-bold text-slate-200 flex items-center gap-1 transition cursor-pointer" title="Xóa các lựa chọn vừa thử để làm lại">
+                  <i class="fa-solid fa-rotate-left"></i><span>Làm lại</span>
+                </button>
+              ` : ''}
             ` : `
               <span class="px-2.5 py-1 rounded-lg bg-slate-700/80 border border-slate-600 text-[11px] font-semibold text-amber-300 inline-flex items-center gap-1">
-                <i class="fa-solid fa-lock"></i><span>Đáp án mở sau khi nộp bài</span>
+                <i class="fa-solid fa-lock"></i><span>Đáp án &amp; lời giải mở sau khi nộp bài</span>
               </span>
             `}
 
@@ -8075,7 +8564,13 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
     `;
 
     document.body.appendChild(modal);
-    if (!uploadedBlobUrl) this.renderMathFormulas(modal);
+    if (!uploadedBlobUrl) {
+      const host = document.getElementById('examHtmlModalDocHost');
+      if (!lockAnswers && host && typeof TeXCompiler !== 'undefined') {
+        TeXCompiler.bindInteractiveDom(host, { mode: 'practice' });
+      }
+      this.renderMathFormulas(modal, exam.tex_macros);
+    }
   },
 
   async publishStudioTexAsHtmlExam() {
@@ -8141,7 +8636,7 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
     document.getElementById('texCompilerStudioModal')?.remove();
     this.state.adminMainTab = 'main';
     this.render();
-    await this.previewExamHtmlModal(examId, 'exam');
+    await this.previewExamHtmlModal(examId, 'practice');
   },
 
   saveCompiledTexAsHomework() {
@@ -8198,9 +8693,10 @@ Tính cỡ mẫu $n$ của bảng số liệu trên.
     if (raw) this.parsePreviewTex();
   },
 
-  renderMathFormulas(rootEl = null) {
+  renderMathFormulas(rootEl = null, extraMacros = null) {
+    const macros = extraMacros || this.state.activeExam?.tex_macros || {};
     if (typeof TeXCompiler !== 'undefined') {
-      TeXCompiler.renderDom(rootEl || document.body);
+      TeXCompiler.renderDom(rootEl || document.body, macros);
       return;
     }
     if (typeof renderMathInElement === 'function') {
