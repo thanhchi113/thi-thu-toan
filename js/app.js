@@ -4,6 +4,7 @@
 const App = {
   ADMIN_RECOVERY_EMAIL: 'badaoqn132@gmail.com',
   PUBLIC_APP_URL: 'https://thanhchi113.github.io/thi-thu-toan/',
+  DATA_SEED_VERSION: '2026-10-29-cap3-hs001-079-clean-v1',
   _pdfViewers: {},
   _deferredInstallPrompt: null,
 
@@ -417,6 +418,25 @@ const App = {
 
   // 1. Tải và đồng bộ dữ liệu với LocalStorage
   loadData() {
+    // Tự động xóa học sinh cũ/nháp, đề thi nháp, bài nộp mẫu và các file PDF nháp khi nâng cấp lên bộ dữ liệu Cấp 3 chính thức
+    const seedVersionKey = 'thpt_data_seed_version';
+    if (localStorage.getItem(seedVersionKey) !== this.DATA_SEED_VERSION) {
+      localStorage.removeItem('thpt_students');
+      localStorage.removeItem('thpt_exams');
+      localStorage.removeItem('thpt_homeworks');
+      localStorage.removeItem('thpt_submissions');
+      try {
+        const cur = JSON.parse(sessionStorage.getItem('thpt_current_user') || 'null');
+        if (cur && cur.role === 'student' && !(INITIAL_SEED_DATA.students || []).some(s => s.studentId === cur.studentId)) {
+          sessionStorage.removeItem('thpt_current_user');
+        }
+      } catch (e) {}
+      if (typeof PDFStorage !== 'undefined' && typeof PDFStorage.clearAllPdfs === 'function') {
+        PDFStorage.clearAllPdfs();
+      }
+      localStorage.setItem(seedVersionKey, this.DATA_SEED_VERSION);
+    }
+
     const storedAdmin = localStorage.getItem('thpt_admin_account');
     const parsedAdmin = storedAdmin ? JSON.parse(storedAdmin) : {};
     this.state.admin = {
@@ -431,19 +451,7 @@ const App = {
     const storedHomeworks = localStorage.getItem('thpt_homeworks');
     const storedSubmissions = localStorage.getItem('thpt_submissions');
 
-    let stus = storedStudents ? JSON.parse(storedStudents) : INITIAL_SEED_DATA.students;
-    if (INITIAL_SEED_DATA.students) {
-      INITIAL_SEED_DATA.students.forEach(st => {
-        const existing = stus.find(x => x.studentId === st.studentId);
-        if (!existing) {
-          stus.push(st);
-        } else {
-          if (!existing.phone && st.phone) existing.phone = st.phone;
-          if (!existing.parentName && st.parentName) existing.parentName = st.parentName;
-          if (!existing.notes && st.notes) existing.notes = st.notes;
-        }
-      });
-    }
+    let stus = storedStudents ? JSON.parse(storedStudents) : (INITIAL_SEED_DATA.students || []).map(s => ({ ...s }));
     // Đảm bảo mọi học sinh đều có đủ trường và khối lớp chuẩn (6 – 12)
     stus.forEach(s => {
       if (s.phone === undefined) s.phone = '';
@@ -454,41 +462,14 @@ const App = {
     });
     this.state.students = stus;
     
-    let examsList = storedExams ? JSON.parse(storedExams) : (INITIAL_SEED_DATA.exams || [SAMPLE_EXAM_2027]);
-    if (INITIAL_SEED_DATA.exams) {
-      INITIAL_SEED_DATA.exams.forEach(se => {
-        if (!examsList.find(e => e.id === se.id)) {
-          examsList.push(se);
-        }
-      });
-    }
-    // Đảm bảo đề mặc định luôn đồng bộ với file PDF thực tế và đáp án chuẩn 2027
-    const defIdx = examsList.findIndex(e => e.id === 'EXAM-2027-01');
-    if (defIdx !== -1) {
-      examsList[defIdx] = {
-        ...SAMPLE_EXAM_2027,
-        ...examsList[defIdx],
-        roundLabel: examsList[defIdx].roundLabel || 'Đợt 1',
-        title: examsList[defIdx].title || SAMPLE_EXAM_2027.title,
-        pdf_url: examsList[defIdx].pdf_url || 'de-toan-12-le-thanh-tong.pdf',
-        solution_pdf_url: examsList[defIdx].solution_pdf_url || 'dethi_toan_thpt_2027_ma101.pdf',
-        part1: Array.isArray(examsList[defIdx].part1) && examsList[defIdx].part1.length > 0 ? examsList[defIdx].part1 : SAMPLE_EXAM_2027.part1,
-        part2: Array.isArray(examsList[defIdx].part2) && examsList[defIdx].part2.length > 0 ? examsList[defIdx].part2 : SAMPLE_EXAM_2027.part2,
-        part3: Array.isArray(examsList[defIdx].part3) && examsList[defIdx].part3.length > 0 ? examsList[defIdx].part3 : SAMPLE_EXAM_2027.part3
-      };
-    } else {
-      examsList.unshift({ ...SAMPLE_EXAM_2027, roundLabel: 'Đợt 1', solution_pdf_url: 'dethi_toan_thpt_2027_ma101.pdf' });
-    }
+    let examsList = storedExams ? JSON.parse(storedExams) : (INITIAL_SEED_DATA.exams || []).map(e => ({ ...e }));
     // Đảm bảo tất cả đề thi chỉ dùng định dạng PDF thuần túy, có bảng đáp án 3 phần, khối lớp 6-12 và phân quyền
     examsList.forEach(ex => {
       delete ex.raw_tex;
       delete ex.html_exam_key;
       delete ex.solution_html_key;
-      if (!ex.pdf_url || /^(tex:|idb_html:)/.test(ex.pdf_url)) ex.pdf_url = 'de-toan-12-le-thanh-tong.pdf';
+      if (!ex.pdf_url || /^(tex:|idb_html:)/.test(ex.pdf_url)) ex.pdf_url = '';
       if (ex.solution_pdf_url && /^(tex:|idb_html:)/.test(ex.solution_pdf_url)) ex.solution_pdf_url = '';
-      if (ex.solution_pdf_url === undefined && ex.id && ex.id.startsWith('EXAM-2027-')) {
-        ex.solution_pdf_url = 'dethi_toan_thpt_2027_ma101.pdf';
-      }
       if (!Array.isArray(ex.part1)) ex.part1 = SAMPLE_EXAM_2027.part1;
       if (!Array.isArray(ex.part2)) ex.part2 = SAMPLE_EXAM_2027.part2;
       if (!Array.isArray(ex.part3)) ex.part3 = SAMPLE_EXAM_2027.part3;
@@ -512,12 +493,12 @@ const App = {
     });
     this.state.exams = examsList;
 
-    this.state.homeworks = storedHomeworks ? JSON.parse(storedHomeworks) : INITIAL_SEED_DATA.homeworks;
+    this.state.homeworks = storedHomeworks ? JSON.parse(storedHomeworks) : (INITIAL_SEED_DATA.homeworks || []).map(h => ({ ...h }));
     if (this.state.homeworks) {
       this.state.homeworks.forEach(hw => {
         delete hw.htmlDocKey;
         if (!hw.pdfUrl || /^(https:\/\/raw\.githubusercontent\.com|tex:|idb_html:)/.test(hw.pdfUrl)) {
-          hw.pdfUrl = hw.id === 'HW-2027-01' ? 'dethi_toan_thpt_2027_ma101.pdf' : 'de-toan-12-le-thanh-tong.pdf';
+          hw.pdfUrl = '';
         }
         if (!hw.grade) {
           const seedHw = (INITIAL_SEED_DATA.homeworks || []).find(sh => sh.id === hw.id);
@@ -533,15 +514,7 @@ const App = {
       });
     }
 
-    let subs = storedSubmissions ? JSON.parse(storedSubmissions) : INITIAL_SEED_DATA.submissions;
-    if (INITIAL_SEED_DATA.submissions) {
-      INITIAL_SEED_DATA.submissions.forEach(ss => {
-        if (!subs.find(x => x.id === ss.id)) {
-          subs.push(ss);
-        }
-      });
-    }
-    this.state.submissions = subs;
+    this.state.submissions = storedSubmissions ? JSON.parse(storedSubmissions) : (INITIAL_SEED_DATA.submissions || []).map(s => ({ ...s }));
 
     // Tải cấu hình quyền riêng tư, xem điểm & giám sát chống thoát màn hình khi thi
     const defaultSettings = {
@@ -576,7 +549,7 @@ const App = {
       // Không lưu các chuỗi base64 khổng lồ vào localStorage
       const safeExams = this.state.exams.map(e => ({
         ...e,
-        pdf_url: (e.pdf_url && e.pdf_url.startsWith('data:')) ? 'de-toan-12-le-thanh-tong.pdf' : e.pdf_url
+        pdf_url: (e.pdf_url && e.pdf_url.startsWith('data:')) ? '' : e.pdf_url
       }));
       localStorage.setItem('thpt_exams', JSON.stringify(safeExams));
       localStorage.setItem('thpt_homeworks', JSON.stringify(this.state.homeworks));
@@ -1351,7 +1324,7 @@ const App = {
                   <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <i class="fa-solid fa-id-card"></i>
                   </div>
-                  <input type="text" id="loginStudentId" placeholder="Nhập mã học sinh (VD: HS202701)" required
+                  <input type="text" id="loginStudentId" placeholder="Nhập mã học sinh (VD: HS001)" required
                     autocapitalize="characters" autocomplete="username" spellcheck="false"
                     oninput="App.forceUppercaseInput(this)"
                     class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono font-bold tracking-wide input-uppercase">
@@ -2370,9 +2343,9 @@ const App = {
     // Đọc file PDF thực tế từ IndexedDB nếu có
     if (typeof PDFStorage !== 'undefined') {
       const idbUrl = await PDFStorage.getPdfBlobUrl(exam.id);
-      this.state.resolvedPdfUrl = idbUrl || exam.pdf_url || 'de-toan-12-le-thanh-tong.pdf';
+      this.state.resolvedPdfUrl = idbUrl || exam.pdf_url || '';
     } else {
-      this.state.resolvedPdfUrl = exam.pdf_url || 'de-toan-12-le-thanh-tong.pdf';
+      this.state.resolvedPdfUrl = exam.pdf_url || '';
     }
 
     this.render();
@@ -2493,7 +2466,7 @@ const App = {
     const ex = this.state.activeExam;
     const u = this.state.currentUser;
     const progress = this.calculateProgress();
-    const pdfSrc = this.state.resolvedPdfUrl || ex.pdf_url || 'de-toan-12-le-thanh-tong.pdf';
+    const pdfSrc = this.state.resolvedPdfUrl || ex.pdf_url || '';
     const guardOn = this.isExamExitWarningEnabled();
     const vCount = this.state.tabSwitchesCount || 0;
 
@@ -2658,7 +2631,7 @@ const App = {
 
   // 1. Chế độ Split View (Hiển thị trực tiếp file PDF đa trang trên cả Web & App iOS + Phiếu trả lời 3 phần)
   renderSplitViewContent(ex) {
-    const pdfSrc = this.state.resolvedPdfUrl || ex.pdf_url || 'de-toan-12-le-thanh-tong.pdf';
+    const pdfSrc = this.state.resolvedPdfUrl || ex.pdf_url || '';
     const safeTitle = (ex.title || '').replace(/'/g, "\\'");
     const paneCls = this.getExamPaneClasses(this.state.mobileExamPane);
     const inStandalone = this.isStandaloneApp();
@@ -4195,7 +4168,9 @@ const App = {
                         })()}
                       </td>
                       <td colspan="2" class="px-4 py-2.5 text-center text-indigo-800 bg-indigo-50/95 border-b-2 border-indigo-200 text-xs">
-                        Hoàn thành: ${Math.round((filteredStudents.filter(s => examsList.every(ex => this.state.submissions.some(sub => sub.studentId === s.studentId && sub.examId === ex.id))).length / (filteredStudents.length || 1)) * 100)}% đủ đợt
+                        ${examsList.length > 0
+                          ? `Hoàn thành: ${Math.round((filteredStudents.filter(s => examsList.every(ex => this.state.submissions.some(sub => sub.studentId === s.studentId && sub.examId === ex.id))).length / (filteredStudents.length || 1)) * 100)}% đủ đợt`
+                          : 'Chưa có đề thi'}
                       </td>
                     </tr>
                   </thead>
@@ -5237,8 +5212,11 @@ const App = {
 
   // --- CẤP TÀI KHOẢN HỌC SINH MỚI (MODAL NÂNG CẤP) ---
   showAddStudentModal() {
-    const nextIdx = this.state.students.length + 1;
-    const defaultCode = `HS2027` + String(nextIdx).padStart(2, '0');
+    const maxNum = this.state.students.reduce((mx, s) => {
+      const m = String(s.studentId || '').match(/^HS(\d+)$/i);
+      return m ? Math.max(mx, parseInt(m[1], 10)) : mx;
+    }, 0);
+    const defaultCode = 'HS' + String(maxNum + 1).padStart(3, '0');
     const defaultGrade = (this.state.studentGradeFilter && this.state.studentGradeFilter !== 'ALL')
       ? Number(this.state.studentGradeFilter)
       : 12;
@@ -5267,7 +5245,7 @@ const App = {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Mã Học Sinh (Tự động IN HOA) *</label>
-              <input type="text" id="newStudentId" required value="${defaultCode}" placeholder="VD: HS202705" autocapitalize="characters" spellcheck="false" oninput="App.forceUppercaseInput(this)" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold input-uppercase text-indigo-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+              <input type="text" id="newStudentId" required value="${defaultCode}" placeholder="VD: HS080" autocapitalize="characters" spellcheck="false" oninput="App.forceUppercaseInput(this)" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold input-uppercase text-indigo-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
             </div>
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Họ và Tên Học Sinh *</label>
@@ -5354,8 +5332,8 @@ const App = {
       notes: notes,
       status: 'active',
       createdAt: new Date().toISOString(),
-      allowedExams: ['EXAM-2027-01'],
-      allowedHomeworks: ['HW-2027-01']
+      allowedExams: [],
+      allowedHomeworks: []
     });
 
     this.saveData();
@@ -6318,7 +6296,7 @@ const App = {
   },
 
   async openPdfModal(title, pdfUrl, storageId = null) {
-    let finalUrl = pdfUrl || 'de-toan-12-le-thanh-tong.pdf';
+    let finalUrl = pdfUrl || '';
     if (storageId && typeof PDFStorage !== 'undefined') {
       const idbUrl = await PDFStorage.getPdfBlobUrl(storageId);
       if (idbUrl) finalUrl = idbUrl;
@@ -6326,6 +6304,10 @@ const App = {
       const key = pdfUrl.replace('idb:', '');
       const idbUrl = await PDFStorage.getPdfBlobUrl(key);
       if (idbUrl) finalUrl = idbUrl;
+    }
+    if (!finalUrl) {
+      this.notify('Mục này hiện chưa có file PDF đính kèm!', 'warning', 'Chưa có file PDF');
+      return;
     }
 
     const old = document.getElementById('previewPdfModal');
@@ -6796,19 +6778,19 @@ const App = {
     const accessType = document.getElementById('newHwAccess')?.value || 'all';
     const pickedIds = Array.from(document.querySelectorAll('input[name="newHwStudentPick"]:checked')).map(el => el.value);
     const file = this.state.tempSelectedHwFile;
+    if (!file) {
+      this.notify('Vui lòng chọn file PDF chuyên đề/tài liệu từ máy tính trước khi tải lên!', 'warning', 'Chưa chọn file PDF');
+      return;
+    }
     const hwId = 'HW-' + Date.now();
 
-    let pdfUrl = 'dethi_toan_thpt_2027_ma101.pdf';
-    let fileName = `Chuyen_De_Khoi_${grade}.pdf`;
-    let fileSize = '2.5 MB';
+    let pdfUrl = '';
+    let fileName = file.name;
+    let fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB';
 
-    if (file) {
-      fileName = file.name;
-      fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB';
-      if (typeof PDFStorage !== 'undefined') {
-        await PDFStorage.savePdf(hwId, file);
-        pdfUrl = 'idb:' + hwId;
-      }
+    if (typeof PDFStorage !== 'undefined') {
+      await PDFStorage.savePdf(hwId, file);
+      pdfUrl = 'idb:' + hwId;
     }
 
     const newHw = {
@@ -7617,7 +7599,12 @@ const App = {
     const host = document.getElementById(containerId);
     if (!host) return;
 
-    const norm = this.normalizeExternalPdfUrl(pdfUrl || 'de-toan-12-le-thanh-tong.pdf');
+    if (!pdfUrl) {
+      host.innerHTML = `<div class="flex-1 w-full h-full flex items-center justify-center p-6 text-center text-slate-400 text-xs">Chưa có file PDF đính kèm cho đề này.</div>`;
+      return;
+    }
+
+    const norm = this.normalizeExternalPdfUrl(pdfUrl);
     if (norm.isExternalEmbed || typeof window === 'undefined' || !window.pdfjsLib) {
       host.innerHTML = `<div class="flex-1 w-full h-full flex flex-col">${this.renderPdfFallbackHtml(norm.embedUrl)}</div>`;
       return;

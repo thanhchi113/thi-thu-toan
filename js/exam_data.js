@@ -1,16 +1,15 @@
-// Đề thi mẫu chuẩn THPT Quốc Gia môn Toán 2027 (Cấu trúc 3 phần theo GDPT 2018)
-// Hiển thị trực tiếp từ file PDF gốc và chấm điểm tự động qua bảng đáp án 3 phần
+// Khung mẫu cấu trúc đáp án 3 phần chuẩn GDPT 2018 (Dùng khi nhấn "Điền mẫu thử" bảng đáp án)
 
 const SAMPLE_EXAM_2027 = {
-  id: "EXAM-2027-01",
-  title: "Đề Kiểm Tra Giữa Kỳ 1 Môn Toán 12 — Trường THPT Lê Thánh Tông TP.HCM",
+  id: "TEMPLATE-3-PARTS",
+  title: "Mẫu Bảng Đáp Án Cấu Trúc 3 Phần",
   description: "Cấu trúc 3 phần chuẩn Bộ GD&ĐT: Phần I (12 câu ABCD), Phần II (4 câu Đúng/Sai), Phần III (6 câu Trả lời ngắn).",
   time_minutes: 90,
   is_active: true,
   allowed_all: true,
-  allowed_students: ["HS202701", "HS202702", "HS202703"],
-  pdf_url: "de-toan-12-le-thanh-tong.pdf",
-  solution_pdf_url: "dethi_toan_thpt_2027_ma101.pdf",
+  allowed_students: [],
+  pdf_url: "",
+  solution_pdf_url: "",
   allow_view_answers: true,
   part1: [
     { id: 1, correct_answer: "C" },

@@ -81,6 +81,22 @@ const PDFStorage = {
     } catch (e) {
       return false;
     }
+  },
+
+  async clearAllPdfs() {
+    try {
+      const db = await this.getDB();
+      if (!db) return false;
+      return new Promise((resolve) => {
+        const tx = db.transaction(this.storeName, 'readwrite');
+        const store = tx.objectStore(this.storeName);
+        store.clear();
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      });
+    } catch (e) {
+      return false;
+    }
   }
 };
 

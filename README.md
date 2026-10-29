@@ -8,7 +8,7 @@ Hệ thống web tĩnh (Static Web App) tối ưu cho cả **Máy tính (Desktop
 
 ### 1. Dành Cho Giáo Viên (Admin)
 - **Đăng nhập quản trị**: Toàn quyền quản lý học sinh, đề thi, tài liệu chuyên đề và xem kết quả.
-- **Cấp tài khoản cho học sinh**: Tạo Mã học sinh (ví dụ `HS202701`, `HS202702`...) đi kèm tên, khối/lớp và mật khẩu. Có thể khóa hoặc kích hoạt tài khoản bất kỳ lúc nào.
+- **Cấp tài khoản cho học sinh**: Tạo Mã học sinh (ví dụ `HS001`, `HS002`...) đi kèm tên, khối/lớp và mật khẩu. Có thể khóa hoặc kích hoạt tài khoản bất kỳ lúc nào.
 - **Quản lý đề thi PDF & Đáp án 3 phần**:
   - Đăng tải trực tiếp **File PDF Đề Thi** và **File PDF Đáp Án & Lời Giải Chi Tiết** từ máy tính (lưu bền vững bằng `IndexedDB`).
   - Thiết lập nhanh **Bảng Đáp Án Chấm Điểm Tự Động 3 Phần** (hỗ trợ dán chuỗi đáp án nhanh `1C 2D 3A...` cho Phần I, bấm chọn `Đ/S` cho Phần II, điền đáp án số cho Phần III, tùy chỉnh linh hoạt số câu mỗi phần).

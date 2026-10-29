@@ -102,14 +102,22 @@ console.assert(paneSheet.right.includes('h-full') && paneSheet.left.includes('hi
 // Test 5: Tự động IN HOA tài khoản đăng nhập & Cảnh báo thoát màn hình khi đang thi (warnOnExitExam)
 let caretCaptured = null;
 const mockLoginInput = {
-  value: 'hs202701',
+  value: 'hs001',
   selectionStart: 4,
   selectionEnd: 4,
   setSelectionRange(s, e) { caretCaptured = [s, e]; }
 };
 const upperVal = App.forceUppercaseInput(mockLoginInput);
-console.assert(upperVal === 'HS202701' && mockLoginInput.value === 'HS202701', 'Uppercase login input fail');
+console.assert(upperVal === 'HS001' && mockLoginInput.value === 'HS001', 'Uppercase login input fail');
 console.assert(caretCaptured && caretCaptured[0] === 4 && caretCaptured[1] === 4, 'Uppercase cursor preserve fail');
+
+// Test 6: Danh sách học sinh Cấp 3 chính thức (HS001..HS079, mật khẩu 123) & đã xóa sạch dữ liệu/PDF nháp
+const SeedData = require('../js/seed_data.js');
+console.assert(SeedData.students.length === 79, 'Expected 79 high school students');
+console.assert(SeedData.students[0].studentId === 'HS001' && SeedData.students[0].fullName === 'Quốc Việt', 'First student HS001 fail');
+console.assert(SeedData.students[78].studentId === 'HS079' && SeedData.students[78].fullName === 'Phan Quý', 'Last student HS079 fail');
+console.assert(SeedData.students.every((s, idx) => s.studentId === 'HS' + String(idx + 1).padStart(3, '0') && s.password === '123' && [10, 11, 12].includes(s.grade)), 'Student ID/password/grade cap 3 invariant fail');
+console.assert(SeedData.exams.length === 0 && SeedData.homeworks.length === 0 && SeedData.submissions.length === 0, 'Draft exams/homeworks/submissions must be empty');
 
 // Khi BẬT warnOnExitExam: ghi nhận đúng 1 lần khi thoát, chống đếm trùng liên tiếp, và báo cảnh báo khi quay lại
 App.state.activeExam = { id: 'EXAM_TEST_GUARD', title: 'Đề kiểm tra' };
