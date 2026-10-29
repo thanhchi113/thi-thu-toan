@@ -22,6 +22,41 @@ const App = {
     { id: 'amber',   name: 'Cam Hổ Phách',   hex: '#d97706' }
   ],
 
+  EXAM_LAYOUT_MODES: [
+    {
+      id: 'top-sheet',
+      name: 'Ô đáp án ở trên – Đề PDF bên dưới',
+      shortLabel: 'Đáp án trên • Đề dưới',
+      icon: 'fa-table-list',
+      badge: 'Rõ đề • Kéo xuống xem PDF',
+      desc: 'Ô điền đáp án xếp ngang gọn gàng ở phía trên (thu gọn được), kéo xuống xem Đề PDF toàn chiều rộng cực nét.'
+    },
+    {
+      id: 'split',
+      name: 'Chia đôi Trái – Phải',
+      shortLabel: 'Đề trái • Đáp án phải',
+      icon: 'fa-table-columns',
+      badge: 'Mặc định',
+      desc: 'Đề PDF nằm bên trái (68%), phiếu điền đáp án nằm bên phải (32%) song song trên màn hình lớn.'
+    },
+    {
+      id: 'fast-entry',
+      name: 'Thu gọn đề – Điền đáp án nhanh',
+      shortLabel: 'Thu gọn đề • Điền nhanh',
+      icon: 'fa-bolt',
+      badge: 'Tốc độ cao',
+      desc: 'Thu gọn khung đề PDF thành 1 thanh mỏng, mở rộng lưới ô đáp án ngang đa cột toàn màn hình để tích chọn cực nhanh.'
+    },
+    {
+      id: 'bottom-sheet',
+      name: 'Đề PDF ở trên – Ô đáp án bên dưới',
+      shortLabel: 'Đề trên • Đáp án dưới',
+      icon: 'fa-layer-group',
+      badge: 'Đọc đề trước',
+      desc: 'Đề PDF toàn chiều rộng ở phía trên, kéo xuống phía dưới để điền ô đáp án dạng lưới ngang.'
+    }
+  ],
+
   state: {
     currentUser: null,       // { role: 'admin' | 'student', ... }
     admin: null,             // Hồ sơ & mật khẩu Giáo viên quản trị
@@ -43,8 +78,16 @@ const App = {
     timerInterval: null,
     secondsLeft: 0,
     tabSwitchesCount: 0,      // Giám sát số lần rời tab
-    activeSectionTab: 'p1',   // 'p1' | 'p2' | 'p3'
+    activeSectionTab: 'p1',   // 'all' | 'p1' | 'p2' | 'p3' | 'p4'
     mobileExamPane: 'both',   // 'pdf' | 'both' | 'sheet'
+    examLayoutMode: 'split',  // 'split' | 'top-sheet' | 'fast-entry' | 'bottom-sheet'
+    examPdfCollapsed: false,  // Thu gọn đề PDF để điền đáp án nhanh
+    examSheetCollapsed: false,// Thu gọn ô đáp án để xem đề PDF rộng tối đa
+    layoutPreviewMode: 'top-sheet',
+    layoutPreviewDevice: 'desktop',
+    layoutPreviewPdfCollapsed: false,
+    layoutPreviewSampleAns: { 1: 'B', 2: 'D', 3: 'A' },
+    layoutPreviewExamId: null,
     paletteFilter: 'all',     // 'all' | 'unanswered' | 'answered' | 'flagged'
     collapseAnswerSheetInDetail: false, // Thu gọn / Mở rộng bảng đáp án ngang khi xem PDF lời giải
     detailAnswerFilter: 'all', // 'all' | 'wrong' | 'correct'
@@ -1230,6 +1273,9 @@ const App = {
       if (typeof saved.fontSizeDelta === 'number') {
         this.state.fontSizeDelta = Math.max(-2, Math.min(6, saved.fontSizeDelta));
       }
+      if (['split', 'top-sheet', 'fast-entry', 'bottom-sheet'].includes(saved.examLayoutMode)) {
+        this.state.examLayoutMode = saved.examLayoutMode;
+      }
     } catch (e) {
       // Bỏ qua nếu dữ liệu cũ lỗi định dạng
     }
@@ -1242,15 +1288,20 @@ const App = {
         accentHex: this.state.accentHex,
         accentPreset: this.state.accentPreset,
         contrast: this.state.contrast,
-        fontSizeDelta: this.state.fontSizeDelta
+        fontSizeDelta: this.state.fontSizeDelta,
+        examLayoutMode: this.getNormalizedExamLayoutMode()
       }));
     } catch (e) {}
   },
 
   applyAppearance() {
     if (typeof document === 'undefined') return;
-    document.body.setAttribute('data-theme', this.state.theme || 'light');
-    document.body.setAttribute('data-contrast', this.state.contrast || 'normal');
+    const th = this.state.theme || 'light';
+    const ct = this.state.contrast || 'normal';
+    document.documentElement.setAttribute('data-theme', th);
+    document.documentElement.setAttribute('data-contrast', ct);
+    document.body.setAttribute('data-theme', th);
+    document.body.setAttribute('data-contrast', ct);
     document.documentElement.style.fontSize = `${16 + (this.state.fontSizeDelta || 0)}px`;
 
     const scale = this.generateAccentScale(this.state.accentHex || '#4f46e5', this.state.contrast === 'high');
@@ -1569,6 +1620,305 @@ const App = {
     if (existing) existing.remove();
   },
 
+  // --- HỆ THỐNG BỐ CỤC ĐỀ PDF & Ô ĐIỀN ĐÁP ÁN + XEM TRƯỚC (PREVIEW) ---
+  getNormalizedExamLayoutMode(mode = this.state.examLayoutMode) {
+    return ['split', 'top-sheet', 'fast-entry', 'bottom-sheet'].includes(mode) ? mode : 'split';
+  },
+
+  getExamLayoutMeta(mode = this.state.examLayoutMode) {
+    const norm = this.getNormalizedExamLayoutMode(mode);
+    return this.EXAM_LAYOUT_MODES.find(m => m.id === norm) || this.EXAM_LAYOUT_MODES[1];
+  },
+
+  isWideAnswerSheet() {
+    return Boolean(this.state.examPdfCollapsed) || this.getNormalizedExamLayoutMode() !== 'split';
+  },
+
+  isExamStackedFlowMode(mobMode = this.state.mobileExamPane) {
+    const m = mobMode === 'pdf' || mobMode === 'sheet' ? mobMode : 'both';
+    if (this.state.examPdfCollapsed || this.state.examSheetCollapsed || m !== 'both') return false;
+    const layout = this.getNormalizedExamLayoutMode();
+    return layout === 'top-sheet' || layout === 'bottom-sheet' || layout === 'fast-entry';
+  },
+
+  showExamLayoutModal(examId = '') {
+    this.closeExamLayoutModal();
+    const curMode = this.getNormalizedExamLayoutMode();
+    this.state.layoutPreviewMode = curMode;
+    this.state.layoutPreviewPdfCollapsed = (curMode === 'fast-entry');
+    this.state.layoutPreviewExamId = examId ? String(examId).replace(/_sol$/, '') : '';
+    if (!this.state.layoutPreviewSampleAns) {
+      this.state.layoutPreviewSampleAns = { 1: 'B', 2: 'D', 3: 'A' };
+    }
+    if (!this.state.layoutPreviewDevice) {
+      this.state.layoutPreviewDevice = (typeof window !== 'undefined' && window.innerWidth < 768) ? 'mobile' : 'desktop';
+    }
+
+    if (typeof document === 'undefined') return;
+    const modal = document.createElement('div');
+    modal.id = 'examLayoutModal';
+    modal.className = 'fixed inset-0 flex items-center justify-center p-2.5 sm:p-4 bg-slate-900/70 backdrop-blur-xs animate-fade-in';
+    modal.style.zIndex = '95';
+    modal.innerHTML = this.renderExamLayoutModalInner();
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) this.closeExamLayoutModal();
+    });
+    document.body.appendChild(modal);
+  },
+
+  closeExamLayoutModal() {
+    if (typeof document === 'undefined') return;
+    const existing = document.getElementById('examLayoutModal');
+    if (existing) existing.remove();
+  },
+
+  selectPreviewLayoutMode(mode) {
+    const norm = this.getNormalizedExamLayoutMode(mode);
+    this.state.layoutPreviewMode = norm;
+    this.state.layoutPreviewPdfCollapsed = (norm === 'fast-entry');
+    this.refreshExamLayoutModalDom();
+  },
+
+  setPreviewLayoutDevice(device) {
+    this.state.layoutPreviewDevice = device === 'mobile' ? 'mobile' : 'desktop';
+    this.refreshExamLayoutModalDom();
+  },
+
+  togglePreviewPdfCollapse() {
+    this.state.layoutPreviewPdfCollapsed = !this.state.layoutPreviewPdfCollapsed;
+    this.refreshExamLayoutModalDom();
+  },
+
+  pickPreviewSampleAns(qId, opt) {
+    if (!this.state.layoutPreviewSampleAns) this.state.layoutPreviewSampleAns = {};
+    this.state.layoutPreviewSampleAns[qId] = opt;
+    this.refreshExamLayoutModalDom();
+  },
+
+  refreshExamLayoutModalDom() {
+    if (typeof document === 'undefined') return;
+    const modal = document.getElementById('examLayoutModal');
+    if (modal) modal.innerHTML = this.renderExamLayoutModalInner();
+  },
+
+  applySelectedExamLayout(andStartExamId = '') {
+    const chosen = this.getNormalizedExamLayoutMode(this.state.layoutPreviewMode);
+    this.state.examLayoutMode = chosen;
+    this.saveAppearance();
+
+    if (this.state.activeExam) {
+      this.state.examPdfCollapsed = Boolean(this.state.layoutPreviewPdfCollapsed);
+      if (this.state.examPdfCollapsed) this.state.examSheetCollapsed = false;
+      this.applyExamLayoutDom();
+      this.closeExamLayoutModal();
+      return;
+    }
+
+    this.closeExamLayoutModal();
+    const targetExamId = String(andStartExamId || '').trim();
+    if (targetExamId && this.state.currentUser && this.state.currentUser.role === 'student') {
+      document.getElementById('previewPdfModal')?.remove();
+      this.startExam(targetExamId);
+      return;
+    }
+
+    this.render();
+  },
+
+  renderExamLayoutModalInner() {
+    const pMode = this.getNormalizedExamLayoutMode(this.state.layoutPreviewMode);
+    const activeSaved = this.getNormalizedExamLayoutMode(this.state.examLayoutMode);
+    const pMeta = this.getExamLayoutMeta(pMode);
+    const isMobPreview = this.state.layoutPreviewDevice === 'mobile';
+    const pdfCollapsed = Boolean(this.state.layoutPreviewPdfCollapsed);
+    const sampleAns = this.state.layoutPreviewSampleAns || { 1: 'B', 2: 'D', 3: 'A' };
+    const targetExamId = this.state.layoutPreviewExamId || '';
+    const targetExam = targetExamId ? (this.state.exams || []).find(e => e.id === targetExamId) : null;
+    const canQuickStart = Boolean(
+      !this.state.activeExam &&
+      targetExam &&
+      this.state.currentUser &&
+      this.state.currentUser.role === 'student' &&
+      this.isStudentAllowedExam(targetExam, this.state.currentUser)
+    );
+
+    const wideSheetInPreview = pdfCollapsed || pMode !== 'split';
+    const sampleColsCls = isMobPreview
+      ? 'grid-cols-1'
+      : (wideSheetInPreview ? 'grid-cols-3' : 'grid-cols-1');
+
+    const sheetPreviewHtml = `
+      <div class="bg-white border border-indigo-200 rounded-xl p-2.5 space-y-2 shadow-2xs">
+        <div class="flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-100 pb-1.5">
+          <span class="text-[11px] font-extrabold text-indigo-700 flex items-center gap-1">
+            <i class="fa-solid fa-pen-to-square"></i>
+            <span>Ô Điền Đáp Án ${wideSheetInPreview ? '(Dàn ngang đa cột)' : '(Cột phải)'}</span>
+          </span>
+          <div class="flex items-center gap-1 text-[10px]">
+            <span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">Đã làm 3/22</span>
+            <button type="button" onclick="App.togglePreviewPdfCollapse()" class="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold cursor-pointer">
+              ${pdfCollapsed ? 'Mở lại đề PDF' : 'Thu gọn đề'}
+            </button>
+          </div>
+        </div>
+        <div class="grid ${sampleColsCls} gap-1.5">
+          ${[1, 2, 3].map(qNum => `
+            <div class="p-1.5 rounded-lg bg-indigo-50/70 border border-indigo-100 flex items-center justify-between gap-1">
+              <span class="text-[10px] font-extrabold text-slate-700">Câu ${qNum}</span>
+              <div class="flex gap-1">
+                ${['A', 'B', 'C', 'D'].map(opt => `
+                  <button type="button" onclick="App.pickPreviewSampleAns(${qNum}, '${opt}')"
+                    class="w-6 h-6 rounded-md text-[10px] font-extrabold border cursor-pointer transition ${sampleAns[qNum] === opt ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-indigo-50'}">${opt}</button>
+                `).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    const pdfPreviewHtml = pdfCollapsed ? `
+      <div class="bg-slate-900 text-indigo-100 rounded-xl px-3 py-2 border border-slate-700 flex items-center justify-between gap-2 text-[11px]">
+        <span class="truncate flex items-center gap-1.5">
+          <i class="fa-solid fa-compress text-amber-400"></i>
+          <span>Đề thi PDF đang thu gọn để ưu tiên điền đáp án nhanh toàn màn hình</span>
+        </span>
+        <button type="button" onclick="App.togglePreviewPdfCollapse()" class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold shrink-0 cursor-pointer">
+          Mở lại đề PDF
+        </button>
+      </div>
+    ` : `
+      <div class="bg-slate-900 rounded-xl border border-slate-700 p-2.5 space-y-2 text-white">
+        <div class="flex items-center justify-between text-[10px] text-slate-300 border-b border-slate-800 pb-1.5">
+          <span class="font-bold text-white flex items-center gap-1.5"><i class="fa-solid fa-file-pdf text-red-400"></i>Mục Xem Đề PDF Gốc (100% sắc nét)</span>
+          <span class="font-mono text-indigo-300">${pMode === 'top-sheet' ? 'Kéo xuống xem tiếp Trang 1 / 6' : 'Trang 1 / 6 • 100%'}</span>
+        </div>
+        <div class="bg-white text-slate-800 rounded-lg p-3 shadow space-y-1.5 text-[11px]">
+          <div class="font-extrabold text-indigo-800 uppercase text-[10px] tracking-wide">ĐỀ KIỂM TRA MÔN TOÁN — PHẦN I. TRẮC NGHIỆM</div>
+          <div class="font-semibold text-slate-800"><strong>Câu 1.</strong> Cho hàm số <i>y = f(x)</i> liên tục trên <b>R</b> có bảng xét dấu đạo hàm. Số điểm cực trị của hàm số là:</div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-1 text-[10px] font-mono font-bold text-slate-600 pt-0.5">
+            <span>A. 1</span><span>B. 2</span><span>C. 3</span><span>D. 4</span>
+          </div>
+          <div class="font-semibold text-slate-700 pt-1 border-t border-slate-100"><strong>Câu 2.</strong> Nghiệm của phương trình <span>log<sub>2</sub>(<i>x</i> &minus; 1) = 3</span> là: <span class="font-mono ml-1">A. x = 7 • B. x = 8 • C. x = 9 • D. x = 10</span></div>
+        </div>
+      </div>
+    `;
+
+    let stageLayoutHtml = '';
+    if (pdfCollapsed) {
+      stageLayoutHtml = `<div class="space-y-2">${pdfPreviewHtml}${sheetPreviewHtml}</div>`;
+    } else if (pMode === 'top-sheet' || pMode === 'fast-entry') {
+      stageLayoutHtml = `<div class="space-y-2">${sheetPreviewHtml}${pdfPreviewHtml}</div>`;
+    } else if (pMode === 'bottom-sheet') {
+      stageLayoutHtml = `<div class="space-y-2">${pdfPreviewHtml}${sheetPreviewHtml}</div>`;
+    } else {
+      stageLayoutHtml = isMobPreview
+        ? `<div class="space-y-2">${pdfPreviewHtml}${sheetPreviewHtml}</div>`
+        : `<div class="grid grid-cols-12 gap-2.5 items-start"><div class="col-span-7">${pdfPreviewHtml}</div><div class="col-span-5">${sheetPreviewHtml}</div></div>`;
+    }
+
+    return `
+      <div class="dialog-card bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200 text-slate-800">
+        <!-- Header -->
+        <div class="px-4 sm:px-6 py-3.5 border-b border-slate-200 bg-gradient-to-r from-indigo-50/80 via-white to-slate-50 flex items-center justify-between gap-3 shrink-0">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
+              <i class="fa-solid fa-table-columns text-base"></i>
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-sm sm:text-base font-extrabold text-slate-900 truncate">Xem Trước &amp; Chọn Cách Hiển Thị Đề PDF + Ô Đáp Án</h3>
+              <p class="text-[11px] sm:text-xs text-slate-500 truncate">${targetExam ? `Đang xem cho đề: ${targetExam.title}` : 'Tùy chọn hiển thị đồng bộ thanh cuộn, thu gọn đề nhanh hoặc đặt ô đáp án ở trên'}</p>
+            </div>
+          </div>
+          <button type="button" onclick="App.closeExamLayoutModal()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer shrink-0" title="Đóng">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        <!-- Body -->
+        <div class="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+          <!-- 4 Thẻ chọn chế độ bố cục -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            ${this.EXAM_LAYOUT_MODES.map(item => {
+              const selected = item.id === pMode;
+              const isCurrent = item.id === activeSaved;
+              return `
+                <button type="button" id="layoutModeCard_${item.id}" onclick="App.selectPreviewLayoutMode('${item.id}')"
+                  class="p-3 rounded-2xl border-2 text-left transition cursor-pointer flex flex-col justify-between gap-2 ${selected ? 'border-indigo-600 bg-indigo-50/70 shadow-sm' : 'border-slate-200 bg-white hover:border-indigo-300 hover:bg-slate-50'}">
+                  <div class="space-y-1.5">
+                    <div class="flex items-center justify-between gap-1.5">
+                      <span class="w-8 h-8 rounded-xl ${selected ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-indigo-600'} flex items-center justify-center shrink-0">
+                        <i class="fa-solid ${item.icon} text-xs"></i>
+                      </span>
+                      <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${isCurrent ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
+                        ${isCurrent ? 'Đang dùng' : item.badge}
+                      </span>
+                    </div>
+                    <div class="font-extrabold text-xs text-slate-900 leading-snug">${item.name}</div>
+                    <p class="text-[11px] text-slate-500 leading-relaxed">${item.desc}</p>
+                  </div>
+                </button>
+              `;
+            }).join('')}
+          </div>
+
+          <!-- Khung Xem Trước Trực Quan (Interactive Live Preview) -->
+          <div id="examLayoutPreviewStage" class="rounded-2xl border border-slate-200 bg-slate-100 p-3 sm:p-4 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2 text-xs">
+                <span class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-bold inline-flex items-center gap-1.5">
+                  <i class="fa-solid fa-eye text-[11px]"></i><span>Xem trước trực tiếp</span>
+                </span>
+                <span class="font-extrabold text-slate-800">${pMeta.name}</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <button type="button" id="previewToggleCollapseBtn" onclick="App.togglePreviewPdfCollapse()"
+                  class="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer flex items-center gap-1 ${pdfCollapsed ? 'bg-amber-500 text-white border-amber-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}">
+                  <i class="fa-solid ${pdfCollapsed ? 'fa-expand' : 'fa-compress'}"></i>
+                  <span>${pdfCollapsed ? 'Đang thu gọn đề (Bấm mở lại)' : 'Thử thu gọn đề'}</span>
+                </button>
+                <div class="inline-flex rounded-xl bg-white border border-slate-200 p-0.5 text-[11px] font-bold">
+                  <button type="button" onclick="App.setPreviewLayoutDevice('desktop')" class="px-2.5 py-1 rounded-lg cursor-pointer transition ${!isMobPreview ? 'bg-indigo-600 text-white' : 'text-slate-600'}">
+                    <i class="fa-solid fa-desktop mr-1"></i>Máy tính
+                  </button>
+                  <button type="button" onclick="App.setPreviewLayoutDevice('mobile')" class="px-2.5 py-1 rounded-lg cursor-pointer transition ${isMobPreview ? 'bg-indigo-600 text-white' : 'text-slate-600'}">
+                    <i class="fa-solid fa-mobile-screen mr-1"></i>Điện thoại
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="${isMobPreview ? 'max-w-[350px] mx-auto' : 'w-full'} transition-all">
+              ${stageLayoutHtml}
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-4 sm:px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 shrink-0">
+          <div class="text-xs text-slate-500">
+            Đang chọn: <strong class="text-indigo-700">${pMeta.name}</strong>
+          </div>
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <button type="button" onclick="App.closeExamLayoutModal()" class="ui-btn bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-4">
+              Đóng
+            </button>
+            <button type="button" id="applyExamLayoutBtn" onclick="App.applySelectedExamLayout()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm px-4">
+              <i class="fa-solid fa-check"></i>
+              <span>Áp dụng cách hiển thị này</span>
+            </button>
+            ${canQuickStart ? `
+              <button type="button" id="applyAndStartExamLayoutBtn" onclick="App.applySelectedExamLayout('${targetExam.id}')" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-4">
+                <i class="fa-solid fa-play text-[10px]"></i>
+                <span>Áp dụng &amp; Vào làm bài ngay</span>
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
   // 4. Render Router chính
   render() {
     this.closeCustomSelectPopover();
@@ -1610,9 +1960,13 @@ const App = {
             <i class="fa-solid fa-qrcode"></i>
             <span>Tạo App ĐT / QR</span>
           </button>
-          <button type="button" id="loginQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn bg-white border border-slate-200 shadow-xs hover:bg-slate-100 text-slate-700 px-3" title="Chuyển nhanh chế độ Sáng / Dịu mắt / Tối">
+          <button type="button" id="loginLayoutBtn" onclick="App.showExamLayoutModal()" class="ui-btn bg-white border border-slate-200 shadow-xs hover:bg-indigo-50 text-indigo-700 px-3" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
+            <i class="fa-solid fa-table-columns text-indigo-600"></i>
+            <span>Bố cục thi</span>
+          </button>
+          <button type="button" id="loginQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn-icon sm:w-auto sm:px-3 bg-white border border-slate-200 shadow-xs hover:bg-slate-100 text-xs font-bold text-slate-700 sm:gap-1.5" title="Chuyển nhanh chế độ Sáng / Dịu mắt / Tối">
             <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
-            <span>${thMeta.label}</span>
+            <span class="hidden sm:inline">${thMeta.label}</span>
           </button>
           <button type="button" id="loginThemeBtn" onclick="App.showThemeModal()" class="ui-btn-icon sm:w-auto sm:px-3 bg-white border border-slate-200 shadow-xs hover:bg-slate-100 text-xs font-bold text-slate-700 sm:gap-1.5" title="Đổi bộ màu chủ đạo & mức độ tương phản">
             <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-black/15 shrink-0" style="background:${swatchHex};"></span>
@@ -1902,6 +2256,12 @@ const App = {
               <button type="button" onclick="App.goHome()" class="hidden md:inline-flex ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-xs" title="Về trang chủ">
                 <i class="fa-solid fa-house"></i>
                 <span>Trang chủ</span>
+              </button>
+
+              <!-- Nút Xem trước & Chọn Bố cục Đề PDF + Ô điền đáp án ngay trên Trang Chủ -->
+              <button type="button" id="studentLayoutBtn" onclick="App.showExamLayoutModal()" class="ui-btn-icon md:w-auto md:px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold border border-indigo-200 shadow-xs md:gap-1.5" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án (${this.getExamLayoutMeta().shortLabel})">
+                <i class="fa-solid ${this.getExamLayoutMeta().icon} text-indigo-600"></i>
+                <span class="hidden md:inline">Bố cục: ${this.getExamLayoutMeta().shortLabel}</span>
               </button>
 
               <!-- Nút Quét QR / Tạo App Điện thoại (Android & iOS) -->
@@ -2621,20 +2981,29 @@ const App = {
 
               <div class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 ${attemptsCount > 0 ? `
-                  <div class="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
+                  <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                     <button type="button" onclick="App.viewSubmissionDetail('${latestSub.id}')" class="ui-btn bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
                       <i class="fa-solid fa-eye"></i><span>Xem lại (${latestSub.scoreResult.totalScore}đ)</span>
                     </button>
                     <button type="button" onclick="App.confirmRetakeExam('${ex.id}')" class="ui-btn text-white bg-amber-600 hover:bg-amber-700 shadow-xs">
                       <i class="fa-solid fa-rotate-right"></i><span>Thi Lại (Lần ${attemptsCount + 1})</span>
                     </button>
+                    <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="ui-btn bg-slate-50 hover:bg-indigo-50 text-indigo-700 border border-slate-200" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
+                      <i class="fa-solid fa-table-columns"></i><span>Bố cục thi</span>
+                    </button>
                   </div>
                   <span class="text-[11px] text-slate-400">Gần nhất: ${new Date(latestSub.submittedAt).toLocaleDateString('vi-VN')}</span>
                 ` : `
-                  <button type="button" onclick="App.startExam('${ex.id}')" class="ui-btn w-full sm:w-auto px-4 text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs">
-                    <i class="fa-solid fa-play text-[10px]"></i>
-                    <span>Vào Làm Bài</span>
-                  </button>
+                  <div class="flex items-center gap-2 w-full sm:w-auto">
+                    <button type="button" onclick="App.startExam('${ex.id}')" class="ui-btn flex-1 sm:flex-initial px-4 text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs">
+                      <i class="fa-solid fa-play text-[10px]"></i>
+                      <span>Vào Làm Bài</span>
+                    </button>
+                    <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3" title="Xem trước & chọn bố cục Đề PDF và Ô đáp án trước khi thi">
+                      <i class="fa-solid fa-table-columns"></i>
+                      <span>Xem trước bố cục</span>
+                    </button>
+                  </div>
                   <span class="text-[11px] text-slate-400 text-center sm:text-right">Chưa làm bài</span>
                 `}
               </div>
@@ -2791,6 +3160,8 @@ const App = {
     this.resetExamMonitorState();
     this.state.activeSectionTab = exam.part1.length ? 'p1' : (exam.part2.length ? 'p2' : (exam.part3.length ? 'p3' : 'p4'));
     this.state.mobileExamPane = 'both';
+    this.state.examPdfCollapsed = (this.getNormalizedExamLayoutMode() === 'fast-entry');
+    this.state.examSheetCollapsed = false;
     this.state.paletteFilter = 'all';
     this.state.activePart3Target = { qId: 1, boxIdx: 0 };
 
@@ -2841,8 +3212,12 @@ const App = {
 
   setSectionTab(tab) {
     this.state.activeSectionTab = tab;
+    if (this.state.examSheetCollapsed) {
+      this.state.examSheetCollapsed = false;
+      this.applyExamLayoutDom();
+    }
     // Cập nhật tab active mà KHÔNG tải lại PDF
-    ['p1', 'p2', 'p3', 'p4'].forEach(t => {
+    ['all', 'p1', 'p2', 'p3', 'p4'].forEach(t => {
       const btn = document.getElementById(`sectionTabBtn_${t}`);
       if (btn) {
         if (t === tab) {
@@ -2882,7 +3257,13 @@ const App = {
     if (this.state.mobileExamPane === 'pdf') {
       this.setMobileExamPane('sheet');
     }
-    this.setSectionTab(part);
+    if (this.state.examSheetCollapsed) {
+      this.state.examSheetCollapsed = false;
+      this.applyExamLayoutDom();
+    }
+    if (this.state.activeSectionTab !== 'all') {
+      this.setSectionTab(part);
+    }
     setTimeout(() => {
       const el = document.getElementById(`row_${part}_${qId}`);
       if (el) {
@@ -3026,6 +3407,9 @@ const App = {
     const pdfSrc = this.state.resolvedPdfUrl || ex.pdf_url || '';
     const guardOn = this.isExamExitWarningEnabled();
     const vCount = this.state.tabSwitchesCount || 0;
+    const paneCls = this.getExamPaneClasses(this.state.mobileExamPane);
+    const pdfCollapsed = Boolean(this.state.examPdfCollapsed);
+    const layoutMeta = this.getExamLayoutMeta();
 
     container.innerHTML = `
       <div class="fixed inset-0 flex flex-col bg-slate-100 overflow-hidden select-none z-10">
@@ -3061,6 +3445,19 @@ const App = {
 
           <!-- Controls & Actions -->
           <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <!-- Nút Thu gọn đề để điền đáp án nhanh -->
+            <button type="button" id="examCollapsePdfBtn" onclick="App.toggleExamPdfCollapse()" class="hidden md:inline-flex ui-btn ${pdfCollapsed ? 'bg-amber-500 hover:bg-amber-600 text-white border border-amber-600' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'} shadow-xs toggle-exam-pdf-btn" title="Thu gọn khung đề PDF để mở rộng ô điền đáp án nhanh toàn màn hình">
+              <i class="fa-solid ${pdfCollapsed ? 'fa-expand' : 'fa-compress'}"></i>
+              <span>${pdfCollapsed ? 'Mở lại đề' : 'Thu gọn đề'}</span>
+            </button>
+
+            <!-- Nút Xem trước & Đổi cách hiển thị Đề PDF + Ô đáp án -->
+            <button type="button" id="examLayoutSwitchBtn" onclick="App.showExamLayoutModal()" class="hidden sm:inline-flex ui-btn bg-white hover:bg-indigo-50 text-slate-700 border border-slate-200 shadow-xs" title="Đổi cách hiển thị Đề PDF và Ô điền đáp án (${layoutMeta.name})">
+              <i class="fa-solid ${layoutMeta.icon} text-indigo-600 exam-layout-btn-icon"></i>
+              <span class="hidden xl:inline exam-layout-btn-label">${layoutMeta.shortLabel}</span>
+              <span class="xl:hidden">Bố cục</span>
+            </button>
+
             <!-- Nút Xem Quá Trình Làm Bài (Desktop/Tablet) -->
             <button type="button" id="examProgressTriggerBtn" onclick="App.toggleMobileDrawer()" class="hidden sm:inline-flex ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-xs" title="Xem quá trình đã làm, số câu đã tích chọn và câu còn bỏ trống">
               <i class="fa-solid fa-list-check text-indigo-600"></i>
@@ -3068,13 +3465,13 @@ const App = {
             </button>
 
             <!-- Tải file PDF về máy (Desktop/Tablet) -->
-            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" onclick="App.suppressAntiCheatTemporarily(2000)" class="hidden xl:inline-flex ui-btn bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200" title="Tải file PDF về máy nếu muốn in ấn">
+            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" onclick="App.suppressAntiCheatTemporarily(2000)" class="hidden 2xl:inline-flex ui-btn bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200" title="Tải file PDF về máy nếu muốn in ấn">
               <i class="fa-solid fa-cloud-arrow-down text-indigo-600"></i>
               <span>Tải Đề</span>
             </a>
 
             <!-- Nút chỉnh cỡ chữ A- / A+ -->
-            <div class="hidden md:flex items-center h-[38px] bg-slate-100 rounded-xl p-0.5 border border-slate-200 text-xs">
+            <div class="hidden lg:flex items-center h-[38px] bg-slate-100 rounded-xl p-0.5 border border-slate-200 text-xs">
               <button type="button" onclick="App.adjustFontSize(-1)" class="px-2.5 h-full rounded-lg text-slate-600 hover:text-indigo-600 font-bold cursor-pointer" title="Giảm cỡ chữ">A-</button>
               <button type="button" onclick="App.adjustFontSize(1)" class="px-2.5 h-full rounded-lg text-slate-600 hover:text-indigo-600 font-bold cursor-pointer" title="Tăng cỡ chữ">A+</button>
             </div>
@@ -3106,8 +3503,8 @@ const App = {
           <div class="exam-progress-bar" style="width: ${progress.percentage}%;"></div>
         </div>
 
-        <!-- Thanh chuyển chế độ Đề PDF / Phiếu trả lời / Quá trình làm bài tối ưu cho Điện thoại -->
-        <div class="lg:hidden bg-slate-900 border-b border-slate-800 px-2 py-1.5 flex items-center gap-1.5 shrink-0 z-20">
+        <!-- Thanh chuyển chế độ Đề PDF / Phiếu trả lời / Thu gọn đề / Bố cục cho Điện thoại -->
+        <div class="lg:hidden bg-slate-900 border-b border-slate-800 px-2 py-1.5 flex items-center gap-1 shrink-0 z-20 overflow-x-auto no-scrollbar">
           <button type="button" id="mobPaneBtn_pdf" onclick="App.setMobileExamPane('pdf')" class="flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'pdf' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
             <i class="fa-solid fa-file-pdf text-red-400"></i><span>Đề PDF</span>
           </button>
@@ -3117,13 +3514,16 @@ const App = {
           <button type="button" id="mobPaneBtn_sheet" onclick="App.setMobileExamPane('sheet')" class="flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'sheet' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
             <i class="fa-solid fa-pen-to-square text-emerald-300"></i><span>Phiếu (<span class="exam-mobile-ans-short">${progress.answered}/${progress.total}</span>)</span>
           </button>
-          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="h-9 px-2.5 rounded-xl text-[11px] font-bold bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700 transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap" title="Xem quá trình đã làm & câu đã tích chọn">
+          <button type="button" id="mobLayoutSwitchBtn" onclick="App.showExamLayoutModal()" class="h-9 px-2 rounded-xl text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap" title="Đổi bố cục Đề & Đáp án">
+            <i class="fa-solid fa-table-list"></i><span>Bố cục</span>
+          </button>
+          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="h-9 px-2 rounded-xl text-[11px] font-bold bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700 transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap" title="Xem quá trình đã làm & câu đã tích chọn">
             <i class="fa-solid fa-list-check"></i><span id="mobilePaletteBtnText">Quá trình</span>
           </button>
         </div>
 
-        <!-- Main Exam Area: Xem đề trực tiếp qua PDF & Điền phiếu trả lời -->
-        <div class="flex-1 min-h-0 overflow-hidden flex flex-col lg:flex-row w-full">
+        <!-- Main Exam Area: Đồng bộ thanh cuộn & linh hoạt đổi vị trí Đề PDF / Ô điền đáp án -->
+        <div id="examMainWorkspace" onscroll="App.onExamWorkspaceScroll()" class="${paneCls.workspace}">
           ${this.renderSplitViewContent(ex)}
         </div>
 
@@ -3152,7 +3552,7 @@ const App = {
     `;
 
     this.updateTimerDisplay();
-    this.mountPdfViewer('examRoomPdfViewer', pdfSrc);
+    this.mountPdfViewer('examRoomPdfViewer', pdfSrc, { flowWithPage: this.isExamStackedFlowMode() });
   },
 
   toggleMobileDrawer() {
@@ -3169,24 +3569,85 @@ const App = {
     }
   },
 
-  getExamPaneClasses(mode = 'both') {
+  getExamPaneClasses(mode = this.state.mobileExamPane) {
     const m = mode === 'pdf' || mode === 'sheet' ? mode : 'both';
+    const layout = this.getNormalizedExamLayoutMode();
+    const pdfCollapsed = Boolean(this.state.examPdfCollapsed) && m !== 'pdf';
+    const sheetCollapsed = Boolean(this.state.examSheetCollapsed) && !pdfCollapsed && m !== 'sheet';
+
+    if (pdfCollapsed) {
+      return {
+        workspace: 'flex-1 min-h-0 overflow-hidden flex flex-col w-full bg-slate-100',
+        left: `${m === 'sheet' ? 'hidden lg:flex' : 'flex'} order-1 w-full shrink-0 border-b border-slate-200 bg-slate-900 flex-col`,
+        right: 'flex h-full order-2 flex-1 min-h-0 w-full bg-white flex-col overflow-y-auto',
+        sheetBody: 'flex-1 flex flex-col',
+        pdfViewer: 'hidden',
+        pdfBanner: 'flex items-center justify-between gap-2 px-3 sm:px-4 py-2 bg-indigo-950 border-t border-indigo-800/80 text-indigo-100 text-xs',
+        pdfHeader: 'bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between shrink-0'
+      };
+    }
+
+    if (sheetCollapsed) {
+      return {
+        workspace: 'flex-1 min-h-0 overflow-hidden flex flex-col w-full bg-slate-100',
+        right: `${m === 'pdf' ? 'hidden lg:flex' : 'flex'} order-1 w-full shrink-0 bg-white border-b border-slate-200 flex-col`,
+        left: 'flex h-full order-2 flex-1 min-h-0 w-full bg-slate-900 flex-col',
+        sheetBody: 'hidden',
+        pdfViewer: 'flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950',
+        pdfBanner: 'hidden',
+        pdfHeader: 'bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0'
+      };
+    }
+
+    if (layout === 'top-sheet' || layout === 'fast-entry') {
+      const onlyPdfMob = m === 'pdf';
+      const onlySheetMob = m === 'sheet';
+      const isUnifiedFlow = m === 'both';
+      return {
+        workspace: `${isUnifiedFlow ? 'overflow-y-auto overflow-x-hidden' : 'overflow-hidden lg:overflow-y-auto lg:overflow-x-hidden'} flex-1 min-h-0 flex flex-col w-full scroll-smooth bg-slate-100`,
+        right: `${onlyPdfMob ? 'hidden lg:flex' : (onlySheetMob ? 'flex h-full lg:h-auto overflow-y-auto lg:overflow-visible' : 'flex')} order-1 w-full shrink-0 bg-white border-b-2 border-indigo-200 flex-col shadow-xs`,
+        left: `${onlySheetMob ? 'hidden lg:flex' : (onlyPdfMob ? 'flex h-full lg:h-auto lg:min-h-[72vh]' : 'flex min-h-[72vh]')} order-2 w-full shrink-0 bg-slate-900 flex-col`,
+        sheetBody: `${onlySheetMob ? 'flex-1 lg:flex-initial' : ''} flex flex-col`,
+        pdfViewer: `${onlyPdfMob ? 'flex-1 lg:flex-initial w-full h-full lg:h-auto min-h-0' : 'w-full h-auto'} flex flex-col bg-slate-950`,
+        pdfBanner: 'hidden',
+        pdfHeader: `bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0 ${isUnifiedFlow ? 'sticky top-0 z-20' : ''}`
+      };
+    }
+
+    if (layout === 'bottom-sheet') {
+      const onlyPdfMob = m === 'pdf';
+      const onlySheetMob = m === 'sheet';
+      const isUnifiedFlow = m === 'both';
+      return {
+        workspace: `${isUnifiedFlow ? 'overflow-y-auto overflow-x-hidden' : 'overflow-hidden lg:overflow-y-auto lg:overflow-x-hidden'} flex-1 min-h-0 flex flex-col w-full scroll-smooth bg-slate-100`,
+        left: `${onlySheetMob ? 'hidden lg:flex' : (onlyPdfMob ? 'flex h-full lg:h-auto lg:min-h-[68vh]' : 'flex min-h-[68vh]')} order-1 w-full shrink-0 border-b-2 border-indigo-200 bg-slate-900 flex-col`,
+        right: `${onlyPdfMob ? 'hidden lg:flex' : (onlySheetMob ? 'flex h-full lg:h-auto overflow-y-auto lg:overflow-visible' : 'flex')} order-2 w-full shrink-0 bg-white flex-col`,
+        sheetBody: `${onlySheetMob ? 'flex-1 lg:flex-initial' : ''} flex flex-col`,
+        pdfViewer: `${onlyPdfMob ? 'flex-1 lg:flex-initial w-full h-full lg:h-auto min-h-0' : 'w-full h-auto'} flex flex-col bg-slate-950`,
+        pdfBanner: 'hidden',
+        pdfHeader: `bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0 ${isUnifiedFlow ? 'sticky top-0 z-20' : ''}`
+      };
+    }
+
     const leftMob = m === 'pdf' ? 'flex h-full' : (m === 'sheet' ? 'hidden' : 'flex h-[52%]');
     const rightMob = m === 'sheet' ? 'flex h-full' : (m === 'pdf' ? 'hidden' : 'flex h-[48%]');
     return {
-      left: `${leftMob} lg:flex lg:w-[68%] lg:h-full border-b lg:border-b-0 lg:border-r border-slate-200 bg-slate-900 flex-col min-h-0 split-pane-left`,
-      right: `${rightMob} lg:flex lg:w-[32%] lg:h-full bg-white flex-col min-h-0 split-pane-right overflow-y-auto`
+      workspace: 'flex-1 min-h-0 overflow-hidden flex flex-col lg:flex-row w-full',
+      left: `${leftMob} lg:flex order-1 lg:w-[68%] lg:h-full border-b lg:border-b-0 lg:border-r border-slate-200 bg-slate-900 flex-col min-h-0 split-pane-left`,
+      right: `${rightMob} lg:flex order-2 lg:w-[32%] lg:h-full bg-white flex-col min-h-0 split-pane-right overflow-y-auto`,
+      sheetBody: 'flex-1 flex flex-col',
+      pdfViewer: 'flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950',
+      pdfBanner: 'hidden',
+      pdfHeader: 'bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0'
     };
   },
 
   setMobileExamPane(mode) {
     const m = mode === 'pdf' || mode === 'sheet' ? mode : 'both';
     this.state.mobileExamPane = m;
-    const cls = this.getExamPaneClasses(m);
-    const leftEl = document.getElementById('examLeftPdfPane');
-    const rightEl = document.getElementById('examRightSheetPane');
-    if (leftEl) leftEl.className = cls.left;
-    if (rightEl) rightEl.className = cls.right;
+    if (m === 'pdf' && this.state.examPdfCollapsed) this.state.examPdfCollapsed = false;
+    if (m === 'sheet' && this.state.examSheetCollapsed) this.state.examSheetCollapsed = false;
+    this.applyExamLayoutDom();
     ['pdf', 'both', 'sheet'].forEach(k => {
       const btn = document.getElementById(`mobPaneBtn_${k}`);
       if (btn) {
@@ -3195,7 +3656,115 @@ const App = {
     });
   },
 
-  // 1. Chế độ Split View (Hiển thị trực tiếp file PDF đa trang trên cả Web & App + Phiếu trả lời kèm Quá trình làm bài)
+  toggleExamPdfCollapse() {
+    this.state.examPdfCollapsed = !this.state.examPdfCollapsed;
+    if (this.state.examPdfCollapsed) {
+      this.state.examSheetCollapsed = false;
+      if (this.state.mobileExamPane === 'pdf') this.state.mobileExamPane = 'both';
+    }
+    this.applyExamLayoutDom();
+  },
+
+  toggleExamSheetCollapse() {
+    this.state.examSheetCollapsed = !this.state.examSheetCollapsed;
+    if (this.state.examSheetCollapsed) {
+      this.state.examPdfCollapsed = false;
+      if (this.state.mobileExamPane === 'sheet') this.state.mobileExamPane = 'both';
+    }
+    this.applyExamLayoutDom();
+  },
+
+  scrollExamWorkspaceTo(target) {
+    if (typeof document === 'undefined') return;
+    if (target === 'pdf' && this.state.examPdfCollapsed) {
+      this.state.examPdfCollapsed = false;
+      this.applyExamLayoutDom();
+    }
+    if (target === 'sheet' && this.state.examSheetCollapsed) {
+      this.state.examSheetCollapsed = false;
+      this.applyExamLayoutDom();
+    }
+    setTimeout(() => {
+      const el = document.getElementById(target === 'pdf' ? 'examLeftPdfPane' : 'examRightSheetPane');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 30);
+  },
+
+  onExamWorkspaceScroll() {
+    if (!this.isExamStackedFlowMode()) return;
+    const ws = typeof document !== 'undefined' ? document.getElementById('examMainWorkspace') : null;
+    if (ws) this.updatePdfPageInfoFromContainer('examRoomPdfViewer', ws);
+  },
+
+  applyExamLayoutDom() {
+    if (typeof document === 'undefined') return;
+    const cls = this.getExamPaneClasses(this.state.mobileExamPane);
+    const pdfCollapsed = Boolean(this.state.examPdfCollapsed);
+    const sheetCollapsed = Boolean(this.state.examSheetCollapsed) && !pdfCollapsed;
+    const layoutMeta = this.getExamLayoutMeta();
+    const isStacked = this.getNormalizedExamLayoutMode() !== 'split' && !pdfCollapsed && !sheetCollapsed;
+
+    const ws = document.getElementById('examMainWorkspace');
+    const leftEl = document.getElementById('examLeftPdfPane');
+    const rightEl = document.getElementById('examRightSheetPane');
+    const pdfHeaderEl = document.getElementById('examLeftPdfHeader');
+    const pdfBannerEl = document.getElementById('examPdfCollapsedBanner');
+    const pdfViewerEl = document.getElementById('examRoomPdfViewer');
+    const sheetBodyEl = document.getElementById('examSheetBodyWrap');
+    const sheetCollapsedHint = document.getElementById('examSheetCollapsedHint');
+
+    if (ws) ws.className = cls.workspace;
+    if (leftEl) leftEl.className = cls.left;
+    if (rightEl) rightEl.className = cls.right;
+    if (pdfHeaderEl) pdfHeaderEl.className = cls.pdfHeader;
+    if (pdfBannerEl) pdfBannerEl.className = cls.pdfBanner;
+    if (pdfViewerEl) pdfViewerEl.className = cls.pdfViewer;
+    if (sheetBodyEl) sheetBodyEl.className = cls.sheetBody;
+    if (sheetCollapsedHint) sheetCollapsedHint.classList.toggle('hidden', !sheetCollapsed);
+
+    this.syncPdfViewerFlowMode('examRoomPdfViewer', this.isExamStackedFlowMode());
+
+    document.querySelectorAll('.toggle-exam-pdf-btn').forEach(btn => {
+      if (btn.id === 'examCollapsePdfBtn') {
+        btn.className = `hidden md:inline-flex ui-btn ${pdfCollapsed ? 'bg-amber-500 hover:bg-amber-600 text-white border border-amber-600' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'} shadow-xs toggle-exam-pdf-btn`;
+      }
+      btn.innerHTML = `<i class="fa-solid ${pdfCollapsed ? 'fa-expand' : 'fa-compress'}"></i><span>${pdfCollapsed ? 'Mở lại đề' : 'Thu gọn đề'}</span>`;
+    });
+
+    document.querySelectorAll('.toggle-exam-sheet-btn').forEach(btn => {
+      btn.innerHTML = `<i class="fa-solid ${sheetCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}"></i><span>${sheetCollapsed ? 'Mở ô đáp án' : 'Thu gọn đáp án'}</span>`;
+    });
+
+    document.querySelectorAll('.exam-layout-btn-label').forEach(el => {
+      el.textContent = layoutMeta.shortLabel;
+    });
+    document.querySelectorAll('.exam-layout-btn-icon').forEach(el => {
+      el.className = `fa-solid ${layoutMeta.icon} text-indigo-600 exam-layout-btn-icon`;
+    });
+
+    const jumpPdfBtn = document.getElementById('sheetJumpToPdfBtn');
+    if (jumpPdfBtn) {
+      const showJumpPdf = isStacked && (this.getNormalizedExamLayoutMode() === 'top-sheet' || this.getNormalizedExamLayoutMode() === 'fast-entry');
+      jumpPdfBtn.classList.toggle('hidden', !showJumpPdf);
+    }
+    const jumpSheetBtn = document.getElementById('pdfJumpToSheetBtn');
+    if (jumpSheetBtn) {
+      jumpSheetBtn.classList.toggle('hidden', !isStacked);
+      const isTopSheet = this.getNormalizedExamLayoutMode() === 'top-sheet' || this.getNormalizedExamLayoutMode() === 'fast-entry';
+      jumpSheetBtn.innerHTML = `<i class="fa-solid ${isTopSheet ? 'fa-angles-up' : 'fa-angles-down'} mr-1"></i><span>${isTopSheet ? 'Lên Ô đáp án' : 'Xuống Ô đáp án'}</span>`;
+    }
+
+    const inputsContainer = document.getElementById('splitAnswerInputsContainer');
+    if (inputsContainer && this.state.activeExam) {
+      inputsContainer.innerHTML = this.renderAnswerSheetInputs(this.state.activeExam);
+    }
+
+    if (!pdfCollapsed) {
+      setTimeout(() => this.renderPdfPages('examRoomPdfViewer'), 60);
+    }
+  },
+
+  // 1. Khung hiển thị Đề PDF & Ô điền đáp án linh hoạt (Split / Ô đáp án ở trên - PDF dưới / Thu gọn đề điền nhanh)
   renderSplitViewContent(ex) {
     const pdfSrc = this.state.resolvedPdfUrl || ex.pdf_url || '';
     const safeTitle = (ex.title || '').replace(/'/g, "\\'");
@@ -3203,13 +3772,24 @@ const App = {
     const inStandalone = this.isStandaloneApp();
     const progress = this.calculateProgress();
     const remainCount = progress.total - progress.answered;
+    const pdfCollapsed = Boolean(this.state.examPdfCollapsed);
+    const sheetCollapsed = Boolean(this.state.examSheetCollapsed) && !pdfCollapsed;
+    const normLayout = this.getNormalizedExamLayoutMode();
+    const isStacked = normLayout !== 'split' && !pdfCollapsed && !sheetCollapsed;
+    const isTopSheet = normLayout === 'top-sheet' || normLayout === 'fast-entry';
 
     return `
-      <!-- Cột trái: Trình xem PDF đa trang trực tiếp -->
+      <!-- Khung Xem Đề PDF Gốc -->
       <div id="examLeftPdfPane" class="${paneCls.left}">
-        <div class="bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0">
+        <div id="examLeftPdfHeader" class="${paneCls.pdfHeader}">
           <span class="flex items-center font-bold text-white truncate"><i class="fa-solid fa-file-pdf text-red-400 mr-2"></i><span class="truncate">Đề thi PDF gốc</span></span>
-          <div class="flex items-center space-x-2.5 shrink-0">
+          <div class="flex items-center gap-2 sm:gap-2.5 shrink-0">
+            <button type="button" id="pdfJumpToSheetBtn" onclick="App.scrollExamWorkspaceTo('sheet')" class="${isStacked ? 'inline-flex' : 'hidden'} px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] items-center cursor-pointer transition">
+              <i class="fa-solid ${isTopSheet ? 'fa-angles-up' : 'fa-angles-down'} mr-1"></i><span>${isTopSheet ? 'Lên Ô đáp án' : 'Xuống Ô đáp án'}</span>
+            </button>
+            <button type="button" onclick="App.toggleExamPdfCollapse()" class="toggle-exam-pdf-btn px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer transition" title="Thu gọn hoặc mở lại khung đề PDF">
+              <i class="fa-solid ${pdfCollapsed ? 'fa-expand' : 'fa-compress'}"></i><span>${pdfCollapsed ? 'Mở lại đề' : 'Thu gọn đề'}</span>
+            </button>
             <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" onclick="App.suppressAntiCheatTemporarily(2000)" class="text-xs text-indigo-300 hover:text-white flex items-center">
               <i class="fa-solid fa-download mr-1"></i><span class="hidden sm:inline">Tải về</span>
             </a>
@@ -3223,14 +3803,23 @@ const App = {
             ` : ''}
           </div>
         </div>
-        <div id="examRoomPdfViewer" class="flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950"></div>
+        <div id="examPdfCollapsedBanner" class="${paneCls.pdfBanner}">
+          <span class="truncate flex items-center gap-1.5">
+            <i class="fa-solid fa-bolt text-amber-400"></i>
+            <span>Đề thi PDF đang thu gọn để ưu tiên điền đáp án nhanh toàn màn hình</span>
+          </span>
+          <button type="button" onclick="App.toggleExamPdfCollapse()" class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold shrink-0 cursor-pointer flex items-center gap-1 shadow-xs">
+            <i class="fa-solid fa-expand text-[10px]"></i><span>Mở lại đề PDF</span>
+          </button>
+        </div>
+        <div id="examRoomPdfViewer" class="${paneCls.pdfViewer}"></div>
       </div>
 
-      <!-- Cột phải: Phiếu trả lời trực tuyến + Thanh theo dõi quá trình làm bài -->
+      <!-- Khung Ô Điền Đáp Án Trực Tuyến + Theo Dõi Quá Trình -->
       <div id="examRightSheetPane" class="${paneCls.right}">
         <div class="p-2.5 sm:p-3 border-b border-slate-200 bg-slate-50 sticky top-0 z-10 space-y-2">
-          <!-- Thanh tóm tắt quá trình đã làm ngay trên phiếu -->
-          <div class="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2 shadow-2xs">
+          <!-- Thanh tóm tắt quá trình & công cụ thu gọn đề / đổi bố cục ngay trên ô đáp án -->
+          <div class="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2 shadow-2xs">
             <div class="min-w-0 flex items-center gap-2 text-xs">
               <span class="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
                 <i class="fa-solid fa-chart-pie text-[11px]"></i>
@@ -3240,12 +3829,31 @@ const App = {
                 <span class="text-[11px] font-semibold ${remainCount > 0 ? 'text-amber-700' : 'text-emerald-700'} ml-1 exam-sheet-remain-text">• ${remainCount > 0 ? `Chưa xong: ${remainCount}` : 'Đã chọn đủ!'}</span>
               </div>
             </div>
-            <button type="button" id="sheetProgressDetailBtn" onclick="App.toggleMobileDrawer()" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold shrink-0 cursor-pointer flex items-center gap-1 shadow-xs" title="Mở bảng chi tiết câu nào đã tích chọn hay chưa">
-              <i class="fa-solid fa-list-check"></i><span>Xem quá trình</span>
-            </button>
+            <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+              <button type="button" id="sheetJumpToPdfBtn" onclick="App.scrollExamWorkspaceTo('pdf')" class="${isStacked && isTopSheet ? 'inline-flex' : 'hidden'} px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold cursor-pointer items-center gap-1" title="Kéo xuống mục xem Đề PDF bên dưới">
+                <i class="fa-solid fa-angles-down"></i><span>Xem Đề PDF dưới</span>
+              </button>
+              <button type="button" id="sheetCollapsePdfQuickBtn" onclick="App.toggleExamPdfCollapse()" class="toggle-exam-pdf-btn px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Thu gọn đề để điền đáp án nhanh">
+                <i class="fa-solid ${pdfCollapsed ? 'fa-expand' : 'fa-compress'}"></i><span>${pdfCollapsed ? 'Mở lại đề' : 'Thu gọn đề'}</span>
+              </button>
+              <button type="button" id="sheetToggleSelfCollapseBtn" onclick="App.toggleExamSheetCollapse()" class="toggle-exam-sheet-btn px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Thu gọn hoặc mở rộng ô điền đáp án">
+                <i class="fa-solid ${sheetCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}"></i><span>${sheetCollapsed ? 'Mở ô đáp án' : 'Thu gọn đáp án'}</span>
+              </button>
+              <button type="button" id="sheetProgressDetailBtn" onclick="App.toggleMobileDrawer()" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold shrink-0 cursor-pointer flex items-center gap-1 shadow-xs" title="Mở bảng chi tiết câu nào đã tích chọn hay chưa">
+                <i class="fa-solid fa-list-check"></i><span>Quá trình</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="examSheetCollapsedHint" class="${sheetCollapsed ? '' : 'hidden'} px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs flex items-center justify-between gap-2">
+            <span><i class="fa-solid fa-circle-info mr-1"></i>Ô điền đáp án đang thu gọn để xem Đề PDF rộng tối đa.</span>
+            <button type="button" onclick="App.toggleExamSheetCollapse()" class="font-extrabold underline cursor-pointer shrink-0">Mở lại điền đáp án</button>
           </div>
 
           <div class="flex border border-slate-200 rounded-xl p-1 bg-white text-[11px] sm:text-xs font-bold gap-1 overflow-x-auto no-scrollbar">
+            <button type="button" id="sectionTabBtn_all" onclick="App.setSectionTab('all')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'all' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}" title="Hiển thị liên thông tất cả các phần để điền đáp án nhanh">
+              Tất cả (${progress.answered}/${progress.total})
+            </button>
             <button type="button" id="sectionTabBtn_p1" onclick="App.setSectionTab('p1')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'p1' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
               P.I (${progress.parts.p1.answered}/${ex.part1.length})
             </button>
@@ -3263,15 +3871,17 @@ const App = {
           </div>
         </div>
 
-        <div id="splitAnswerInputsContainer" class="p-3.5 sm:p-4 space-y-5 flex-1">
-          ${this.renderAnswerSheetInputs(ex)}
-        </div>
+        <div id="examSheetBodyWrap" class="${paneCls.sheetBody}">
+          <div id="splitAnswerInputsContainer" class="p-3 sm:p-4 space-y-4 flex-1">
+            ${this.renderAnswerSheetInputs(ex)}
+          </div>
 
-        <div class="p-3.5 pt-2 border-t border-slate-200 bg-slate-50 ios-safe-bottom">
-          <button type="button" id="sheetBottomSubmitBtn" onclick="App.confirmSubmitExam()" class="ui-btn-lg w-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm">
-            <i class="fa-solid fa-paper-plane"></i>
-            <span>Nộp Bài &amp; Chấm Điểm Ngay</span>
-          </button>
+          <div class="p-3 sm:p-3.5 pt-2 border-t border-slate-200 bg-slate-50 ios-safe-bottom">
+            <button type="button" id="sheetBottomSubmitBtn" onclick="App.confirmSubmitExam()" class="ui-btn-lg w-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm">
+              <i class="fa-solid fa-paper-plane"></i>
+              <span>Nộp Bài &amp; Chấm Điểm Ngay</span>
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -3450,34 +4060,170 @@ const App = {
     };
   },
 
-  // 3. Render Phiếu làm bài bên phải (Split Mode)
+  // 3. Render Phiếu làm bài (Tự động chuyển sang Lưới Ngang Đa Cột tốc độ cao khi Thu gọn đề hoặc đặt Ô đáp án ở trên/dưới)
   renderAnswerSheetInputs(ex) {
-    if (this.state.activeSectionTab === 'p1') {
-      if (ex.part1.length === 0) return `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này không có câu hỏi Phần I.</div>`;
+    const wide = this.isWideAnswerSheet();
+    const tab = this.state.activeSectionTab || 'p1';
+    if (tab === 'all') {
+      const blocks = ['p1', 'p2', 'p3', 'p4']
+        .map(k => this.renderAnswerSheetPartBlock(ex, k, wide, true))
+        .filter(Boolean);
+      return blocks.length
+        ? `<div class="space-y-5">${blocks.join('<hr class="border-slate-200">')}</div>`
+        : `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này chưa có câu hỏi.</div>`;
+    }
+    return this.renderAnswerSheetPartBlock(ex, tab, wide, false);
+  },
+
+  renderAnswerSheetPartBlock(ex, partKey, wide = false, skipEmpty = false) {
+    if (partKey === 'p1') {
+      if (ex.part1.length === 0) return skipEmpty ? '' : `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này không có câu hỏi Phần I.</div>`;
       return `
         <div class="space-y-2.5">
-          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Phần I: Chọn 1 trong 4 đáp án (${ex.part1.length} câu)</div>
-          ${ex.part1.map(q => {
-            const curAns = this.state.answers.part1[q.id];
-            const st = this.getQuestionProgressState('p1', q.id);
-            const vis = this.getRowVisualClasses('p1', st);
+          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center justify-between gap-2">
+            <span>Phần I: Chọn 1 trong 4 đáp án (${ex.part1.length} câu)</span>
+            ${wide ? `<span class="text-[11px] font-semibold text-indigo-600 normal-case">Chế độ dàn ngang điền nhanh</span>` : ''}
+          </div>
+          <div class="${wide ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2' : 'space-y-2.5'}">
+            ${ex.part1.map(q => {
+              const curAns = this.state.answers.part1[q.id];
+              const st = this.getQuestionProgressState('p1', q.id);
+              const vis = this.getRowVisualClasses('p1', st);
+              return `
+                <div id="row_p1_${q.id}" class="${vis.row}">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <button type="button" id="flag_btn_p1_${q.id}" onclick="App.toggleFlag('p1', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
+                      <i class="fa-solid fa-star text-[11px]"></i>
+                    </button>
+                    <div class="flex flex-col">
+                      <span class="font-bold text-xs text-slate-800 whitespace-nowrap">Câu ${q.id}</span>
+                      <span id="row_status_p1_${q.id}" class="${vis.badge} w-fit mt-0.5">${st.label}</span>
+                    </div>
+                  </div>
+                  <div class="flex gap-1.5 shrink-0">
+                    ${['A', 'B', 'C', 'D'].map(opt => `
+                      <button type="button" id="split_btn_p1_${q.id}_${opt}" onclick="App.selectPart1Answer(${q.id}, '${opt}')" 
+                        class="w-10 h-10 sm:w-9 sm:h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer ${curAns === opt ? 'bg-indigo-600 border-indigo-600 text-white shadow' : 'bg-white border-slate-300 text-slate-700 hover:bg-indigo-50'}">
+                        ${opt}
+                      </button>
+                    `).join('')}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    if (partKey === 'p2') {
+      if (ex.part2.length === 0) return skipEmpty ? '' : `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này không có câu hỏi Phần II.</div>`;
+      return `
+        <div class="space-y-3">
+          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Phần II: Chọn Đúng hoặc Sai (${ex.part2.length} câu)</div>
+          <div class="${wide ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3' : 'space-y-4'}">
+            ${ex.part2.map(q => {
+              const st = this.getQuestionProgressState('p2', q.id);
+              const vis = this.getRowVisualClasses('p2', st);
+              return `
+              <div id="row_p2_${q.id}" class="${vis.row}">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-1.5">
+                    <button type="button" id="flag_btn_p2_${q.id}" onclick="App.toggleFlag('p2', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
+                      <i class="fa-solid fa-star text-[11px]"></i>
+                    </button>
+                    <span class="font-bold text-xs text-slate-800">Câu ${q.id} (4 ý):</span>
+                  </div>
+                  <span id="row_status_p2_${q.id}" class="${vis.badge}">${st.label}</span>
+                </div>
+                <div class="${wide ? 'grid grid-cols-1 gap-1.5' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2'}">
+                  ${['a', 'b', 'c', 'd'].map(sub => {
+                    const val = this.state.answers.part2[q.id]?.[sub];
+                    return `
+                      <div class="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs">
+                        <span class="font-mono font-bold text-slate-700">Ý ${sub})</span>
+                        <div class="flex gap-1.5">
+                          <button type="button" id="split_tf_${q.id}_${sub}_true" onclick="App.selectPart2Answer(${q.id}, '${sub}', true)" class="tf-btn px-2.5 text-xs font-bold border cursor-pointer ${val === true ? 'selected-true' : 'bg-slate-50 text-slate-600 border-slate-200'}">Đúng</button>
+                          <button type="button" id="split_tf_${q.id}_${sub}_false" onclick="App.selectPart2Answer(${q.id}, '${sub}', false)" class="tf-btn px-2.5 text-xs font-bold border cursor-pointer ${val === false ? 'selected-false' : 'bg-slate-50 text-slate-600 border-slate-200'}">Sai</button>
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+            `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    if (partKey === 'p3') {
+      if (ex.part3.length === 0) return skipEmpty ? '' : `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này không có câu hỏi Phần III.</div>`;
+      const p3Boxes = this.getPart3BoxCount(ex);
+      const boxIndices = Array.from({ length: p3Boxes }, (_, idx) => idx);
+      const keypadHtml = `
+        <div class="${wide ? 'bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-2' : 'mt-4 pt-3.5 border-t border-slate-200 space-y-2'}">
+          <div class="text-[11px] text-slate-500 font-semibold text-center">Bàn phím số nhanh (Hỗ trợ cả <strong class="font-mono">.</strong> và <strong class="font-mono">,</strong>):</div>
+          <div class="math-keypad max-w-xs mx-auto">
+            ${[
+              { k: '1', l: '1' },
+              { k: '2', l: '2' },
+              { k: '3', l: '3' },
+              { k: 'backspace', l: '<i class="fa-solid fa-delete-left"></i>' },
+              { k: '4', l: '4' },
+              { k: '5', l: '5' },
+              { k: '6', l: '6' },
+              { k: '-', l: '-' },
+              { k: '7', l: '7' },
+              { k: '8', l: '8' },
+              { k: '9', l: '9' },
+              { k: ',', l: ',' },
+              { k: '.', l: '.' },
+              { k: '0', l: '0' },
+              { k: '/', l: '/' },
+              { k: 'C', l: 'C' }
+            ].map(btn => `
+              <button type="button" onclick="App.handleKeypadPress('${btn.k}')" class="math-key ${['backspace', 'C', '-', '/', '.', ','].includes(btn.k) ? 'math-key-action' : ''}">
+                ${btn.l}
+              </button>
+            `).join('')}
+          </div>
+          <div class="max-w-xs mx-auto">
+            <button type="button" onclick="App.handleKeypadPress('enter')" class="w-full py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5">
+              <span>Chuyển sang câu tiếp theo</span>
+              <i class="fa-solid fa-arrow-down text-[11px]"></i>
+            </button>
+          </div>
+        </div>
+      `;
+
+      const inputsGridHtml = `
+        <div class="${wide ? 'grid grid-cols-1 md:grid-cols-2 gap-2.5' : 'space-y-3'}">
+          ${ex.part3.map(q => {
+            const digits = this.state.answers.part3[q.id] || Array(p3Boxes).fill('');
+            const st = this.getQuestionProgressState('p3', q.id);
+            const vis = this.getRowVisualClasses('p3', st);
             return `
-              <div id="row_p1_${q.id}" class="${vis.row}">
+              <div id="row_p3_${q.id}" class="${vis.row}">
                 <div class="flex items-center gap-1.5 min-w-0">
-                  <button type="button" id="flag_btn_p1_${q.id}" onclick="App.toggleFlag('p1', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
+                  <button type="button" id="flag_btn_p3_${q.id}" onclick="App.toggleFlag('p3', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
                     <i class="fa-solid fa-star text-[11px]"></i>
                   </button>
                   <div class="flex flex-col">
                     <span class="font-bold text-xs text-slate-800 whitespace-nowrap">Câu ${q.id}</span>
-                    <span id="row_status_p1_${q.id}" class="${vis.badge} w-fit mt-0.5">${st.label}</span>
+                    <span id="row_status_p3_${q.id}" class="${vis.badge} w-fit mt-0.5">${st.label}</span>
                   </div>
                 </div>
-                <div class="flex gap-1.5 sm:gap-2 shrink-0">
-                  ${['A', 'B', 'C', 'D'].map(opt => `
-                    <button type="button" id="split_btn_p1_${q.id}_${opt}" onclick="App.selectPart1Answer(${q.id}, '${opt}')" 
-                      class="w-10 h-10 sm:w-9 sm:h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer ${curAns === opt ? 'bg-indigo-600 border-indigo-600 text-white shadow' : 'bg-white border-slate-300 text-slate-700 hover:bg-indigo-50'}">
-                      ${opt}
-                    </button>
+                <div class="flex ${p3Boxes > 4 ? 'gap-1' : 'gap-1.5 sm:gap-2'} shrink-0">
+                  ${boxIndices.map(boxIdx => `
+                    <input type="text" inputmode="decimal" autocomplete="off"
+                      id="split_box_${q.id}_${boxIdx}"
+                      value="${digits[boxIdx] || ''}"
+                      onfocus="App.state.activePart3Target = { qId: ${q.id}, boxIdx: ${boxIdx} }"
+                      onkeydown="App.handleBoxKeyDown(event, ${q.id}, ${boxIdx}, 'split_box_')"
+                      oninput="App.handleBoxInput(event, ${q.id}, ${boxIdx}, 'split_box_')"
+                      class="box-digit ${p3Boxes > 4 ? '!w-8 !h-11 !text-lg sm:!w-9 sm:!h-12' : ''} ${digits[boxIdx] ? 'box-digit-filled' : ''}">
                   `).join('')}
                 </div>
               </div>
@@ -3485,181 +4231,84 @@ const App = {
           }).join('')}
         </div>
       `;
-    }
 
-    if (this.state.activeSectionTab === 'p2') {
-      if (ex.part2.length === 0) return `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này không có câu hỏi Phần II.</div>`;
       return `
-        <div class="space-y-4">
-          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Phần II: Chọn Đúng hoặc Sai (${ex.part2.length} câu)</div>
-          ${ex.part2.map(q => {
-            const st = this.getQuestionProgressState('p2', q.id);
-            const vis = this.getRowVisualClasses('p2', st);
-            return `
-            <div id="row_p2_${q.id}" class="${vis.row}">
-              <div class="flex items-center justify-between gap-2">
-                <div class="flex items-center gap-1.5">
-                  <button type="button" id="flag_btn_p2_${q.id}" onclick="App.toggleFlag('p2', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
-                    <i class="fa-solid fa-star text-[11px]"></i>
-                  </button>
-                  <span class="font-bold text-xs text-slate-800">Câu ${q.id} (4 ý):</span>
-                </div>
-                <span id="row_status_p2_${q.id}" class="${vis.badge}">${st.label}</span>
-              </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
-                ${['a', 'b', 'c', 'd'].map(sub => {
-                  const val = this.state.answers.part2[q.id]?.[sub];
-                  return `
-                    <div class="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200 text-xs">
-                      <span class="font-mono font-bold text-slate-700">Ý ${sub})</span>
-                      <div class="flex gap-1.5">
-                        <button type="button" id="split_tf_${q.id}_${sub}_true" onclick="App.selectPart2Answer(${q.id}, '${sub}', true)" class="tf-btn px-3 text-xs font-bold border cursor-pointer ${val === true ? 'selected-true' : 'bg-slate-50 text-slate-600 border-slate-200'}">Đúng</button>
-                        <button type="button" id="split_tf_${q.id}_${sub}_false" onclick="App.selectPart2Answer(${q.id}, '${sub}', false)" class="tf-btn px-3 text-xs font-bold border cursor-pointer ${val === false ? 'selected-false' : 'bg-slate-50 text-slate-600 border-slate-200'}">Sai</button>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
-              </div>
+        <div class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="text-xs font-bold text-slate-500 uppercase tracking-wider">Phần III: Trả lời ngắn (${ex.part3.length} câu)</div>
+            <div class="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1 flex items-center gap-1.5">
+              <i class="fa-solid fa-circle-info text-amber-600 shrink-0"></i>
+              <span>Điền dấu <strong>.</strong> hoặc <strong>,</strong> đều được chấp nhận (VD: <code class="font-mono font-bold">12.5</code> = <code class="font-mono font-bold">12,5</code>).</span>
             </div>
-          `;
-          }).join('')}
+          </div>
+          ${wide ? `
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
+              <div class="lg:col-span-8">${inputsGridHtml}</div>
+              <div class="lg:col-span-4">${keypadHtml}</div>
+            </div>
+          ` : `
+            ${inputsGridHtml}
+            ${keypadHtml}
+          `}
         </div>
       `;
     }
 
-    if (this.state.activeSectionTab === 'p3') {
-      if (ex.part3.length === 0) return `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này không có câu hỏi Phần III.</div>`;
-      const p3Boxes = this.getPart3BoxCount(ex);
-      const boxIndices = Array.from({ length: p3Boxes }, (_, idx) => idx);
+    if (partKey === 'p4') {
+      const p4List = Array.isArray(ex.part4) ? ex.part4 : [];
+      if (p4List.length === 0) return skipEmpty ? '' : `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này không có Phần IV (Tự luận).</div>`;
       return `
-        <div class="space-y-3.5">
-          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider">Phần III: Trả lời ngắn (${ex.part3.length} câu)</div>
-          <div class="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-start gap-2">
-            <i class="fa-solid fa-circle-info text-amber-600 mt-0.5 shrink-0"></i>
-            <span>Số thập phân điền dấu chấm (<strong>.</strong>) hoặc dấu phẩy (<strong>,</strong>) đều được chấp nhận như nhau (VD: <code class="font-mono font-bold">12.5</code> hoặc <code class="font-mono font-bold">12,5</code>).</span>
-          </div>
-          <div class="space-y-3">
-            ${ex.part3.map(q => {
-              const digits = this.state.answers.part3[q.id] || Array(p3Boxes).fill('');
-              const st = this.getQuestionProgressState('p3', q.id);
-              const vis = this.getRowVisualClasses('p3', st);
+        <div class="space-y-3">
+          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Phần IV: Tự Luận (${p4List.length} câu • Nhập bài giải hoặc chụp ảnh giấy làm bài)</div>
+          <div class="${wide ? 'grid grid-cols-1 lg:grid-cols-2 gap-3.5' : 'space-y-4'}">
+            ${p4List.map(q => {
+              const entry = (this.state.answers.part4 && this.state.answers.part4[q.id]) || { text: '', images: [] };
+              const qMax = +GradingSystem.getQuestionMaxPoints(ex, 'part4', q).toFixed(2);
+              const imgs = Array.isArray(entry.images) ? entry.images : [];
+              const st = this.getQuestionProgressState('p4', q.id);
+              const vis = this.getRowVisualClasses('p4', st);
               return `
-                <div id="row_p3_${q.id}" class="${vis.row}">
-                  <div class="flex items-center gap-1.5 min-w-0">
-                    <button type="button" id="flag_btn_p3_${q.id}" onclick="App.toggleFlag('p3', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
-                      <i class="fa-solid fa-star text-[11px]"></i>
-                    </button>
-                    <div class="flex flex-col">
-                      <span class="font-bold text-xs text-slate-800 whitespace-nowrap">Câu ${q.id}</span>
-                      <span id="row_status_p3_${q.id}" class="${vis.badge} w-fit mt-0.5">${st.label}</span>
+                <div id="row_p4_${q.id}" data-drop-target="p4ImgInput_${q.id}" class="${vis.row}">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-1.5">
+                      <button type="button" id="flag_btn_p4_${q.id}" onclick="App.toggleFlag('p4', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
+                        <i class="fa-solid fa-star text-[11px]"></i>
+                      </button>
+                      <span class="font-extrabold text-xs text-slate-800">Câu ${q.id} (Tự luận):</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span id="row_status_p4_${q.id}" class="${vis.badge}">${st.label}</span>
+                      <span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-mono font-bold text-[11px]">${qMax} điểm</span>
                     </div>
                   </div>
-                  <div class="flex ${p3Boxes > 4 ? 'gap-1' : 'gap-1.5 sm:gap-2'} shrink-0">
-                    ${boxIndices.map(boxIdx => `
-                      <input type="text" inputmode="decimal" autocomplete="off"
-                        id="split_box_${q.id}_${boxIdx}"
-                        value="${digits[boxIdx] || ''}"
-                        onfocus="App.state.activePart3Target = { qId: ${q.id}, boxIdx: ${boxIdx} }"
-                        onkeydown="App.handleBoxKeyDown(event, ${q.id}, ${boxIdx}, 'split_box_')"
-                        oninput="App.handleBoxInput(event, ${q.id}, ${boxIdx}, 'split_box_')"
-                        class="box-digit ${p3Boxes > 4 ? '!w-8 !h-11 !text-lg sm:!w-9 sm:!h-12' : ''} ${digits[boxIdx] ? 'box-digit-filled' : ''}">
-                    `).join('')}
+                  <textarea rows="3" placeholder="Trình bày lời giải tóm tắt hoặc ghi kết quả cuối cùng của Câu ${q.id}..." oninput="App.handlePart4TextInput(${q.id}, this.value)" class="w-full p-2.5 rounded-xl border border-slate-300 bg-white text-xs text-slate-800 focus:border-indigo-500 outline-none">${String(entry.text || '').replace(/</g, '&lt;')}</textarea>
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <input type="file" id="p4ImgInput_${q.id}" accept="image/*" multiple class="hidden" onchange="App.handlePart4ImageSelect(event, ${q.id})">
+                    <button type="button" onclick="App.suppressAntiCheatTemporarily(90000); document.getElementById('p4ImgInput_${q.id}').click();" class="ui-btn px-3 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs">
+                      <i class="fa-solid fa-camera"></i><span>Chụp / Kéo thả ảnh bài giải</span>
+                    </button>
+                    <span class="text-[11px] text-slate-400 font-mono">${imgs.length} ảnh đính kèm</span>
                   </div>
+                  ${imgs.length > 0 ? `
+                    <div class="grid grid-cols-3 gap-2 pt-1">
+                      ${imgs.map((src, idx) => `
+                        <div class="relative group rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square">
+                          <img src="${src}" alt="Bài làm câu ${q.id}" onclick="App.previewFullImage('${src}')" class="w-full h-full object-cover cursor-pointer">
+                          <button type="button" onclick="App.removePart4Image(${q.id}, ${idx})" class="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-600 text-white text-[10px] flex items-center justify-center shadow cursor-pointer" title="Xóa ảnh">
+                            <i class="fa-solid fa-xmark"></i>
+                          </button>
+                        </div>
+                      `).join('')}
+                    </div>
+                  ` : ''}
                 </div>
               `;
             }).join('')}
           </div>
-
-          <!-- Bàn phím số nhanh cho Phần III (Hỗ trợ cả dấu "." và dấu ",") -->
-          <div class="mt-4 pt-3.5 border-t border-slate-200 space-y-2">
-            <div class="text-[11px] text-slate-500 font-semibold text-center">Bàn phím số nhanh (Hỗ trợ cả <strong class="font-mono">.</strong> và <strong class="font-mono">,</strong>):</div>
-            <div class="math-keypad max-w-xs mx-auto">
-              ${[
-                { k: '1', l: '1' },
-                { k: '2', l: '2' },
-                { k: '3', l: '3' },
-                { k: 'backspace', l: '<i class="fa-solid fa-delete-left"></i>' },
-                { k: '4', l: '4' },
-                { k: '5', l: '5' },
-                { k: '6', l: '6' },
-                { k: '-', l: '-' },
-                { k: '7', l: '7' },
-                { k: '8', l: '8' },
-                { k: '9', l: '9' },
-                { k: ',', l: ',' },
-                { k: '.', l: '.' },
-                { k: '0', l: '0' },
-                { k: '/', l: '/' },
-                { k: 'C', l: 'C' }
-              ].map(btn => `
-                <button type="button" onclick="App.handleKeypadPress('${btn.k}')" class="math-key ${['backspace', 'C', '-', '/', '.', ','].includes(btn.k) ? 'math-key-action' : ''}">
-                  ${btn.l}
-                </button>
-              `).join('')}
-            </div>
-            <div class="max-w-xs mx-auto">
-              <button type="button" onclick="App.handleKeypadPress('enter')" class="w-full py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5">
-                <span>Chuyển sang câu tiếp theo</span>
-                <i class="fa-solid fa-arrow-down text-[11px]"></i>
-              </button>
-            </div>
-          </div>
         </div>
       `;
     }
-
-    if (this.state.activeSectionTab === 'p4') {
-      const p4List = Array.isArray(ex.part4) ? ex.part4 : [];
-      if (p4List.length === 0) return `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này không có Phần IV (Tự luận).</div>`;
-      return `
-        <div class="space-y-4">
-          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Phần IV: Tự Luận (${p4List.length} câu • Nhập bài giải hoặc chụp ảnh giấy làm bài)</div>
-          ${p4List.map(q => {
-            const entry = (this.state.answers.part4 && this.state.answers.part4[q.id]) || { text: '', images: [] };
-            const qMax = +GradingSystem.getQuestionMaxPoints(ex, 'part4', q).toFixed(2);
-            const imgs = Array.isArray(entry.images) ? entry.images : [];
-            const st = this.getQuestionProgressState('p4', q.id);
-            const vis = this.getRowVisualClasses('p4', st);
-            return `
-              <div id="row_p4_${q.id}" data-drop-target="p4ImgInput_${q.id}" class="${vis.row}">
-                <div class="flex items-center justify-between gap-2">
-                  <div class="flex items-center gap-1.5">
-                    <button type="button" id="flag_btn_p4_${q.id}" onclick="App.toggleFlag('p4', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
-                      <i class="fa-solid fa-star text-[11px]"></i>
-                    </button>
-                    <span class="font-extrabold text-xs text-slate-800">Câu ${q.id} (Tự luận):</span>
-                  </div>
-                  <div class="flex items-center gap-1.5">
-                    <span id="row_status_p4_${q.id}" class="${vis.badge}">${st.label}</span>
-                    <span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-mono font-bold text-[11px]">${qMax} điểm</span>
-                  </div>
-                </div>
-                <textarea rows="3" placeholder="Trình bày lời giải tóm tắt hoặc ghi kết quả cuối cùng của Câu ${q.id}..." oninput="App.handlePart4TextInput(${q.id}, this.value)" class="w-full p-2.5 rounded-xl border border-slate-300 bg-white text-xs text-slate-800 focus:border-indigo-500 outline-none">${String(entry.text || '').replace(/</g, '&lt;')}</textarea>
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <input type="file" id="p4ImgInput_${q.id}" accept="image/*" multiple class="hidden" onchange="App.handlePart4ImageSelect(event, ${q.id})">
-                  <button type="button" onclick="App.suppressAntiCheatTemporarily(90000); document.getElementById('p4ImgInput_${q.id}').click();" class="ui-btn px-3 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs">
-                    <i class="fa-solid fa-camera"></i><span>Chụp / Kéo thả ảnh bài giải</span>
-                  </button>
-                  <span class="text-[11px] text-slate-400 font-mono">${imgs.length} ảnh đính kèm</span>
-                </div>
-                ${imgs.length > 0 ? `
-                  <div class="grid grid-cols-3 gap-2 pt-1">
-                    ${imgs.map((src, idx) => `
-                      <div class="relative group rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square">
-                        <img src="${src}" alt="Bài làm câu ${q.id}" onclick="App.previewFullImage('${src}')" class="w-full h-full object-cover cursor-pointer">
-                        <button type="button" onclick="App.removePart4Image(${q.id}, ${idx})" class="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-600 text-white text-[10px] flex items-center justify-center shadow cursor-pointer" title="Xóa ảnh">
-                          <i class="fa-solid fa-xmark"></i>
-                        </button>
-                      </div>
-                    `).join('')}
-                  </div>
-                ` : ''}
-              </div>
-            `;
-          }).join('')}
-        </div>
-      `;
-    }
+    return '';
   },
 
   handlePart4TextInput(qId, val) {
@@ -3977,8 +4626,9 @@ const App = {
       el.textContent = `${p.answered}/${p.total} câu`;
     });
 
-    // Cập nhật tiến độ ngay trên nhãn các tab P.I / P.II / P.III / P.IV
+    // Cập nhật tiến độ ngay trên nhãn các tab Tất cả / P.I / P.II / P.III / P.IV
     const tabMap = {
+      all: `Tất cả (${p.answered}/${p.total})`,
       p1: `P.I (${p.parts.p1.answered}/${p.parts.p1.total})`,
       p2: `P.II (${p.parts.p2.answered}/${p.parts.p2.total})`,
       p3: `P.III (${p.parts.p3.answered}/${p.parts.p3.total})`,
@@ -4602,9 +5252,9 @@ const App = {
           </div>
 
           ${showPdf ? `
-            <!-- PHẦN DƯỚI (TOÀN CHIỀU RỘNG): KÉO XUỐNG XEM TRỰC TIẾP PDF ĐÁP ÁN & LỜI GIẢI CHI TIẾT -->
-            <div id="submissionSolutionPdfSection" class="w-full h-[85dvh] lg:h-[calc(100vh-76px)] min-h-[600px] bg-slate-900 rounded-2xl border border-slate-700 shadow-xl overflow-hidden flex flex-col">
-              <div class="px-4 py-2.5 bg-slate-800 text-white flex flex-wrap items-center justify-between gap-2 text-xs font-bold shrink-0 border-b border-slate-700">
+            <!-- PHẦN DƯỚI (TOÀN CHIỀU RỘNG): ĐỒNG BỘ 1 THANH CUỘN CHUNG VỚI TRANG XEM PDF LỜI GIẢI CHI TIẾT -->
+            <div id="submissionSolutionPdfSection" class="w-full min-h-[520px] bg-slate-900 rounded-2xl border border-slate-700 shadow-xl flex flex-col">
+              <div class="px-4 py-2.5 bg-slate-800 rounded-t-2xl text-white flex flex-wrap items-center justify-between gap-2 text-xs font-bold shrink-0 border-b border-slate-700 sticky top-14 z-20">
                 <span class="flex items-center truncate text-white"><i class="fa-solid fa-file-pdf text-red-400 mr-2 text-sm"></i>File PDF Đáp Án &amp; Lời Giải Chi Tiết</span>
                 <div class="flex items-center space-x-2 shrink-0">
                   <button type="button" onclick="document.getElementById('submissionAnswerCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' })" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-amber-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
@@ -4623,7 +5273,7 @@ const App = {
                   </a>
                 </div>
               </div>
-              <div id="submissionSolPdfViewer" class="flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950"></div>
+              <div id="submissionSolPdfViewer" class="w-full h-auto flex flex-col bg-slate-950 rounded-b-2xl"></div>
             </div>
           ` : ''}
         </div>
@@ -4636,7 +5286,7 @@ const App = {
     `;
 
     if (showPdf) {
-      this.mountPdfViewer('submissionSolPdfViewer', solPdfUrl);
+      this.mountPdfViewer('submissionSolPdfViewer', solPdfUrl, { flowWithPage: true });
     }
   },
 
@@ -4701,6 +5351,12 @@ const App = {
               <button type="button" onclick="App.goHome()" class="hidden md:inline-flex ui-btn bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 shadow-xs" title="Về trang chủ">
                 <i class="fa-solid fa-house text-indigo-400"></i>
                 <span>Trang chủ</span>
+              </button>
+
+              <!-- Nút Xem trước & Chọn Bố cục Đề PDF + Ô Đáp Án -->
+              <button type="button" id="adminLayoutBtn" onclick="App.showExamLayoutModal()" class="ui-btn-icon md:w-auto md:px-3 bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold border border-slate-700 shadow-xs md:gap-1.5" title="Xem trước & chọn bố cục hiển thị Đề PDF và Ô điền đáp án">
+                <i class="fa-solid ${this.getExamLayoutMeta().icon} text-indigo-400"></i>
+                <span class="hidden md:inline">Bố cục thi</span>
               </button>
 
               <!-- Nút Quét QR Tạo App Điện Thoại (Android & iOS) cho Học Sinh -->
@@ -5835,17 +6491,20 @@ const App = {
 
               <!-- Các nút thao tác sắp xếp gọn gàng theo lưới 2 hàng cân đối -->
               <div class="pt-3 border-t border-slate-100 space-y-2">
-                <div class="grid grid-cols-2 gap-2">
+                <div class="grid grid-cols-3 gap-2">
                   <button type="button" onclick="App.previewAdminPdf('${ex.id}')" class="ui-btn bg-red-50 hover:bg-red-100 border border-red-200 text-red-700" title="Xem trực tiếp file PDF đề thi">
                     <i class="fa-solid fa-file-pdf"></i><span>Xem PDF Đề</span>
                   </button>
+                  <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="ui-btn bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
+                    <i class="fa-solid fa-table-columns"></i><span>Xem trước bố cục</span>
+                  </button>
                   ${ex.solution_pdf_url ? `
                     <button type="button" onclick="App.previewAdminSolutionPdf('${ex.id}')" class="ui-btn bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700" title="Xem trực tiếp file PDF đáp án và lời giải">
-                      <i class="fa-solid fa-file-shield"></i><span>Xem PDF Đáp Án</span>
+                      <i class="fa-solid fa-file-shield"></i><span>PDF Đáp Án</span>
                     </button>
                   ` : `
                     <button type="button" onclick="App.showUpdatePdfModal('${ex.id}')" class="ui-btn bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 text-slate-600">
-                      <i class="fa-solid fa-cloud-arrow-up"></i><span>Up PDF Đáp Án</span>
+                      <i class="fa-solid fa-cloud-arrow-up"></i><span>Up PDF ĐA</span>
                     </button>
                   `}
                 </div>
@@ -8787,6 +9446,11 @@ const App = {
             </div>
           </div>
           <div class="flex items-center space-x-2 shrink-0">
+            <button type="button" id="pdfModalLayoutBtn" onclick="App.showExamLayoutModal('${String(storageId || '').replace(/_sol$/, '')}')" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1.5 transition cursor-pointer shadow-xs" title="Xem trước & đổi cách hiển thị Đề PDF và Ô điền đáp án">
+              <i class="fa-solid fa-table-columns"></i>
+              <span class="hidden sm:inline">Bố cục Đề &amp; Đáp án</span>
+              <span class="sm:hidden">Bố cục</span>
+            </button>
             ${!this.isStandaloneApp() ? `
               <a href="${finalUrl}" target="_blank" class="hidden sm:flex px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-indigo-300 hover:text-white items-center transition cursor-pointer" title="Mở trong tab mới">
                 <i class="fa-solid fa-arrow-up-right-from-square mr-1.5"></i>Tab Mới
@@ -10166,24 +10830,70 @@ const App = {
     `;
   },
 
-  async mountPdfViewer(containerId, pdfUrl) {
+  getPdfViewerFlowClasses(containerId, flowWithPage = false) {
+    if (flowWithPage) {
+      const stickyOffset = containerId === 'submissionSolPdfViewer' ? 'sticky top-[98px] z-10' : 'sticky top-[33px] z-10';
+      return {
+        toolbar: `bg-slate-900/95 backdrop-blur-xs border-b border-slate-800 px-3 py-1.5 flex items-center justify-between text-xs text-slate-200 shrink-0 ${stickyOffset}`,
+        scroll: 'pdf-viewer-scroll pdf-viewer-flow w-full h-auto overflow-visible p-2 sm:p-4 space-y-3 bg-slate-900 rounded-b-2xl'
+      };
+    }
+    return {
+      toolbar: 'bg-slate-900/95 border-b border-slate-800 px-3 py-1.5 flex items-center justify-between text-xs text-slate-200 shrink-0',
+      scroll: 'pdf-viewer-scroll flex-1 w-full h-full min-h-0 overflow-auto p-2 sm:p-4 space-y-3 bg-slate-900'
+    };
+  },
+
+  syncPdfViewerFlowMode(containerId, flowWithPage = false) {
+    if (this._pdfViewers && this._pdfViewers[containerId]) {
+      this._pdfViewers[containerId].flowWithPage = Boolean(flowWithPage);
+    }
+    if (typeof document === 'undefined') return;
+    const cls = this.getPdfViewerFlowClasses(containerId, flowWithPage);
+    const toolbarEl = document.getElementById(`${containerId}_toolbar`);
+    const scrollEl = document.getElementById(`${containerId}_scroll`);
+    if (toolbarEl) toolbarEl.className = cls.toolbar;
+    if (scrollEl) scrollEl.className = cls.scroll;
+  },
+
+  updatePdfPageInfoFromContainer(containerId, scrollParent) {
+    if (typeof document === 'undefined') return;
+    const vState = this._pdfViewers && this._pdfViewers[containerId];
+    const scrollEl = document.getElementById(`${containerId}_scroll`);
+    const infoEl = document.getElementById(`${containerId}_pageInfo`);
+    if (!vState || !vState.pdfDoc || !scrollEl || !infoEl) return;
+    const pages = scrollEl.querySelectorAll('[data-pdf-page]');
+    if (!pages.length) return;
+    const refTop = scrollParent && scrollParent !== window
+      ? scrollParent.getBoundingClientRect().top + scrollParent.clientHeight * 0.35
+      : (typeof window !== 'undefined' ? window.innerHeight * 0.35 : 240);
+    let cur = 1;
+    pages.forEach(p => {
+      if (p.getBoundingClientRect().top <= refTop) cur = Number(p.getAttribute('data-pdf-page')) || cur;
+    });
+    infoEl.textContent = `Trang ${cur} / ${vState.pdfDoc.numPages}`;
+  },
+
+  async mountPdfViewer(containerId, pdfUrl, options = {}) {
     if (typeof document === 'undefined') return;
     const host = document.getElementById(containerId);
     if (!host) return;
+    const flowWithPage = Boolean(options && options.flowWithPage);
 
     if (!pdfUrl) {
-      host.innerHTML = `<div class="flex-1 w-full h-full flex items-center justify-center p-6 text-center text-slate-400 text-xs">Chưa có file PDF đính kèm cho đề này.</div>`;
+      host.innerHTML = `<div class="flex-1 w-full h-full min-h-[240px] flex items-center justify-center p-6 text-center text-slate-400 text-xs">Chưa có file PDF đính kèm cho đề này.</div>`;
       return;
     }
 
     const norm = this.normalizeExternalPdfUrl(pdfUrl);
     if (norm.isExternalEmbed || typeof window === 'undefined' || !window.pdfjsLib) {
-      host.innerHTML = `<div class="flex-1 w-full h-full flex flex-col">${this.renderPdfFallbackHtml(norm.embedUrl)}</div>`;
+      host.innerHTML = `<div class="flex-1 w-full ${flowWithPage ? 'min-h-[78vh]' : 'h-full'} flex flex-col">${this.renderPdfFallbackHtml(norm.embedUrl)}</div>`;
       return;
     }
 
+    const flowCls = this.getPdfViewerFlowClasses(containerId, flowWithPage);
     host.innerHTML = `
-      <div id="${containerId}_toolbar" class="bg-slate-900/95 border-b border-slate-800 px-3 py-1.5 flex items-center justify-between text-xs text-slate-200 shrink-0">
+      <div id="${containerId}_toolbar" class="${flowCls.toolbar}">
         <div class="flex items-center gap-1.5 font-mono text-[11px]">
           <i class="fa-regular fa-file-lines text-indigo-400"></i>
           <span id="${containerId}_pageInfo">Đang tải đề PDF...</span>
@@ -10201,7 +10911,7 @@ const App = {
           </button>
         </div>
       </div>
-      <div id="${containerId}_scroll" class="pdf-viewer-scroll flex-1 w-full h-full min-h-0 overflow-auto p-2 sm:p-4 space-y-3 bg-slate-900">
+      <div id="${containerId}_scroll" class="${flowCls.scroll}">
         <div class="py-12 text-center text-slate-400 text-xs space-y-2">
           <i class="fa-solid fa-spinner fa-spin text-2xl text-indigo-400"></i>
           <div>Đang dựng các trang PDF sắc nét...</div>
@@ -10219,6 +10929,7 @@ const App = {
         pdfDoc,
         zoomFactor: 1.0,
         url: norm.embedUrl,
+        flowWithPage,
         renderToken: 0
       };
       await this.renderPdfPages(containerId);
@@ -10237,10 +10948,18 @@ const App = {
           if (infoEl) infoEl.textContent = `Trang ${cur} / ${pdfDoc.numPages}`;
         }, { passive: true });
       }
+      if (containerId === 'submissionSolPdfViewer' && typeof window !== 'undefined' && !this._solWinScrollBound) {
+        this._solWinScrollBound = true;
+        window.addEventListener('scroll', () => {
+          if (document.getElementById('submissionSolPdfViewer_scroll')) {
+            this.updatePdfPageInfoFromContainer('submissionSolPdfViewer', window);
+          }
+        }, { passive: true });
+      }
     } catch (_) {
       const stillHost = document.getElementById(containerId);
       if (stillHost) {
-        stillHost.innerHTML = `<div class="flex-1 w-full h-full flex flex-col">${this.renderPdfFallbackHtml(norm.embedUrl)}</div>`;
+        stillHost.innerHTML = `<div class="flex-1 w-full ${flowWithPage ? 'min-h-[78vh]' : 'h-full'} flex flex-col">${this.renderPdfFallbackHtml(norm.embedUrl)}</div>`;
       }
     }
   },

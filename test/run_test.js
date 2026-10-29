@@ -455,4 +455,71 @@ console.assert(onlyCorrectHtml.includes('C1') && !onlyCorrectHtml.includes('C2')
 App.state.detailAnswerFilter = 'all';
 App.state.activeExam = null;
 
-console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, DẤU ./, PHẦN III, TIẾN ĐỘ LÀM BÀI & BẢNG ĐÁP ÁN NGANG ĐÃ ĐẠT 100%!');
+// Test 17: Thu gọn đề điền đáp án nhanh + 4 chế độ bố cục Đề PDF / Ô đáp án (bao gồm Ô đáp án ở trên - Đề PDF bên dưới) + Đồng bộ 1 thanh cuộn
+console.assert(Array.isArray(App.EXAM_LAYOUT_MODES) && App.EXAM_LAYOUT_MODES.length === 4, 'Must support 4 exam layout modes');
+console.assert(App.getExamLayoutMeta('top-sheet').id === 'top-sheet', 'top-sheet meta fail');
+console.assert(App.getNormalizedExamLayoutMode('invalid-mode') === 'split', 'Invalid layout mode must fallback to split');
+
+// 17.1 Chế độ 'top-sheet' (Ô đáp án ở trên - Đề PDF bên dưới, đồng bộ 1 thanh cuộn chung trên workspace)
+App.state.examLayoutMode = 'top-sheet';
+App.state.examPdfCollapsed = false;
+App.state.examSheetCollapsed = false;
+App.state.mobileExamPane = 'both';
+console.assert(App.isWideAnswerSheet() === true, 'top-sheet must enable wide horizontal answer grid');
+console.assert(App.isExamStackedFlowMode('both') === true, 'top-sheet must enable unified single-scrollbar flow mode');
+const topCls = App.getExamPaneClasses('both');
+console.assert(topCls.right.includes('order-1') && topCls.left.includes('order-2'), 'top-sheet must place Answer Sheet (order-1) above PDF (order-2)');
+console.assert(topCls.workspace.includes('overflow-y-auto') && !topCls.right.includes('overflow-y-auto'), 'top-sheet must use unified workspace scrollbar without nested right scrollbar');
+const flowPdfCls = App.getPdfViewerFlowClasses('examRoomPdfViewer', true);
+console.assert(flowPdfCls.scroll.includes('overflow-visible') && flowPdfCls.scroll.includes('pdf-viewer-flow'), 'Unified PDF viewer must not trap vertical scroll');
+
+// 17.2 Chế độ Thu gọn đề (examPdfCollapsed = true) -> ẩn khung PDF viewer, hiện thanh banner mỏng, mở rộng ô đáp án 100% đa cột
+App.state.examLayoutMode = 'split';
+App.state.examPdfCollapsed = true;
+console.assert(App.isWideAnswerSheet() === true, 'Collapsed PDF in split mode must switch answer sheet to wide horizontal grid');
+const collapsedPdfCls = App.getExamPaneClasses('both');
+console.assert(collapsedPdfCls.pdfViewer === 'hidden' && !collapsedPdfCls.pdfBanner.includes('hidden'), 'Collapsed PDF must hide viewer and show restore banner');
+console.assert(collapsedPdfCls.right.includes('w-full') && collapsedPdfCls.right.includes('flex-1'), 'Collapsed PDF must expand Answer Sheet to full width');
+
+// 17.3 Kiểm tra render lưới ngang đa cột và tab 'all' điền liên thông toàn đề
+const fastExamMock = {
+  part1: [{ id: 1, correct_answer: 'A' }, { id: 2, correct_answer: 'B' }, { id: 3, correct_answer: 'C' }, { id: 4, correct_answer: 'D' }],
+  part2: [{ id: 1, statements: [{ sub_id: 'a', correct: true }, { sub_id: 'b', correct: false }, { sub_id: 'c', correct: true }, { sub_id: 'd', correct: false }] }],
+  part3: [{ id: 1, correct_answer: '12,5' }],
+  part4: [{ id: 1, correct_answer: 'x=1' }]
+};
+App.state.activeExam = fastExamMock;
+App.state.activeSectionTab = 'p1';
+const wideP1Html = App.renderAnswerSheetInputs(fastExamMock);
+console.assert(wideP1Html.includes('xl:grid-cols-4') && wideP1Html.includes('lg:grid-cols-3'), 'Wide P1 must render 3-4 column horizontal grid');
+
+App.state.activeSectionTab = 'all';
+const allContinuousHtml = App.renderAnswerSheetInputs(fastExamMock);
+console.assert(
+  allContinuousHtml.includes('row_p1_1') &&
+  allContinuousHtml.includes('row_p2_1') &&
+  allContinuousHtml.includes('row_p3_1') &&
+  allContinuousHtml.includes('row_p4_1'),
+  'All-sections tab must render P.I, P.II, P.III, and P.IV continuously'
+);
+
+// 17.4 Kiểm tra Modal Xem Trước (Preview) & Chọn Bố Cục
+App.state.layoutPreviewMode = 'top-sheet';
+App.state.layoutPreviewPdfCollapsed = false;
+const previewModalHtml = App.renderExamLayoutModalInner();
+console.assert(
+  previewModalHtml.includes('layoutModeCard_top-sheet') &&
+  previewModalHtml.includes('layoutModeCard_fast-entry') &&
+  previewModalHtml.includes('examLayoutPreviewStage') &&
+  previewModalHtml.includes('applyExamLayoutBtn'),
+  'Layout preview modal must render all mode cards, interactive preview stage, and apply button'
+);
+
+// Reset state
+App.state.examLayoutMode = 'split';
+App.state.examPdfCollapsed = false;
+App.state.examSheetCollapsed = false;
+App.state.activeSectionTab = 'p1';
+App.state.activeExam = null;
+
+console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, DẤU ./, PHẦN III, TIẾN ĐỘ, BỐ CỤC ĐỀ/ĐÁP ÁN & ĐỒNG BỘ THANH CUỘN ĐÃ ĐẠT 100%!');
