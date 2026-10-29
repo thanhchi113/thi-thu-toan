@@ -1,4 +1,4 @@
-const CACHE_NAME = 'khao-thi-toan-shell-v9';
+const CACHE_NAME = 'khao-thi-toan-shell-v10';
 const SHELL_ASSETS = [
   './',
   './index.html',
@@ -32,8 +32,13 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET' || !req.url.startsWith(self.location.origin)) return;
+  const pathname = new URL(req.url).pathname;
+  if (pathname.endsWith('/cloud_state.json') || pathname.includes('/pdfs/')) {
+    event.respondWith(fetch(req, { cache: 'no-store' }));
+    return;
+  }
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' })
       .then((res) => {
         if (res && res.status === 200) {
           const clone = res.clone();
@@ -41,6 +46,6 @@ self.addEventListener('fetch', (event) => {
         }
         return res;
       })
-      .catch(() => caches.match(req).then((cached) => cached || caches.match('./index.html')))
+      .catch(() => caches.match(req, { ignoreSearch: true }).then((cached) => cached || caches.match('./index.html')))
   );
 });

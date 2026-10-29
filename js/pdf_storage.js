@@ -7,8 +7,9 @@ const PDFStorage = {
   dbPromise: null,
 
   getDB() {
+    if (typeof indexedDB === 'undefined') return Promise.resolve(null);
     if (!this.dbPromise) {
-      this.dbPromise = new Promise((resolve, reject) => {
+      this.dbPromise = new Promise((resolve) => {
         const req = indexedDB.open(this.dbName, 1);
         req.onupgradeneeded = (e) => {
           const db = e.target.result;
@@ -43,28 +44,32 @@ const PDFStorage = {
     }
   },
 
-  async getPdfBlobUrl(examId) {
+  async getPdfBlob(examId) {
     try {
+      if (!examId) return null;
       const db = await this.getDB();
       if (!db) return null;
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         const tx = db.transaction(this.storeName, 'readonly');
         const store = tx.objectStore(this.storeName);
         const req = store.get(examId);
         req.onsuccess = () => {
           const result = req.result;
-          if (result instanceof Blob) {
-            resolve(URL.createObjectURL(result));
-          } else {
-            resolve(null);
-          }
+          resolve(result instanceof Blob ? result : null);
         };
         req.onerror = () => resolve(null);
       });
     } catch (e) {
-      console.error('Lỗi khi đọc PDF từ IndexedDB:', e);
+      console.error('Lỗi khi đọc Blob PDF từ IndexedDB:', e);
       return null;
     }
+  },
+
+  async getPdfBlobUrl(examId) {
+    const blob = await this.getPdfBlob(examId);
+    return blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+      ? URL.createObjectURL(blob)
+      : null;
   },
 
   async deletePdf(examId) {

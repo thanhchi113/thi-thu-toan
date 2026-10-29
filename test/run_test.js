@@ -522,4 +522,156 @@ App.state.examSheetCollapsed = false;
 App.state.activeSectionTab = 'p1';
 App.state.activeExam = null;
 
-console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, DẤU ./, PHẦN III, TIẾN ĐỘ, BỐ CỤC ĐỀ/ĐÁP ÁN & ĐỒNG BỘ THANH CUỘN ĐÃ ĐẠT 100%!');
+// Test 18: Đồng bộ Đề thi & File PDF giữa Máy tính Giáo viên và Điện thoại Học sinh + Chẩn đoán Phân quyền Khối
+const assert = require('assert');
+const PDFStorage = require('../js/pdf_storage.js');
+
+(async () => {
+  // 18.1 PDFStorage an toàn trong môi trường Node (không có indexedDB)
+  const nullBlob = await PDFStorage.getPdfBlob('EXAM-NONE');
+  assert.strictEqual(nullBlob, null, 'PDFStorage.getPdfBlob must safely return null without indexedDB');
+
+  // 18.2 mergeCloudState với file cloud_state.json khởi tạo (updatedAt: 0, exams: null) KHÔNG bao giờ xóa đề cục bộ idb: trên máy Giáo viên
+  App.state.exams = [{
+    id: 'EXAM-LOCAL-PC',
+    title: 'Đề Ôn Tập Giữa Kỳ 1 - Mã Đề 05',
+    grade: 11,
+    category: 'GK1',
+    is_active: true,
+    allowed_all: false,
+    access_type: 'grade',
+    allowed_grades: [11],
+    pdf_url: 'idb:EXAM-LOCAL-PC',
+    part1: [{ id: 1, correct_answer: 'B' }],
+    part2: [],
+    part3: [],
+    part4: []
+  }];
+  App.state.deletedIds = [];
+  App.state.localStateUpdatedAt = 1000;
+
+  assert.strictEqual(App.hasLocalOnlyPdf(App.state.exams[0]), true, 'idb: exam must be flagged as local-only');
+  assert.strictEqual(App.getUnsyncedAdminExamsCount(), 1, 'Unsynced count must detect local idb: exam');
+
+  const changedInit = App.mergeCloudState({ version: 1, updatedAt: 0, exams: null, homeworks: null, students: null });
+  assert.strictEqual(changedInit.changed, false, 'Uninitialized cloud_state.json must be ignored');
+  assert.strictEqual(App.state.exams.length, 1, 'Existing local PC exam must remain intact');
+
+  // 18.3 Chẩn đoán rõ ràng trên Điện thoại khi có đề Khối 11 đang mở nhưng HS001 thuộc Khối 12
+  App.state.currentUser = { role: 'student', studentId: 'HS001', fullName: 'Quốc Việt', grade: 12, className: '12A1' };
+  const mismatchHtml = App.renderStudentExamGridHtml([], []);
+  assert(
+    mismatchHtml.includes('Khối 11') && mismatchHtml.includes('HS001') && mismatchHtml.includes('studentEmptySyncBtn'),
+    'Empty student grid must clearly explain grade/permission mismatch and provide sync button'
+  );
+
+  // 18.4 Điện thoại mới tinh (exams = []) nhận ngay Đề thi & Chuyên đề khi mergeCloudState từ Đám mây
+  App.state.exams = [];
+  App.state.homeworks = [];
+  App.state.submissions = [];
+  App.state.localStateUpdatedAt = 0;
+
+  const cloudSnapshot = {
+    version: 1,
+    updatedAt: 1730280000000,
+    deletedIds: [],
+    exams: [{
+      id: 'EXAM-CLOUD-01',
+      title: 'Đề Kiểm Tra GK1 Toán 12 - Đợt 1',
+      grade: 12,
+      category: 'GK1',
+      is_active: true,
+      allowed_all: true,
+      access_type: 'all',
+      pdf_url: 'pdfs/EXAM-CLOUD-01_1730280000000.pdf',
+      pdf_name: 'De_GK1_Toan12.pdf',
+      part1: [{ id: 1, correct_answer: 'A' }],
+      part2: [],
+      part3: [],
+      part4: []
+    }],
+    homeworks: [{
+      id: 'HW-CLOUD-01',
+      title: 'Chuyên Đề Hàm Số 12',
+      grade: 12,
+      pdfUrl: 'pdfs/HW-CLOUD-01_1730280000000.pdf',
+      fileName: 'Ham_So_12.pdf',
+      accessType: 'all',
+      allowedAll: true
+    }],
+    submissions: [{
+      id: 'SUB-CLOUD-01',
+      studentId: 'HS001',
+      studentName: 'Quốc Việt',
+      examId: 'EXAM-CLOUD-01',
+      examTitle: 'Đề Kiểm Tra GK1 Toán 12 - Đợt 1',
+      submittedAt: '2026-10-29T15:00:00.000Z',
+      scoreResult: { totalScore: 9.5, maxTotal: 10, rank: 'Xuất sắc', part1: { score: 9.5 }, part2: { score: 0 }, part3: { score: 0 } },
+      answers: { part1: { 1: 'A' }, part2: {}, part3: {}, part4: {} }
+    }]
+  };
+
+  const mergedMobile = App.mergeCloudState(cloudSnapshot);
+  assert.strictEqual(mergedMobile.changed, true, 'Mobile must detect new cloud snapshot');
+  assert.strictEqual(App.state.exams.length, 1, 'Mobile must receive cloud exam');
+  assert.strictEqual(App.state.exams[0].pdf_url, 'pdfs/EXAM-CLOUD-01_1730280000000.pdf', 'Cloud PDF path must be preserved');
+  assert.strictEqual(App.hasLocalOnlyPdf(App.state.exams[0]), false, 'Cloud PDF exam must show as synced');
+  assert.strictEqual(App.state.homeworks.length, 1, 'Mobile must receive cloud homework without wiping pdfUrl');
+  assert.strictEqual(App.state.submissions.length, 1, 'Submissions must sync across devices');
+
+  // 18.5 Tombstone deletedIds xóa sạch đề đã bị Giáo viên gỡ bỏ trên mọi thiết bị
+  App.mergeCloudState({
+    version: 1,
+    updatedAt: 1730280050000,
+    deletedIds: ['EXAM-CLOUD-01'],
+    exams: []
+  });
+  assert.strictEqual(App.state.exams.length, 0, 'Deleted exam tombstone must remove exam on mobile');
+
+  // 18.6 resolvePdfSourceUrl giải mã cả pdfs/... (GitHub) và gas:... (Google Drive)
+  const origFetch = global.fetch;
+  const pdfBase64 = App.utf8ToBase64('%PDF-1.4 mock pdf content');
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('pdfs/EXAM-CLOUD-01')) {
+      return {
+        ok: true,
+        blob: async () => new Blob(['%PDF-1.4 github pdf'], { type: 'application/pdf' })
+      };
+    }
+    if (u.includes('action=getPdf')) {
+      return {
+        ok: true,
+        json: async () => ({ success: true, base64: pdfBase64 })
+      };
+    }
+    return { ok: false };
+  };
+
+  const resolvedGhUrl = await App.resolvePdfSourceUrl('pdfs/EXAM-CLOUD-01_1730280000000.pdf', 'EXAM-CLOUD-01');
+  assert(resolvedGhUrl.startsWith('blob:') || resolvedGhUrl.includes('pdfs/EXAM-CLOUD-01'), 'GitHub PDF URL must resolve cleanly for mobile');
+
+  App.saveCloudConfig({ gasWebAppUrl: 'https://script.google.com/macros/s/AKfycbTest123/exec' });
+  const resolvedGasUrl = await App.resolvePdfSourceUrl('gas:EXAM-GAS-01', 'EXAM-GAS-01');
+  assert(resolvedGasUrl.startsWith('blob:'), 'Google Apps Script PDF reference must resolve to Blob URL on mobile');
+
+  // 18.7 QR URL đính kèm tham số &cloud=... khi có cấu hình Google Apps Script và giữ nguyên mặc định khi để trống
+  const qrWithCloud = App.getRecommendedAppUrl({ protocol: 'https:', hostname: 'thanhchi113.github.io', origin: 'https://thanhchi113.github.io', pathname: '/thi-thu-toan/' }, 'android');
+  assert(
+    qrWithCloud.url.includes('install=android&cloud=' + encodeURIComponent('https://script.google.com/macros/s/AKfycbTest123/exec')),
+    'QR URL must propagate &cloud=... so mobile phones auto-discover GAS endpoint'
+  );
+
+  App.saveCloudConfig({ gasWebAppUrl: '', githubToken: '' });
+  const qrClean = App.getRecommendedAppUrl({ protocol: 'https:', hostname: 'thanhchi113.github.io', origin: 'https://thanhchi113.github.io', pathname: '/thi-thu-toan/' }, 'ios');
+  assert.strictEqual(qrClean.url, 'https://thanhchi113.github.io/thi-thu-toan/?install=ios', 'Clean QR URL must match canonical URL');
+
+  global.fetch = origFetch;
+  App.state.currentUser = null;
+  App.state.deletedIds = [];
+
+  console.log('[OK] TẤT CẢ 18 BỘ TEST (CHẤM ĐIỂM, DẤU ./, TIẾN ĐỘ, BỐ CỤC, THANH CUỘN & ĐỒNG BỘ ĐỀ THI MÁY TÍNH <-> ĐIỆN THOẠI) ĐÃ ĐẠT 100%!');
+})().catch((err) => {
+  console.error('[FAIL] Test 18 failed:', err);
+  process.exit(1);
+});

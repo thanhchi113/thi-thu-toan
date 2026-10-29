@@ -8,9 +8,13 @@ if (typeof GradingSystem === 'undefined' && typeof require === 'function') {
 const App = {
   ADMIN_RECOVERY_EMAIL: 'badaoqn132@gmail.com',
   PUBLIC_APP_URL: 'https://thanhchi113.github.io/thi-thu-toan/',
+  GITHUB_DEFAULT_REPO: 'thanhchi113/thi-thu-toan',
+  GITHUB_DEFAULT_BRANCH: 'main',
   DATA_SEED_VERSION: '2026-10-29-cap3-hs001-079-clean-v1',
   _pdfViewers: {},
   _deferredInstallPrompt: null,
+  _memCloudCfg: null,
+  _memPdfCacheVer: {},
 
   ACCENT_PRESETS: [
     { id: 'indigo',  name: 'Chàm Cổ Điển',  hex: '#4f46e5' },
@@ -138,6 +142,14 @@ const App = {
     studentScoreTab: 'mine',             // 'mine' (Kết quả cá nhân) | 'classBoard' (So sánh Lớp / Khối)
     studentCompareMode: 'class',         // 'class' (Lớp của mình) | 'grade' (Toàn khối của mình)
     studentCompareExamFilter: 'ALL',     // 'ALL' (Điểm TB các đề trong khối) | examId cụ thể
+
+    // Đồng bộ Đám mây Máy tính <-> Điện thoại (GitHub Repo + Google Apps Script 2 chiều)
+    deletedIds: [],
+    localStateUpdatedAt: 0,
+    unsyncedAdminChanges: false,
+    cloudSyncStatus: 'idle',             // 'idle' | 'syncing' | 'ok' | 'error'
+    cloudLastSyncedAt: 0,
+    cloudSyncMessage: '',
   },
 
   // Ép ô nhập Tài khoản đăng nhập luôn là chữ IN HOA (giữ nguyên vị trí con trỏ khi gõ trên điện thoại)
@@ -315,6 +327,7 @@ const App = {
     this.initGlobalEvents();
     this.render();
     this.checkPasswordResetUrl();
+    this.syncFromCloud({ silent: true });
   },
 
   initPwaSupport() {
@@ -323,7 +336,11 @@ const App = {
       window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     }
     if ('serviceWorker' in navigator && /^https?:$/i.test(window.location.protocol)) {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
+      navigator.serviceWorker.register('./sw.js')
+        .then((reg) => {
+          if (reg && typeof reg.update === 'function') reg.update().catch(() => {});
+        })
+        .catch(() => {});
     }
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
@@ -333,17 +350,28 @@ const App = {
       }
     });
     const params = new URLSearchParams(window.location.search);
+    let urlChanged = false;
+    const cloudParam = params.get('cloud');
+    if (cloudParam) {
+      const normalizedGas = this.normalizeGasUrl(cloudParam);
+      if (normalizedGas) {
+        this.saveCloudConfig({ gasWebAppUrl: normalizedGas });
+      }
+      params.delete('cloud');
+      urlChanged = true;
+    }
     const installTarget = (params.get('install') || '').toLowerCase();
     if (installTarget === 'ios' || installTarget === 'android' || installTarget === 'app') {
       params.delete('install');
-      const rest = params.toString();
-      if (window.history && window.history.replaceState) {
-        window.history.replaceState({}, document.title, window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
-      }
+      urlChanged = true;
       if (!this.isStandaloneApp()) {
         const targetPlatform = installTarget === 'android' ? 'android' : (installTarget === 'ios' ? 'ios' : null);
         setTimeout(() => this.showIosAppModal(true, targetPlatform), 150);
       }
+    }
+    if (urlChanged && window.history && window.history.replaceState) {
+      const rest = params.toString();
+      window.history.replaceState({}, document.title, window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
     }
   },
 
@@ -351,9 +379,14 @@ const App = {
     if (this._globalEventsBound) return;
     this._globalEventsBound = true;
 
-    // Giám sát thoát màn hình trên điện thoại (App iOS / Android) & chuyển tab trên trình duyệt
+    // Giám sát thoát màn hình trên điện thoại (App iOS / Android) & tự động tải đề mới khi mở lại App ngoài phòng thi
     document.addEventListener('visibilitychange', () => {
-      if (!App.state.activeExam) return;
+      if (!App.state.activeExam) {
+        if (!document.hidden && Date.now() - (App.state.cloudLastSyncedAt || 0) > 15000) {
+          App.syncFromCloud({ silent: true });
+        }
+        return;
+      }
       if (document.hidden) {
         App.recordExamLeaveViolation('Thoát ra ngoài ứng dụng / chuyển màn hình khi đang thi');
       } else {
@@ -367,7 +400,18 @@ const App = {
     });
 
     window.addEventListener('pageshow', () => {
+      if (!App.state.activeExam && Date.now() - (App.state.cloudLastSyncedAt || 0) > 15000) {
+        App.syncFromCloud({ silent: true });
+      }
       App.handleExamReturnFocus();
+    });
+
+    window.addEventListener('online', () => {
+      if (!App.state.activeExam) {
+        App.syncFromCloud({ silent: true });
+      } else {
+        App.flushPendingSubmissions();
+      }
     });
 
     window.addEventListener('blur', () => {
@@ -774,15 +818,84 @@ const App = {
     }
   },
 
-  // 1. Tải và đồng bộ dữ liệu với LocalStorage
+  normalizeStudentRecord(s) {
+    if (!s || typeof s !== 'object') return s;
+    if (s.phone === undefined) s.phone = '';
+    if (s.parentName === undefined) s.parentName = '';
+    if (s.notes === undefined) s.notes = '';
+    if (!s.status) s.status = 'active';
+    s.grade = this.getStudentGrade(s);
+    return s;
+  },
+
+  normalizeExamRecord(ex) {
+    if (!ex || typeof ex !== 'object') return ex;
+    const sampleFallback = typeof SAMPLE_EXAM_2027 !== 'undefined' ? SAMPLE_EXAM_2027 : { part1: [], part2: [], part3: [] };
+    const seedExams = (typeof INITIAL_SEED_DATA !== 'undefined' && INITIAL_SEED_DATA.exams) ? INITIAL_SEED_DATA.exams : [];
+    delete ex.raw_tex;
+    delete ex.html_exam_key;
+    delete ex.solution_html_key;
+    if (!ex.pdf_url || /^(tex:|idb_html:)/.test(ex.pdf_url)) ex.pdf_url = '';
+    if (ex.solution_pdf_url && /^(tex:|idb_html:)/.test(ex.solution_pdf_url)) ex.solution_pdf_url = '';
+    if (!Array.isArray(ex.part1)) ex.part1 = sampleFallback.part1;
+    if (!Array.isArray(ex.part2)) ex.part2 = sampleFallback.part2;
+    if (!Array.isArray(ex.part3)) ex.part3 = sampleFallback.part3;
+    if (!Array.isArray(ex.part4)) ex.part4 = [];
+    if (!ex.scoring || typeof ex.scoring !== 'object') {
+      ex.scoring = { mode: 'equal', p1Total: null, p2Total: null, p3Total: null, p4Total: null };
+    }
+    if (ex.allow_view_answers === undefined) ex.allow_view_answers = true;
+    if (!ex.grade) {
+      const match = (ex.title + ' ' + (ex.pdf_url || '')).match(/(?:Toán|Khối|Lớp)\s*(1[0-2]|[6-9])/i);
+      ex.grade = match ? parseInt(match[1], 10) : 12;
+    }
+    if (!ex.roundLabel) {
+      const roundMatch = (ex.title || '').match(/Đợt\s*([0-9]+)/i);
+      ex.roundLabel = roundMatch ? `Đợt ${roundMatch[1]}` : 'Đợt 1';
+    }
+    if (!ex.category || !this.EXAM_CATEGORIES.some(c => c.id === ex.category)) {
+      const seedMatch = seedExams.find(se => se.id === ex.id);
+      ex.category = (seedMatch && seedMatch.category) ? seedMatch.category : this.inferExamCategory(ex);
+    }
+    if (ex.allowed_all === undefined) ex.allowed_all = true;
+    if (!ex.allowed_grades) ex.allowed_grades = [ex.grade || 12];
+    if (!ex.allowed_students) ex.allowed_students = [];
+    if (!ex.access_type) ex.access_type = ex.allowed_all ? 'all' : (ex.allowed_grades.length ? 'grade' : 'custom');
+    return ex;
+  },
+
+  normalizeHomeworkRecord(hw) {
+    if (!hw || typeof hw !== 'object') return hw;
+    const seedHws = (typeof INITIAL_SEED_DATA !== 'undefined' && INITIAL_SEED_DATA.homeworks) ? INITIAL_SEED_DATA.homeworks : [];
+    delete hw.htmlDocKey;
+    if (!hw.pdfUrl || /^(tex:|idb_html:)/.test(hw.pdfUrl)) {
+      hw.pdfUrl = '';
+    }
+    if (!hw.grade) {
+      const seedHw = seedHws.find(sh => sh.id === hw.id);
+      if (seedHw && seedHw.grade) {
+        hw.grade = seedHw.grade;
+      } else {
+        const txt = `${hw.title || ''} ${hw.fileName || ''}`;
+        const m = txt.match(/(?:Toán|Khối|Lớp)\s*(1[0-2]|[6-9])/i);
+        hw.grade = m ? parseInt(m[1], 10) : (/vào\s*(?:lớp\s*)?10/i.test(txt) ? 9 : 12);
+      }
+    }
+    if (!hw.accessType) hw.accessType = hw.allowedAll ? 'all' : 'selected';
+    return hw;
+  },
+
+  // 1. Tải và đồng bộ dữ liệu với LocalStorage + Đám mây
   loadData() {
-    // Tự động xóa học sinh cũ/nháp, đề thi nháp, bài nộp mẫu và các file PDF nháp khi nâng cấp lên bộ dữ liệu Cấp 3 chính thức
     const seedVersionKey = 'thpt_data_seed_version';
     if (localStorage.getItem(seedVersionKey) !== this.DATA_SEED_VERSION) {
       localStorage.removeItem('thpt_students');
       localStorage.removeItem('thpt_exams');
       localStorage.removeItem('thpt_homeworks');
       localStorage.removeItem('thpt_submissions');
+      localStorage.removeItem('thpt_deleted_ids');
+      localStorage.removeItem('thpt_local_updated_at');
+      localStorage.removeItem('thpt_unsynced_admin_changes');
       try {
         const cur = JSON.parse(sessionStorage.getItem('thpt_current_user') || 'null');
         if (cur && cur.role === 'student' && !(INITIAL_SEED_DATA.students || []).some(s => s.studentId === cur.studentId)) {
@@ -804,81 +917,34 @@ const App = {
       email: this.ADMIN_RECOVERY_EMAIL
     };
 
+    try {
+      this.state.deletedIds = JSON.parse(localStorage.getItem('thpt_deleted_ids') || '[]') || [];
+    } catch (_) {
+      this.state.deletedIds = [];
+    }
+    this.state.localStateUpdatedAt = Number(localStorage.getItem('thpt_local_updated_at') || 0) || 0;
+    this.state.unsyncedAdminChanges = localStorage.getItem('thpt_unsynced_admin_changes') === '1';
+
     const storedStudents = localStorage.getItem('thpt_students');
     const storedExams = localStorage.getItem('thpt_exams');
     const storedHomeworks = localStorage.getItem('thpt_homeworks');
     const storedSubmissions = localStorage.getItem('thpt_submissions');
 
-    let stus = storedStudents ? JSON.parse(storedStudents) : (INITIAL_SEED_DATA.students || []).map(s => ({ ...s }));
-    // Đảm bảo mọi học sinh đều có đủ trường và khối lớp chuẩn (6 – 12)
-    stus.forEach(s => {
-      if (s.phone === undefined) s.phone = '';
-      if (s.parentName === undefined) s.parentName = '';
-      if (s.notes === undefined) s.notes = '';
-      if (!s.status) s.status = 'active';
-      s.grade = this.getStudentGrade(s);
-    });
+    const stus = storedStudents ? JSON.parse(storedStudents) : (INITIAL_SEED_DATA.students || []).map(s => ({ ...s }));
+    stus.forEach(s => this.normalizeStudentRecord(s));
     this.state.students = stus;
-    
-    let examsList = storedExams ? JSON.parse(storedExams) : (INITIAL_SEED_DATA.exams || []).map(e => ({ ...e }));
-    // Đảm bảo tất cả đề thi chỉ dùng định dạng PDF thuần túy, có bảng đáp án 3 phần, khối lớp 6-12 và phân quyền
-    examsList.forEach(ex => {
-      delete ex.raw_tex;
-      delete ex.html_exam_key;
-      delete ex.solution_html_key;
-      if (!ex.pdf_url || /^(tex:|idb_html:)/.test(ex.pdf_url)) ex.pdf_url = '';
-      if (ex.solution_pdf_url && /^(tex:|idb_html:)/.test(ex.solution_pdf_url)) ex.solution_pdf_url = '';
-      if (!Array.isArray(ex.part1)) ex.part1 = SAMPLE_EXAM_2027.part1;
-      if (!Array.isArray(ex.part2)) ex.part2 = SAMPLE_EXAM_2027.part2;
-      if (!Array.isArray(ex.part3)) ex.part3 = SAMPLE_EXAM_2027.part3;
-      if (!Array.isArray(ex.part4)) ex.part4 = [];
-      if (!ex.scoring || typeof ex.scoring !== 'object') {
-        ex.scoring = { mode: 'equal', p1Total: null, p2Total: null, p3Total: null, p4Total: null };
-      }
-      if (ex.allow_view_answers === undefined) ex.allow_view_answers = true;
-      if (!ex.grade) {
-        const match = (ex.title + ' ' + (ex.pdf_url || '')).match(/(?:Toán|Khối|Lớp)\s*(1[0-2]|[6-9])/i);
-        ex.grade = match ? parseInt(match[1]) : 12;
-      }
-      if (!ex.roundLabel) {
-        const roundMatch = (ex.title || '').match(/Đợt\s*([0-9]+)/i);
-        ex.roundLabel = roundMatch ? `Đợt ${roundMatch[1]}` : 'Đợt 1';
-      }
-      if (!ex.category || !this.EXAM_CATEGORIES.some(c => c.id === ex.category)) {
-        const seedMatch = (INITIAL_SEED_DATA.exams || []).find(se => se.id === ex.id);
-        ex.category = (seedMatch && seedMatch.category) ? seedMatch.category : this.inferExamCategory(ex);
-      }
-      if (ex.allowed_all === undefined) ex.allowed_all = true;
-      if (!ex.allowed_grades) ex.allowed_grades = [ex.grade || 12];
-      if (!ex.allowed_students) ex.allowed_students = [];
-      if (!ex.access_type) ex.access_type = ex.allowed_all ? 'all' : (ex.allowed_grades.length ? 'grade' : 'custom');
-    });
+
+    const examsList = storedExams ? JSON.parse(storedExams) : (INITIAL_SEED_DATA.exams || []).map(e => ({ ...e }));
+    examsList.forEach(ex => this.normalizeExamRecord(ex));
     this.state.exams = examsList;
 
     this.state.homeworks = storedHomeworks ? JSON.parse(storedHomeworks) : (INITIAL_SEED_DATA.homeworks || []).map(h => ({ ...h }));
     if (this.state.homeworks) {
-      this.state.homeworks.forEach(hw => {
-        delete hw.htmlDocKey;
-        if (!hw.pdfUrl || /^(https:\/\/raw\.githubusercontent\.com|tex:|idb_html:)/.test(hw.pdfUrl)) {
-          hw.pdfUrl = '';
-        }
-        if (!hw.grade) {
-          const seedHw = (INITIAL_SEED_DATA.homeworks || []).find(sh => sh.id === hw.id);
-          if (seedHw && seedHw.grade) {
-            hw.grade = seedHw.grade;
-          } else {
-            const txt = `${hw.title || ''} ${hw.fileName || ''}`;
-            const m = txt.match(/(?:Toán|Khối|Lớp)\s*(1[0-2]|[6-9])/i);
-            hw.grade = m ? parseInt(m[1], 10) : (/vào\s*(?:lớp\s*)?10/i.test(txt) ? 9 : 12);
-          }
-        }
-        if (!hw.accessType) hw.accessType = hw.allowedAll ? 'all' : 'selected';
-      });
+      this.state.homeworks.forEach(hw => this.normalizeHomeworkRecord(hw));
     }
 
     this.state.submissions = storedSubmissions ? JSON.parse(storedSubmissions) : (INITIAL_SEED_DATA.submissions || []).map(s => ({ ...s }));
 
-    // Tải cấu hình quyền riêng tư, xem điểm, so sánh Lớp/Khối & giám sát chống thoát màn hình khi thi
     const defaultSettings = {
       allowStudentViewOwnScore: true,
       allowStudentViewClassBoard: false,
@@ -905,30 +971,1000 @@ const App = {
       this.state.settings.warnOnExitExam = true;
     }
 
-    this.saveData();
+    this.saveData({ markAdminDirty: false, skipAutoPush: true });
   },
 
-  saveData() {
-    try {
-      if (this.state.admin) {
-        localStorage.setItem('thpt_admin_account', JSON.stringify({
-          ...this.state.admin,
-          role: 'admin',
-          email: this.ADMIN_RECOVERY_EMAIL
-        }));
+  markDeletedId(id) {
+    const clean = String(id || '').trim();
+    if (!clean) return;
+    if (!Array.isArray(this.state.deletedIds)) this.state.deletedIds = [];
+    if (!this.state.deletedIds.includes(clean)) {
+      this.state.deletedIds.push(clean);
+      if (this.state.deletedIds.length > 500) {
+        this.state.deletedIds = this.state.deletedIds.slice(-500);
       }
-      localStorage.setItem('thpt_students', JSON.stringify(this.state.students));
-      // Không lưu các chuỗi base64 khổng lồ vào localStorage
-      const safeExams = this.state.exams.map(e => ({
-        ...e,
-        pdf_url: (e.pdf_url && e.pdf_url.startsWith('data:')) ? '' : e.pdf_url
-      }));
-      localStorage.setItem('thpt_exams', JSON.stringify(safeExams));
-      localStorage.setItem('thpt_homeworks', JSON.stringify(this.state.homeworks));
-      localStorage.setItem('thpt_submissions', JSON.stringify(this.state.submissions));
-      localStorage.setItem('thpt_settings', JSON.stringify(this.state.settings));
-    } catch (e) {
-      console.warn('LocalStorage limit, continuing in memory.', e);
+    }
+  },
+
+  saveData(opts = {}) {
+    if (opts && opts.markAdminDirty) {
+      this.state.localStateUpdatedAt = Date.now();
+      this.state.unsyncedAdminChanges = true;
+    }
+    if (typeof localStorage !== 'undefined') {
+      try {
+        if (this.state.admin) {
+          localStorage.setItem('thpt_admin_account', JSON.stringify({
+            ...this.state.admin,
+            role: 'admin',
+            email: this.ADMIN_RECOVERY_EMAIL
+          }));
+        }
+        localStorage.setItem('thpt_students', JSON.stringify(this.state.students));
+        const safeExams = (this.state.exams || []).map(e => ({
+          ...e,
+          pdf_url: (e.pdf_url && e.pdf_url.startsWith('data:')) ? '' : e.pdf_url
+        }));
+        localStorage.setItem('thpt_exams', JSON.stringify(safeExams));
+        localStorage.setItem('thpt_homeworks', JSON.stringify(this.state.homeworks));
+        localStorage.setItem('thpt_submissions', JSON.stringify(this.state.submissions));
+        localStorage.setItem('thpt_settings', JSON.stringify(this.state.settings));
+        localStorage.setItem('thpt_deleted_ids', JSON.stringify(this.state.deletedIds || []));
+        localStorage.setItem('thpt_local_updated_at', String(this.state.localStateUpdatedAt || 0));
+        localStorage.setItem('thpt_unsynced_admin_changes', this.state.unsyncedAdminChanges ? '1' : '0');
+      } catch (e) {
+        console.warn('LocalStorage limit, continuing in memory.', e);
+      }
+    }
+    if (opts && opts.markAdminDirty && !opts.skipAutoPush) {
+      this.scheduleAutoCloudPush();
+    }
+  },
+
+  // --- ĐỒNG BỘ ĐÁM MÂY MÁY TÍNH GIÁO VIÊN <-> ĐIỆN THOẠI HỌC SINH (GITHUB REPO + GOOGLE APPS SCRIPT) ---
+  utf8ToBase64(str) {
+    const s = String(str ?? '');
+    if (typeof Buffer !== 'undefined') return Buffer.from(s, 'utf8').toString('base64');
+    const bytes = new TextEncoder().encode(s);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+  },
+
+  base64ToUtf8(b64) {
+    const clean = String(b64 || '').replace(/\s+/g, '');
+    if (!clean) return '';
+    if (typeof Buffer !== 'undefined') return Buffer.from(clean, 'base64').toString('utf8');
+    const bin = atob(clean);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
+  },
+
+  async blobToBase64(blob) {
+    const buf = await blob.arrayBuffer();
+    if (typeof Buffer !== 'undefined') return Buffer.from(buf).toString('base64');
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+  },
+
+  base64ToBlob(b64, mime = 'application/pdf') {
+    const clean = String(b64 || '').replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
+    const bin = typeof atob === 'function' ? atob(clean) : Buffer.from(clean, 'base64').toString('binary');
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+  },
+
+  normalizeGasUrl(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) {
+      return s.split('?')[0].trim();
+    }
+    if (/^AKfycb[A-Za-z0-9_-]{20,}$/.test(s)) {
+      return `https://script.google.com/macros/s/${s}/exec`;
+    }
+    return '';
+  },
+
+  getCloudConfig() {
+    let stored = {};
+    if (typeof localStorage !== 'undefined') {
+      try {
+        stored = JSON.parse(localStorage.getItem('thpt_cloud_sync_cfg') || '{}') || {};
+      } catch (_) {
+        stored = {};
+      }
+    } else if (this._memCloudCfg) {
+      stored = { ...this._memCloudCfg };
+    }
+    const repoRaw = String(stored.githubRepo || this.GITHUB_DEFAULT_REPO).trim()
+      .replace(/^https?:\/\/github\.com\//i, '')
+      .replace(/\.git$/i, '')
+      .replace(/^\/+|\/+$/g, '');
+    return {
+      githubToken: String(stored.githubToken || '').trim(),
+      githubRepo: repoRaw || this.GITHUB_DEFAULT_REPO,
+      githubBranch: String(stored.githubBranch || this.GITHUB_DEFAULT_BRANCH).trim() || 'main',
+      gasWebAppUrl: this.normalizeGasUrl(stored.gasWebAppUrl || '')
+    };
+  },
+
+  saveCloudConfig(partial = {}) {
+    const cur = this.getCloudConfig();
+    const next = {
+      githubToken: partial.githubToken !== undefined ? String(partial.githubToken || '').trim() : cur.githubToken,
+      githubRepo: partial.githubRepo !== undefined
+        ? (String(partial.githubRepo || '').trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '') || this.GITHUB_DEFAULT_REPO)
+        : cur.githubRepo,
+      githubBranch: partial.githubBranch !== undefined ? (String(partial.githubBranch || '').trim() || 'main') : cur.githubBranch,
+      gasWebAppUrl: partial.gasWebAppUrl !== undefined ? this.normalizeGasUrl(partial.gasWebAppUrl) : cur.gasWebAppUrl
+    };
+    this._memCloudCfg = { ...next };
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.setItem('thpt_cloud_sync_cfg', JSON.stringify(next)); } catch (_) {}
+    }
+    return next;
+  },
+
+  isAdminCloudPushReady() {
+    const cfg = this.getCloudConfig();
+    return Boolean(cfg.githubToken || cfg.gasWebAppUrl);
+  },
+
+  hasLocalOnlyPdf(item) {
+    if (!item || typeof item !== 'object') return false;
+    return [item.pdf_url, item.solution_pdf_url, item.pdfUrl]
+      .some(u => typeof u === 'string' && u.startsWith('idb:'));
+  },
+
+  getUnsyncedAdminExamsCount() {
+    const localPdfExams = (this.state.exams || []).filter(ex => this.hasLocalOnlyPdf(ex)).length;
+    if (localPdfExams > 0) return localPdfExams;
+    if (this.state.unsyncedAdminChanges && (this.state.exams || []).length > 0) {
+      return this.state.exams.length;
+    }
+    return 0;
+  },
+
+  getPdfCacheVersionMap() {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        return JSON.parse(localStorage.getItem('thpt_pdf_cache_ver') || '{}') || {};
+      } catch (_) {}
+    }
+    return this._memPdfCacheVer || {};
+  },
+
+  setPdfCacheVersion(key, verStr) {
+    if (!key) return;
+    const map = this.getPdfCacheVersionMap();
+    map[key] = String(verStr || '');
+    this._memPdfCacheVer = map;
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.setItem('thpt_pdf_cache_ver', JSON.stringify(map)); } catch (_) {}
+    }
+  },
+
+  async resolvePdfSourceUrl(rawUrl, storageKey = null) {
+    const urlStr = String(rawUrl || '').trim();
+    if (!urlStr && !storageKey) return '';
+    if (/^(blob:|data:application\/pdf)/i.test(urlStr)) return urlStr;
+
+    const derivedKey = storageKey || (urlStr.startsWith('idb:') ? urlStr.slice(4) : (urlStr.startsWith('gas:') ? urlStr.slice(4) : ''));
+    const verMap = this.getPdfCacheVersionMap();
+
+    // 1. Ưu tiên mở tức thì từ bộ nhớ đệm IndexedDB trên thiết bị nếu đúng phiên bản
+    if (derivedKey && typeof PDFStorage !== 'undefined' && typeof PDFStorage.getPdfBlobUrl === 'function') {
+      const expectedVer = (urlStr && !urlStr.startsWith('idb:')) ? urlStr : '';
+      if (!expectedVer || !verMap[derivedKey] || verMap[derivedKey] === expectedVer) {
+        const cachedBlobUrl = await PDFStorage.getPdfBlobUrl(derivedKey);
+        if (cachedBlobUrl) return cachedBlobUrl;
+      }
+    }
+
+    const cfg = this.getCloudConfig();
+
+    // 2. Tải file PDF từ kho lưu trữ trên GitHub (pdfs/...) và lưu đệm vào IndexedDB của điện thoại
+    if (/^(\.\/)?pdfs\//i.test(urlStr) && typeof fetch === 'function') {
+      const relPath = urlStr.replace(/^\.\//, '');
+      const candidates = [
+        `https://raw.githubusercontent.com/${cfg.githubRepo}/${cfg.githubBranch}/${relPath}`,
+        `./${relPath}`
+      ];
+      for (const candidate of candidates) {
+        try {
+          const res = await fetch(candidate);
+          if (res && res.ok) {
+            const rawBlob = await res.blob();
+            const pdfBlob = rawBlob.type === 'application/pdf' ? rawBlob : new Blob([rawBlob], { type: 'application/pdf' });
+            if (derivedKey && typeof PDFStorage !== 'undefined') {
+              await PDFStorage.savePdf(derivedKey, pdfBlob);
+              this.setPdfCacheVersion(derivedKey, urlStr);
+            }
+            if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+              return URL.createObjectURL(pdfBlob);
+            }
+            return candidate;
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 3. Tải file PDF từ Google Drive qua Google Apps Script (gas:... hoặc idb:... khi đã nối GAS)
+    if ((urlStr.startsWith('gas:') || urlStr.startsWith('idb:')) && cfg.gasWebAppUrl && derivedKey && typeof fetch === 'function') {
+      try {
+        const sep = cfg.gasWebAppUrl.includes('?') ? '&' : '?';
+        const res = await fetch(`${cfg.gasWebAppUrl}${sep}action=getPdf&key=${encodeURIComponent(derivedKey)}&t=${Date.now()}`);
+        const data = res && res.ok ? await res.json() : null;
+        if (data && data.success && data.base64) {
+          const pdfBlob = this.base64ToBlob(data.base64, 'application/pdf');
+          if (typeof PDFStorage !== 'undefined') {
+            await PDFStorage.savePdf(derivedKey, pdfBlob);
+            this.setPdfCacheVersion(derivedKey, urlStr);
+          }
+          if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+            return URL.createObjectURL(pdfBlob);
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!urlStr.startsWith('idb:') && !urlStr.startsWith('gas:')) {
+      return urlStr;
+    }
+    return '';
+  },
+
+  async downloadHomeworkPdf(hwId) {
+    const hw = (this.state.homeworks || []).find(h => h.id === hwId);
+    if (!hw) return;
+    const resolved = await this.resolvePdfSourceUrl(hw.pdfUrl, hw.id);
+    if (!resolved) {
+      this.notify('Không tải được file PDF của tài liệu này. Vui lòng bấm Đồng bộ hoặc kiểm tra kết nối mạng!', 'warning', 'Chưa tải được PDF');
+      return;
+    }
+    if (typeof document !== 'undefined') {
+      const a = document.createElement('a');
+      a.href = resolved;
+      a.download = hw.fileName || `${hw.id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+  },
+
+  mergeCloudState(cloud) {
+    if (!cloud || typeof cloud !== 'object') return { changed: false };
+
+    // Tự động khám phá gasWebAppUrl từ cloud_state.json để điện thoại học sinh không cần cài đặt thủ công
+    if (cloud.gasWebAppUrl) {
+      const discoveredGas = this.normalizeGasUrl(cloud.gasWebAppUrl);
+      if (discoveredGas && !this.getCloudConfig().gasWebAppUrl) {
+        this.saveCloudConfig({ gasWebAppUrl: discoveredGas });
+      }
+    }
+
+    const cloudUpdated = Number(cloud.updatedAt || 0);
+    const localUpdated = Number(this.state.localStateUpdatedAt || 0);
+    const hasCloudPayload = cloudUpdated > 0 || Array.isArray(cloud.exams) || Array.isArray(cloud.homeworks) || Array.isArray(cloud.submissions);
+    if (!hasCloudPayload) return { changed: false };
+
+    const mergedDeleted = [...new Set([
+      ...(Array.isArray(this.state.deletedIds) ? this.state.deletedIds : []),
+      ...(Array.isArray(cloud.deletedIds) ? cloud.deletedIds : [])
+    ].map(x => String(x || '').trim()).filter(Boolean))].slice(-500);
+    const delSet = new Set(mergedDeleted);
+    this.state.deletedIds = mergedDeleted;
+
+    const preferLocalAdmin = Boolean(this.state.unsyncedAdminChanges && localUpdated > cloudUpdated);
+
+    // 1. Gộp Đề thi (giữ nguyên các đề cục bộ chưa đồng bộ idb:... trên máy tính Giáo viên)
+    if (Array.isArray(cloud.exams)) {
+      const cloudExams = cloud.exams
+        .filter(e => e && e.id && !delSet.has(e.id))
+        .map(e => this.normalizeExamRecord({ ...e }));
+      const localExams = (this.state.exams || [])
+        .filter(e => e && e.id && !delSet.has(e.id))
+        .map(e => this.normalizeExamRecord({ ...e }));
+
+      if (preferLocalAdmin) {
+        const seen = new Set(localExams.map(e => e.id));
+        this.state.exams = [...localExams, ...cloudExams.filter(e => !seen.has(e.id))];
+      } else {
+        const cloudIds = new Set(cloudExams.map(e => e.id));
+        const unsyncedLocalOnly = localExams.filter(e => !cloudIds.has(e.id) && this.hasLocalOnlyPdf(e));
+        this.state.exams = [...unsyncedLocalOnly, ...cloudExams];
+      }
+    } else if (delSet.size > 0) {
+      this.state.exams = (this.state.exams || []).filter(e => e && !delSet.has(e.id));
+    }
+
+    // 2. Gộp Tài liệu & Chuyên đề
+    if (Array.isArray(cloud.homeworks)) {
+      const cloudHws = cloud.homeworks
+        .filter(h => h && h.id && !delSet.has(h.id))
+        .map(h => this.normalizeHomeworkRecord({ ...h }));
+      const localHws = (this.state.homeworks || [])
+        .filter(h => h && h.id && !delSet.has(h.id))
+        .map(h => this.normalizeHomeworkRecord({ ...h }));
+
+      if (preferLocalAdmin) {
+        const seen = new Set(localHws.map(h => h.id));
+        this.state.homeworks = [...localHws, ...cloudHws.filter(h => !seen.has(h.id))];
+      } else {
+        const cloudIds = new Set(cloudHws.map(h => h.id));
+        const unsyncedLocalOnly = localHws.filter(h => !cloudIds.has(h.id) && this.hasLocalOnlyPdf(h));
+        this.state.homeworks = [...unsyncedLocalOnly, ...cloudHws];
+      }
+    } else if (delSet.size > 0) {
+      this.state.homeworks = (this.state.homeworks || []).filter(h => h && !delSet.has(h.id));
+    }
+
+    // 3. Gộp Học sinh (ưu tiên bản ghi có updatedAt mới hơn)
+    if (Array.isArray(cloud.students) && cloud.students.length > 0) {
+      const localMap = new Map((this.state.students || []).filter(s => s && s.studentId && !delSet.has(s.studentId)).map(s => [s.studentId, s]));
+      const nextStudents = [];
+      const visited = new Set();
+
+      cloud.students.forEach(cs => {
+        if (!cs || !cs.studentId || delSet.has(cs.studentId)) return;
+        visited.add(cs.studentId);
+        const ls = localMap.get(cs.studentId);
+        if (!ls) {
+          nextStudents.push(this.normalizeStudentRecord({ ...cs }));
+        } else {
+          const cTime = Date.parse(cs.updatedAt || '') || 0;
+          const lTime = Date.parse(ls.updatedAt || '') || 0;
+          const chosen = (lTime > cTime || (lTime === cTime && preferLocalAdmin)) ? ls : cs;
+          nextStudents.push(this.normalizeStudentRecord({ ...chosen }));
+        }
+      });
+
+      if (preferLocalAdmin) {
+        localMap.forEach((ls, sid) => {
+          if (!visited.has(sid) && !delSet.has(sid)) {
+            nextStudents.push(this.normalizeStudentRecord({ ...ls }));
+          }
+        });
+      }
+      this.state.students = nextStudents;
+
+      if (this.state.currentUser && this.state.currentUser.role === 'student') {
+        const freshMe = this.state.students.find(s => s.studentId === this.state.currentUser.studentId);
+        if (freshMe) {
+          this.state.currentUser = { ...freshMe, role: 'student' };
+          if (typeof sessionStorage !== 'undefined') {
+            try { sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser)); } catch (_) {}
+          }
+        }
+      }
+    }
+
+    // 4. Gộp Cài đặt quyền xem điểm & giám sát
+    if (cloud.settings && typeof cloud.settings === 'object' && !preferLocalAdmin && cloudUpdated > 0) {
+      this.state.settings = { ...this.state.settings, ...cloud.settings };
+    }
+
+    // 5. Gộp Lượt nộp bài (Union theo id, ưu tiên bản đã chấm điểm Tự luận Phần IV)
+    if (Array.isArray(cloud.submissions)) {
+      const subMap = new Map();
+      (this.state.submissions || []).forEach(s => { if (s && s.id) subMap.set(s.id, s); });
+      cloud.submissions.forEach(cs => {
+        if (!cs || !cs.id) return;
+        const cur = subMap.get(cs.id);
+        if (!cur) {
+          subMap.set(cs.id, cs);
+        } else {
+          const incGraded = cs.answers && cs.answers.part4Scores && Object.keys(cs.answers.part4Scores).length > 0;
+          const curGraded = cur.answers && cur.answers.part4Scores && Object.keys(cur.answers.part4Scores).length > 0;
+          if (incGraded && !curGraded) subMap.set(cs.id, cs);
+        }
+      });
+      this.state.submissions = Array.from(subMap.values()).sort((a, b) =>
+        String(b.submittedAt || '').localeCompare(String(a.submittedAt || ''))
+      );
+    }
+
+    if (!preferLocalAdmin && cloudUpdated >= localUpdated) {
+      this.state.localStateUpdatedAt = Math.max(localUpdated, cloudUpdated);
+      if (!(this.state.exams || []).some(e => this.hasLocalOnlyPdf(e))) {
+        this.state.unsyncedAdminChanges = false;
+      }
+    }
+
+    this.saveData({ markAdminDirty: false, skipAutoPush: true });
+    return { changed: true };
+  },
+
+  async fetchRepoCloudState(cfg) {
+    if (typeof fetch !== 'function') return null;
+    const now = Date.now();
+    const candidates = [];
+
+    // Nguồn 1: File tĩnh cùng domain (không giới hạn lượt truy cập khi cả lớp cùng mở)
+    if (typeof window !== 'undefined' && /^https?:$/i.test(window.location?.protocol || '')) {
+      candidates.push(
+        fetch(`./data/cloud_state.json?t=${now}`, { cache: 'no-store' })
+          .then(r => (r && r.ok ? r.json() : null))
+          .catch(() => null)
+      );
+    }
+
+    // Nguồn 2: GitHub Contents API (cập nhật tức thì 0 giây ngay sau khi Giáo viên bấm xuất bản đề)
+    if (cfg.githubRepo) {
+      const ghHeaders = cfg.githubToken ? { Authorization: `Bearer ${cfg.githubToken}` } : undefined;
+      candidates.push(
+        fetch(`https://api.github.com/repos/${cfg.githubRepo}/contents/data/cloud_state.json?ref=${encodeURIComponent(cfg.githubBranch)}`, ghHeaders ? { headers: ghHeaders, cache: 'no-store' } : { cache: 'no-store' })
+          .then(async (r) => {
+            if (!r || !r.ok) return null;
+            const meta = await r.json();
+            if (meta && meta.content) return JSON.parse(this.base64ToUtf8(meta.content));
+            return null;
+          })
+          .catch(() => null)
+      );
+    }
+
+    const results = (await Promise.all(candidates)).filter(x => x && typeof x === 'object');
+    if (results.length > 0) {
+      results.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+      return results[0];
+    }
+
+    if (cfg.githubRepo) {
+      try {
+        const rawRes = await fetch(`https://raw.githubusercontent.com/${cfg.githubRepo}/${cfg.githubBranch}/data/cloud_state.json?t=${now}`);
+        if (rawRes && rawRes.ok) return await rawRes.json();
+      } catch (_) {}
+    }
+    return null;
+  },
+
+  async fetchGasCloudState(gasUrl) {
+    if (!gasUrl || typeof fetch !== 'function') return null;
+    try {
+      const sep = gasUrl.includes('?') ? '&' : '?';
+      const res = await fetch(`${gasUrl}${sep}action=getState&t=${Date.now()}`, { method: 'GET', redirect: 'follow' });
+      if (!res || !res.ok) return null;
+      const data = await res.json();
+      return (data && data.success) ? data : null;
+    } catch (_) {
+      return null;
+    }
+  },
+
+  canSafelyAutoReRender() {
+    if (typeof document === 'undefined' || this.state.activeExam) return false;
+    if (document.querySelector('[id$="Modal"], #appSystemDialog')) return false;
+    const active = document.activeElement;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return false;
+    return true;
+  },
+
+  async syncFromCloud({ silent = false, manual = false } = {}) {
+    if (typeof fetch !== 'function') return false;
+    if (this._syncFromCloudPromise) return this._syncFromCloudPromise;
+
+    this.state.cloudSyncStatus = 'syncing';
+    if (manual && typeof document !== 'undefined') this.render();
+
+    this._syncFromCloudPromise = (async () => {
+      try {
+        const prevExamCount = (this.state.exams || []).length;
+        const cfg = this.getCloudConfig();
+        const repoSnap = await this.fetchRepoCloudState(cfg);
+        let mergedAny = false;
+
+        if (repoSnap) {
+          const r1 = this.mergeCloudState(repoSnap);
+          if (r1.changed) mergedAny = true;
+        }
+
+        const activeGasUrl = this.getCloudConfig().gasWebAppUrl;
+        if (activeGasUrl) {
+          const gasSnap = await this.fetchGasCloudState(activeGasUrl);
+          if (gasSnap) {
+            const r2 = this.mergeCloudState(gasSnap);
+            if (r2.changed) mergedAny = true;
+          }
+          await this.flushPendingSubmissions();
+        }
+
+        this.state.cloudLastSyncedAt = Date.now();
+        this.state.cloudSyncStatus = 'ok';
+
+        if (manual) {
+          if (typeof document !== 'undefined' && !this.state.activeExam) this.render();
+          const curCount = (this.state.exams || []).length;
+          const diff = curCount - prevExamCount;
+          this.notify(
+            diff > 0
+              ? `Đã tải thêm ${diff} đề thi mới! Hệ thống hiện có ${curCount} đề thi.`
+              : `Đã cập nhật dữ liệu mới nhất (${curCount} đề thi trên hệ thống).`,
+            'success',
+            'Đồng bộ dữ liệu hoàn tất'
+          );
+        } else if (mergedAny && !silent) {
+          if (this.canSafelyAutoReRender()) this.render();
+        } else if (mergedAny && this.canSafelyAutoReRender()) {
+          this.render();
+        }
+        return true;
+      } catch (err) {
+        this.state.cloudSyncStatus = 'error';
+        this.state.cloudSyncMessage = String(err?.message || 'Lỗi kết nối đồng bộ');
+        if (manual) {
+          if (typeof document !== 'undefined' && !this.state.activeExam) this.render();
+          this.notify('Không thể kết nối máy chủ đồng bộ. Vui lòng kiểm tra mạng Internet và thử lại!', 'warning', 'Chưa tải được dữ liệu mới');
+        }
+        return false;
+      } finally {
+        this._syncFromCloudPromise = null;
+      }
+    })();
+
+    return this._syncFromCloudPromise;
+  },
+
+  async uploadPdfToGithub(storageKey, blob, cfg) {
+    const safeKey = String(storageKey || 'exam').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const relPath = `pdfs/${safeKey}_${Date.now()}.pdf`;
+    const b64 = await this.blobToBase64(blob);
+    const res = await fetch(`https://api.github.com/repos/${cfg.githubRepo}/contents/${relPath}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${cfg.githubToken}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: `Publish PDF ${safeKey}`,
+        content: b64,
+        branch: cfg.githubBranch
+      })
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.message || `GitHub PDF upload HTTP ${res.status}`);
+    }
+    return relPath;
+  },
+
+  async uploadPdfToGas(storageKey, fileName, blob, gasUrl) {
+    const b64 = await this.blobToBase64(blob);
+    const res = await fetch(gasUrl, {
+      method: 'POST',
+      redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'uploadPdf',
+        key: storageKey,
+        fileName: fileName || `${storageKey}.pdf`,
+        base64: b64
+      })
+    });
+    const data = res && res.ok ? await res.json() : null;
+    if (!data || !data.success) {
+      throw new Error((data && data.error) || 'Không tải được file PDF lên Google Drive');
+    }
+    return `gas:${storageKey}`;
+  },
+
+  scheduleAutoCloudPush() {
+    if (!this.isAdminCloudPushReady() || typeof setTimeout !== 'function') return;
+    if (this._autoCloudPushTimer) clearTimeout(this._autoCloudPushTimer);
+    this._autoCloudPushTimer = setTimeout(() => {
+      this._autoCloudPushTimer = null;
+      this.pushAdminStateToCloud({ manual: false });
+    }, 600);
+  },
+
+  async pushAdminStateToCloud({ manual = false } = {}) {
+    const cfg = this.getCloudConfig();
+    if (!cfg.githubToken && !cfg.gasWebAppUrl) {
+      if (manual) this.showCloudSyncModal();
+      return false;
+    }
+    if (this._pushCloudPromise) return this._pushCloudPromise;
+
+    this.state.cloudSyncStatus = 'syncing';
+    if (manual && typeof document !== 'undefined') this.render();
+
+    this._pushCloudPromise = (async () => {
+      try {
+        // 1. Tự động tải mọi file PDF cục bộ (IndexedDB) chưa đồng bộ lên GitHub và/hoặc Google Drive
+        const uploadSlotIfNeeded = async (currentUrl, storageKey, fileName) => {
+          const cur = String(currentUrl || '');
+          const needsGithub = Boolean(cfg.githubToken) && (cur.startsWith('idb:') || cur.startsWith('gas:'));
+          const needsGas = Boolean(cfg.gasWebAppUrl) && cur.startsWith('idb:');
+          if (!needsGithub && !needsGas) return cur;
+          if (typeof PDFStorage === 'undefined' || typeof PDFStorage.getPdfBlob !== 'function') return cur;
+          const blob = await PDFStorage.getPdfBlob(storageKey);
+          if (!blob) return cur;
+
+          let nextUrl = cur;
+          if (cfg.githubToken && needsGithub) {
+            nextUrl = await this.uploadPdfToGithub(storageKey, blob, cfg);
+            this.setPdfCacheVersion(storageKey, nextUrl);
+          }
+          if (cfg.gasWebAppUrl && (needsGas || cur.startsWith('idb:'))) {
+            const gasRef = await this.uploadPdfToGas(storageKey, fileName, blob, cfg.gasWebAppUrl);
+            if (!cfg.githubToken) {
+              nextUrl = gasRef;
+              this.setPdfCacheVersion(storageKey, nextUrl);
+            }
+          }
+          return nextUrl;
+        };
+
+        for (const ex of (this.state.exams || [])) {
+          if (ex.pdf_url) {
+            ex.pdf_url = await uploadSlotIfNeeded(ex.pdf_url, ex.id, ex.pdf_name || `${ex.id}.pdf`);
+          }
+          if (ex.solution_pdf_url) {
+            ex.solution_pdf_url = await uploadSlotIfNeeded(ex.solution_pdf_url, `${ex.id}_sol`, ex.solution_pdf_name || `${ex.id}_sol.pdf`);
+          }
+        }
+
+        for (const hw of (this.state.homeworks || [])) {
+          if (hw.pdfUrl) {
+            hw.pdfUrl = await uploadSlotIfNeeded(hw.pdfUrl, hw.id, hw.fileName || `${hw.id}.pdf`);
+          }
+        }
+
+        const nowTs = Date.now();
+        this.state.localStateUpdatedAt = nowTs;
+        const safeExams = (this.state.exams || []).map(e => ({
+          ...e,
+          pdf_url: (e.pdf_url && e.pdf_url.startsWith('data:')) ? '' : e.pdf_url
+        }));
+
+        // 2. Xuất bản thẳng lên kho GitHub (data/cloud_state.json) -> Điện thoại mở web là nhận đề ngay
+        if (cfg.githubToken) {
+          const statePath = 'data/cloud_state.json';
+          let currentSha = '';
+          const getRes = await fetch(`https://api.github.com/repos/${cfg.githubRepo}/contents/${statePath}?ref=${encodeURIComponent(cfg.githubBranch)}`, {
+            headers: {
+              Authorization: `Bearer ${cfg.githubToken}`,
+              Accept: 'application/vnd.github+json'
+            },
+            cache: 'no-store'
+          });
+          if (getRes.ok) {
+            const meta = await getRes.json();
+            currentSha = meta.sha || '';
+          }
+
+          const payloadJson = JSON.stringify({
+            version: 1,
+            updatedAt: nowTs,
+            gasWebAppUrl: cfg.gasWebAppUrl || '',
+            deletedIds: this.state.deletedIds || [],
+            exams: safeExams,
+            homeworks: this.state.homeworks || [],
+            students: this.state.students || [],
+            settings: this.state.settings || {}
+          }, null, 2);
+
+          const putBody = {
+            message: `Sync exams & state (${safeExams.length} exams)`,
+            content: this.utf8ToBase64(payloadJson),
+            branch: cfg.githubBranch
+          };
+          if (currentSha) putBody.sha = currentSha;
+
+          const putRes = await fetch(`https://api.github.com/repos/${cfg.githubRepo}/contents/${statePath}`, {
+            method: 'PUT',
+            headers: {
+              Authorization: `Bearer ${cfg.githubToken}`,
+              Accept: 'application/vnd.github+json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(putBody)
+          });
+          if (!putRes.ok) {
+            const errJson = await putRes.json().catch(() => ({}));
+            throw new Error(errJson.message || `GitHub Sync HTTP ${putRes.status}`);
+          }
+        }
+
+        // 3. Đồng bộ 2 chiều qua Google Apps Script (nhận thêm các lượt nộp bài từ Điện thoại Học sinh)
+        if (cfg.gasWebAppUrl) {
+          const gasRes = await fetch(cfg.gasWebAppUrl, {
+            method: 'POST',
+            redirect: 'follow',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'syncAdminState',
+              updatedAt: nowTs,
+              deletedIds: this.state.deletedIds || [],
+              exams: safeExams,
+              homeworks: this.state.homeworks || [],
+              students: this.state.students || [],
+              settings: this.state.settings || {},
+              submissions: this.state.submissions || []
+            })
+          });
+          const gasData = gasRes && gasRes.ok ? await gasRes.json() : null;
+          if (!gasData || !gasData.success) {
+            throw new Error((gasData && gasData.error) || 'Google Apps Script trả về lỗi đồng bộ');
+          }
+          if (Array.isArray(gasData.submissions)) {
+            this.mergeCloudState({ updatedAt: nowTs, submissions: gasData.submissions });
+          }
+        }
+
+        this.state.unsyncedAdminChanges = false;
+        this.state.cloudLastSyncedAt = nowTs;
+        this.state.cloudSyncStatus = 'ok';
+        this.state.cloudSyncMessage = '';
+        this.saveData({ markAdminDirty: false, skipAutoPush: true });
+
+        if (typeof document !== 'undefined' && !this.state.activeExam) {
+          document.getElementById('cloudSyncModal')?.remove();
+          this.render();
+        }
+        if (manual) {
+          this.notify(
+            `Đã đồng bộ thành công ${safeExams.length} đề thi và ${this.state.homeworks.length} tài liệu lên Điện thoại! Học sinh mở web hoặc App trên điện thoại sẽ thấy đề ngay lập tức.`,
+            'success',
+            'Đồng bộ lên Điện thoại thành công'
+          );
+        }
+        return true;
+      } catch (err) {
+        this.state.cloudSyncStatus = 'error';
+        this.state.cloudSyncMessage = String(err?.message || 'Lỗi đồng bộ');
+        if (typeof document !== 'undefined' && !this.state.activeExam && !document.getElementById('cloudSyncModal')) {
+          this.render();
+        }
+        if (manual) {
+          this.notify(
+            `Chưa đồng bộ được lên đám mây: ${this.state.cloudSyncMessage}. Vui lòng kiểm tra lại Token GitHub hoặc đường dẫn Google Apps Script (/exec)!`,
+            'error',
+            'Lỗi đồng bộ lên Điện thoại'
+          );
+        }
+        return false;
+      } finally {
+        this._pushCloudPromise = null;
+      }
+    })();
+
+    return this._pushCloudPromise;
+  },
+
+  getPendingSubmissionIds() {
+    if (typeof localStorage === 'undefined') return [];
+    try {
+      return JSON.parse(localStorage.getItem('thpt_pending_submissions') || '[]') || [];
+    } catch (_) {
+      return [];
+    }
+  },
+
+  setPendingSubmissionIds(ids) {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem('thpt_pending_submissions', JSON.stringify([...new Set(ids)].slice(-200)));
+    } catch (_) {}
+  },
+
+  async pushStudentSubmissionToCloud(submission, studentUpdate = null) {
+    const gasUrl = this.getCloudConfig().gasWebAppUrl;
+    if (!gasUrl || typeof fetch !== 'function') return false;
+    try {
+      const res = await fetch(gasUrl, {
+        method: 'POST',
+        redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'submitExam',
+          submission: submission || null,
+          studentUpdate: studentUpdate || null
+        })
+      });
+      const data = res && res.ok ? await res.json() : null;
+      if (data && data.success) {
+        if (submission && submission.id) {
+          this.setPendingSubmissionIds(this.getPendingSubmissionIds().filter(id => id !== submission.id));
+        }
+        return true;
+      }
+    } catch (_) {}
+
+    if (submission && submission.id) {
+      this.setPendingSubmissionIds([...this.getPendingSubmissionIds(), submission.id]);
+    }
+    return false;
+  },
+
+  async flushPendingSubmissions() {
+    const gasUrl = this.getCloudConfig().gasWebAppUrl;
+    if (!gasUrl) return;
+    const pendingIds = this.getPendingSubmissionIds();
+    if (!pendingIds.length) return;
+    for (const subId of pendingIds) {
+      const sub = (this.state.submissions || []).find(s => s.id === subId);
+      if (sub) {
+        await this.pushStudentSubmissionToCloud(sub);
+      }
+    }
+  },
+
+  async copyGasScriptCode() {
+    const btn = document.getElementById('copyGasCodeBtn');
+    try {
+      const res = await fetch('./google-apps-script/Code.gs', { cache: 'no-cache' });
+      const code = await res.text();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(code);
+      }
+      if (btn) {
+        btn.innerHTML = '<i class="fa-solid fa-check"></i><span>Đã sao chép mã Code.gs!</span>';
+        setTimeout(() => {
+          if (document.body.contains(btn)) {
+            btn.innerHTML = '<i class="fa-regular fa-copy"></i><span>Sao chép mã Code.gs</span>';
+          }
+        }, 2500);
+      }
+    } catch (_) {
+      this.notify('Bạn có thể mở trực tiếp tệp google-apps-script/Code.gs trong thư mục mã nguồn để sao chép.', 'info', 'Sao chép Code.gs');
+    }
+  },
+
+  showCloudSyncModal() {
+    document.getElementById('cloudSyncModal')?.remove();
+    const cfg = this.getCloudConfig();
+    const unsyncedCount = this.getUnsyncedAdminExamsCount();
+    const isConnected = Boolean(cfg.githubToken || cfg.gasWebAppUrl);
+
+    const modal = document.createElement('div');
+    modal.id = 'cloudSyncModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="dialog-card bg-white rounded-3xl max-w-2xl w-full max-h-[92dvh] border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/90 via-white to-emerald-50/60 flex items-center justify-between gap-3 shrink-0">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
+              <i class="fa-solid fa-cloud-arrow-up text-lg"></i>
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-sm sm:text-base font-extrabold text-slate-900 truncate">Đồng Bộ Đề Thi &amp; File PDF Giữa Máy Tính và Điện Thoại</h3>
+              <p class="text-[11px] sm:text-xs text-slate-500 truncate">Thiết lập 1 lần duy nhất • Tự động đẩy mọi đề thi, PDF và nhận bài nộp từ điện thoại</p>
+            </div>
+          </div>
+          <button type="button" onclick="document.getElementById('cloudSyncModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer shrink-0">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        <form onsubmit="event.preventDefault(); App.saveCloudSyncModalSubmit();" class="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs text-slate-700">
+          <div class="p-3.5 rounded-2xl border ${unsyncedCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-900' : (isConnected ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-indigo-50 border-indigo-200 text-indigo-900')} flex items-start gap-3">
+            <i class="fa-solid ${unsyncedCount > 0 ? 'fa-triangle-exclamation text-amber-600' : (isConnected ? 'fa-circle-check text-emerald-600' : 'fa-circle-info text-indigo-600')} text-base mt-0.5 shrink-0"></i>
+            <div class="space-y-1 leading-relaxed">
+              ${unsyncedCount > 0 ? `
+                <div class="font-extrabold">Đang có ${unsyncedCount} đề thi lưu cục bộ trên trình duyệt máy tính này chưa đẩy lên Điện thoại!</div>
+                <div>Trình duyệt web lưu đề mặc định trong bộ nhớ máy tính (IndexedDB). Hãy kết nối 1 trong 2 kênh dưới đây (hoặc cả 2) rồi bấm <strong>Lưu &amp; Đồng Bộ Ngay</strong> — toàn bộ đề và file PDF hiện có sẽ tự động chuyển lên Điện thoại mà <strong>không cần chọn lại file PDF</strong>.</div>
+              ` : `
+                <div class="font-extrabold">${isConnected ? 'Đã kết nối đồng bộ Điện thoại!' : 'Chưa kết nối kênh đồng bộ đám mây'}</div>
+                <div>Mỗi khi Giáo viên thêm/sửa/xóa đề thi hoặc tài liệu trên máy tính, hệ thống sẽ tự động cập nhật sang mọi điện thoại của học sinh.</div>
+              `}
+            </div>
+          </div>
+
+          <!-- Kênh 1: GitHub Repo Direct Publish -->
+          <div class="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="font-extrabold text-slate-900 text-xs sm:text-sm flex items-center gap-2">
+                <i class="fa-brands fa-github text-base text-slate-900"></i>
+                <span>Kênh 1: Xuất bản trực tiếp lên Web GitHub (Khuyên dùng)</span>
+              </div>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">Điện thoại 0 cần cài đặt</span>
+            </div>
+            <p class="text-[11px] text-slate-500 leading-relaxed">
+              Dán <strong>GitHub Personal Access Token</strong> (quyền <code class="px-1 py-0.5 rounded bg-white border">repo</code> hoặc <code class="px-1 py-0.5 rounded bg-white border">Contents: Read &amp; Write</code> của kho <code class="font-mono font-bold">${cfg.githubRepo}</code>). Token chỉ lưu riêng trên máy tính của Giáo viên, không bao giờ lộ ra ngoài.
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div>
+                <label class="block text-[11px] font-bold text-slate-700 mb-1">Kho GitHub (Owner/Repo)</label>
+                <input type="text" id="cloudGithubRepoInput" value="${cfg.githubRepo}" placeholder="thanhchi113/thi-thu-toan" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono text-xs font-bold text-slate-800 focus:border-indigo-600 outline-none">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="block text-[11px] font-bold text-slate-700 mb-1">GitHub Token (ghp_... hoặc github_pat_...)</label>
+                <div class="relative">
+                  <input type="password" id="cloudGithubTokenInput" value="${cfg.githubToken}" placeholder="Dán GitHub Token vào đây..." autocomplete="off" class="w-full pl-3 pr-9 py-2 rounded-xl border border-slate-300 bg-white font-mono text-xs focus:border-indigo-600 outline-none">
+                  <button type="button" onclick="App.toggleInputPassword('cloudGithubTokenInput', 'cloudGhTokEye')" class="absolute inset-y-0 right-0 px-3 text-slate-400 hover:text-indigo-600 cursor-pointer">
+                    <i id="cloudGhTokEye" class="fa-solid fa-eye text-xs"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Kênh 2: Google Apps Script 2 chiều -->
+          <div class="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="font-extrabold text-slate-900 text-xs sm:text-sm flex items-center gap-2">
+                <i class="fa-solid fa-cloud-bolt text-indigo-600 text-sm"></i>
+                <span>Kênh 2: Google Apps Script (Đồng bộ 2 chiều cả Bài Nộp từ ĐT)</span>
+              </div>
+              <button type="button" id="copyGasCodeBtn" onclick="App.copyGasScriptCode()" class="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[11px] inline-flex items-center gap-1.5 cursor-pointer transition">
+                <i class="fa-regular fa-copy"></i><span>Sao chép mã Code.gs</span>
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-500 leading-relaxed">
+              Lưu không giới hạn PDF trên Google Drive cá nhân và <strong>tự động thu bài nộp từ điện thoại học sinh</strong> về máy tính Giáo viên + Google Trang Tính: Mở <code class="font-mono font-bold">script.new</code> &rarr; dán mã <code class="font-mono font-bold">Code.gs</code> &rarr; <strong>Triển khai &rarr; Ứng dụng web</strong> (Thực thi: <em>Tôi</em>, Quyền truy cập: <em>Bất kỳ ai</em>) &rarr; dán link <code class="font-mono">/exec</code> vào ô dưới:
+            </p>
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 mb-1">URL Google Apps Script Web App (kết thúc bằng /exec)</label>
+              <input type="text" id="cloudGasUrlInput" value="${cfg.gasWebAppUrl}" placeholder="https://script.google.com/macros/s/AKfycb.../exec" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono text-xs focus:border-indigo-600 outline-none">
+            </div>
+          </div>
+
+          <div class="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <button type="button" onclick="App.syncFromCloud({ manual: true })" class="ui-btn bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200">
+              <i class="fa-solid fa-cloud-arrow-down text-indigo-600"></i>
+              <span>Tải dữ liệu từ Đám mây về</span>
+            </button>
+            <div class="flex items-center gap-2 ml-auto">
+              <button type="button" onclick="document.getElementById('cloudSyncModal')?.remove()" class="ui-btn bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 px-3.5">
+                Đóng
+              </button>
+              <button type="submit" id="saveAndPushCloudBtn" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-4">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+                <span>Lưu &amp; Đồng Bộ Lên Điện Thoại</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  },
+
+  async saveCloudSyncModalSubmit() {
+    const repo = document.getElementById('cloudGithubRepoInput')?.value || '';
+    const token = document.getElementById('cloudGithubTokenInput')?.value || '';
+    const gasRaw = document.getElementById('cloudGasUrlInput')?.value || '';
+    const normGas = this.normalizeGasUrl(gasRaw);
+
+    if (gasRaw.trim() && !normGas) {
+      this.notify('Đường dẫn Google Apps Script không hợp lệ! Vui lòng dán URL kết thúc bằng /exec.', 'warning', 'Sai định dạng URL');
+      return;
+    }
+
+    const saved = this.saveCloudConfig({
+      githubRepo: repo,
+      githubToken: token,
+      gasWebAppUrl: normGas
+    });
+
+    if (!saved.githubToken && !saved.gasWebAppUrl) {
+      document.getElementById('cloudSyncModal')?.remove();
+      this.render();
+      this.notify('Đã xóa cấu hình kết nối đám mây trên trình duyệt này.', 'info', 'Đã lưu cài đặt');
+      return;
+    }
+
+    const btn = document.getElementById('saveAndPushCloudBtn');
+    const origBtnHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Đang tải đề &amp; PDF lên Điện thoại...</span>';
+    }
+    const ok = await this.pushAdminStateToCloud({ manual: true });
+    if (!ok && btn && document.body.contains(btn)) {
+      btn.disabled = false;
+      btn.innerHTML = origBtnHtml;
     }
   },
 
@@ -1100,6 +2136,7 @@ const App = {
     this.state.currentUser = { role: 'student', ...s };
     sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
     this.render();
+    this.syncFromCloud({ silent: true });
     return true;
   },
 
@@ -1111,6 +2148,7 @@ const App = {
       this.state.currentUser = { ...adminAcc, role: 'admin', email: this.ADMIN_RECOVERY_EMAIL };
       sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
       this.render();
+      this.syncFromCloud({ silent: true });
       return true;
     }
     this.notify('Tên đăng nhập hoặc mật khẩu Quản trị không chính xác!', 'error', 'Đăng nhập thất bại');
@@ -2134,10 +3172,16 @@ const App = {
     }
   },
 
-  handleStudentLogin() {
+  async handleStudentLogin() {
     const idEl = document.getElementById('loginStudentId');
     const id = this.forceUppercaseInput(idEl);
     const pass = document.getElementById('loginStudentPass').value;
+    const matchedLocal = this.state.students.some(
+      x => x.studentId.trim().toUpperCase() === id.trim().toUpperCase() && x.password === pass
+    );
+    if (!matchedLocal) {
+      await this.syncFromCloud({ silent: true });
+    }
     this.loginStudent(id, pass);
   },
 
@@ -2251,11 +3295,17 @@ const App = {
               </div>
             </div>
 
-            <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div class="flex items-center gap-1 sm:gap-2 shrink-0">
               <!-- Nút Về Trang Chủ (ẩn trên điện thoại vì bấm vào logo đã về trang chủ) -->
               <button type="button" onclick="App.goHome()" class="hidden md:inline-flex ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-xs" title="Về trang chủ">
                 <i class="fa-solid fa-house"></i>
                 <span>Trang chủ</span>
+              </button>
+
+              <!-- Nút Tải đề thi & tài liệu mới nhất cho điện thoại -->
+              <button type="button" id="studentSyncBtn" onclick="App.syncFromCloud({ manual: true })" class="ui-btn-icon sm:w-auto sm:px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold border border-emerald-200 shadow-xs sm:gap-1.5" title="Tải đề thi & tài liệu mới nhất từ Giáo viên">
+                <i class="fa-solid fa-arrows-rotate ${this.state.cloudSyncStatus === 'syncing' ? 'fa-spin' : ''} text-emerald-600"></i>
+                <span class="hidden sm:inline">Tải đề mới</span>
               </button>
 
               <!-- Nút Xem trước & Chọn Bố cục Đề PDF + Ô điền đáp án ngay trên Trang Chủ -->
@@ -2271,7 +3321,7 @@ const App = {
               </button>
 
               <!-- Nút Chuyển Nhanh Sáng/Tối & Bảng Màu -->
-              <button type="button" id="studentQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn-icon bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-xs" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
+              <button type="button" id="studentQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-xs" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
                 <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
               </button>
               <button type="button" id="studentThemeBtn" onclick="App.showThemeModal()" class="ui-btn-icon md:w-auto md:px-3 bg-white hover:bg-indigo-50 text-slate-700 text-xs font-bold border border-slate-200 shadow-xs md:gap-1.5" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
@@ -2279,8 +3329,8 @@ const App = {
                 <span class="hidden md:inline">Giao diện</span>
               </button>
 
-              <!-- Nút Hồ Sơ Cá Nhân / Đổi Mật Khẩu -->
-              <button type="button" onclick="App.showStudentSelfEditModal()" class="ui-btn-icon lg:w-auto lg:px-3 bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-bold border border-slate-200 shadow-xs lg:gap-1.5" title="Hồ sơ cá nhân & Đổi mật khẩu">
+              <!-- Nút Hồ Sơ Cá Nhân / Đổi Mật Khẩu (trên điện thoại đã có nút lớn ngay dưới banner) -->
+              <button type="button" onclick="App.showStudentSelfEditModal()" class="hidden sm:inline-flex ui-btn-icon lg:w-auto lg:px-3 bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-bold border border-slate-200 shadow-xs lg:gap-1.5" title="Hồ sơ cá nhân & Đổi mật khẩu">
                 <i class="fa-solid fa-user-pen text-indigo-600"></i>
                 <span class="hidden lg:inline">Hồ sơ cá nhân</span>
               </button>
@@ -2411,6 +3461,10 @@ const App = {
                   </h3>
                   <p class="text-xs text-slate-500 mt-0.5">Phân chia theo Khối 6 – 12 &amp; Phân loại (GK1, CK1, GK2, CK2, Đề thi vào 10, Thi thử THPT QG)</p>
                 </div>
+                <button type="button" onclick="App.syncFromCloud({ manual: true })" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs shrink-0 self-start sm:self-auto">
+                  <i class="fa-solid fa-arrows-rotate ${this.state.cloudSyncStatus === 'syncing' ? 'fa-spin' : ''}"></i>
+                  <span>Tải đề mới nhất</span>
+                </button>
               </div>
 
               <!-- Thanh Phân Khối 6-12, Phân Loại Đề & Tìm Kiếm -->
@@ -2922,10 +3976,32 @@ const App = {
     });
 
     if (examsSource.length === 0) {
+      const allExams = Array.isArray(this.state.exams) ? this.state.exams : [];
+      const activeAll = allExams.filter(e => e && e.is_active);
+      const stGrade = u ? this.getStudentGrade(u) : 12;
+      let emptyTitle = 'Hiện tại chưa có đề thi nào được tải về thiết bị này.';
+      let emptyHint = 'Nếu Giáo viên vừa đăng đề trên máy tính, hãy bấm nút "Tải Đề Thi Mới" bên dưới (hoặc nhắc Giáo viên bấm nút "Đồng bộ ĐT" trên Cổng Giáo Viên).';
+      if (activeAll.length > 0) {
+        const openGrades = [...new Set(activeAll.map(e => 'Khối ' + (e.grade || 12)))].join(', ');
+        emptyTitle = `Hệ thống hiện có ${activeAll.length} đề thi đang mở (${openGrades}), nhưng chưa mở quyền cho tài khoản ${u?.studentId || ''} (Khối ${stGrade} • Lớp ${u?.className || '12'}).`;
+        emptyHint = 'Nhờ Giáo viên kiểm tra mục Phân quyền đề thi (chọn Tất cả học sinh hoặc đúng Khối lớp của bạn) rồi bấm Tải Đề Thi Mới.';
+      } else if (allExams.length > 0) {
+        emptyTitle = `Hệ thống hiện có ${allExams.length} đề thi nhưng Giáo viên đang tạm đóng, chưa mở giờ làm bài.`;
+        emptyHint = 'Bấm nút bên dưới để kiểm tra xem Giáo viên đã mở đề thi hay chưa.';
+      }
       return `
-        <div class="bg-slate-50 rounded-2xl p-8 text-center border border-dashed border-slate-200 text-slate-500 text-xs">
-          <i class="fa-solid fa-lock text-2xl text-slate-300 mb-2"></i>
-          <p class="font-semibold">Hiện tại chưa có bài kiểm tra nào được mở quyền cho bạn.</p>
+        <div class="bg-slate-50 rounded-2xl p-7 sm:p-8 text-center border border-dashed border-slate-200 text-slate-600 text-xs space-y-2.5">
+          <div class="w-11 h-11 mx-auto rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center">
+            <i class="fa-solid ${activeAll.length > 0 ? 'fa-user-lock' : 'fa-cloud-arrow-down'} text-lg"></i>
+          </div>
+          <p class="font-bold text-slate-800 max-w-xl mx-auto leading-relaxed">${emptyTitle}</p>
+          <p class="text-[11px] text-slate-500 max-w-lg mx-auto leading-relaxed">${emptyHint}</p>
+          <div class="pt-1">
+            <button type="button" id="studentEmptySyncBtn" onclick="App.syncFromCloud({ manual: true })" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white px-4 shadow-sm">
+              <i class="fa-solid fa-arrows-rotate ${this.state.cloudSyncStatus === 'syncing' ? 'fa-spin' : ''}"></i>
+              <span>Tải Đề Thi Mới</span>
+            </button>
+          </div>
         </div>
       `;
     }
@@ -3086,9 +4162,9 @@ const App = {
                 <button type="button" onclick="App.openPdfModal('${hw.title}', '${hw.pdfUrl}', '${hw.id}')" class="ui-btn bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100">
                   <i class="fa-solid fa-eye"></i><span>Xem trực tiếp</span>
                 </button>
-                <a href="${hw.pdfUrl}" download="${hw.fileName || 'Tai_Lieu.pdf'}" class="ui-btn bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200/80">
+                <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}')" class="ui-btn bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200/80">
                   <i class="fa-solid fa-download"></i><span>Tải về</span>
-                </a>
+                </button>
               </div>
             </div>
           </div>
@@ -3165,13 +4241,8 @@ const App = {
     this.state.paletteFilter = 'all';
     this.state.activePart3Target = { qId: 1, boxIdx: 0 };
 
-    // Đọc file PDF thực tế từ IndexedDB nếu có
-    if (typeof PDFStorage !== 'undefined') {
-      const idbUrl = await PDFStorage.getPdfBlobUrl(exam.id);
-      this.state.resolvedPdfUrl = idbUrl || exam.pdf_url || '';
-    } else {
-      this.state.resolvedPdfUrl = exam.pdf_url || '';
-    }
+    // Giải mã file PDF từ IndexedDB hoặc tự động tải từ Đám mây (GitHub / Google Drive) cho điện thoại
+    this.state.resolvedPdfUrl = await this.resolvePdfSourceUrl(exam.pdf_url, exam.id);
 
     this.render();
     this.startTimer();
@@ -4707,6 +5778,7 @@ const App = {
 
     this.state.submissions.unshift(submission);
     this.saveData();
+    this.pushStudentSubmissionToCloud(submission);
 
     this.state.activeExam = null;
     this.render();
@@ -5111,16 +6183,9 @@ const App = {
     const isStudent = this.state.currentUser && this.state.currentUser.role === 'student';
     const canViewAnswers = !isStudent || (exam.allow_view_answers !== false && (this.state.settings && this.state.settings.allowStudentViewAnswers !== false));
 
-    let solPdfUrl = exam.solution_pdf_url || '';
-    if (typeof PDFStorage !== 'undefined' && solPdfUrl) {
-      const idbSol = await PDFStorage.getPdfBlobUrl(exam.id + '_sol');
-      if (idbSol) solPdfUrl = idbSol;
-      else if (solPdfUrl.startsWith('idb:')) {
-        const key = solPdfUrl.replace('idb:', '');
-        const b = await PDFStorage.getPdfBlobUrl(key);
-        if (b) solPdfUrl = b;
-      }
-    }
+    const solPdfUrl = exam.solution_pdf_url
+      ? (await this.resolvePdfSourceUrl(exam.solution_pdf_url, exam.id + '_sol'))
+      : '';
 
     const showPdf = canViewAnswers && solPdfUrl && !this.state.hideSolutionPdfInDetail;
     const p4List = Array.isArray(exam.part4) ? exam.part4 : [];
@@ -5311,7 +6376,7 @@ const App = {
     });
 
     sub.scoreResult = GradingSystem.grade(sub.answers, exam);
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     this.notify(`Đã cập nhật điểm Tự luận! Tổng điểm mới: ${sub.scoreResult.totalScore}/${sub.scoreResult.maxTotal}đ.`, 'success', 'Lưu điểm Tự luận');
     this.viewSubmissionDetail(subId);
   },
@@ -5330,6 +6395,10 @@ const App = {
     if (!this.state.adminMainTab) this.state.adminMainTab = 'main';
     const thMeta = this.getThemeMeta();
     const swatchHex = (this._lastAccentMeta && this._lastAccentMeta.primaryHex) || this.state.accentHex || '#4f46e5';
+    const unsyncedExamsCount = this.getUnsyncedAdminExamsCount();
+    const cloudReady = this.isAdminCloudPushReady();
+    const isCloudSyncing = this.state.cloudSyncStatus === 'syncing';
+    const showUnsyncedAlert = unsyncedExamsCount > 0 || (this.state.unsyncedAdminChanges && !cloudReady);
 
     container.innerHTML = `
       <div class="min-h-screen bg-slate-100 flex flex-col">
@@ -5346,7 +6415,7 @@ const App = {
               </div>
             </div>
 
-            <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div class="flex items-center gap-1 sm:gap-2 shrink-0">
               <!-- Nút Về Trang Chủ (ẩn trên điện thoại vì bấm vào logo đã về trang chủ) -->
               <button type="button" onclick="App.goHome()" class="hidden md:inline-flex ui-btn bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 shadow-xs" title="Về trang chủ">
                 <i class="fa-solid fa-house text-indigo-400"></i>
@@ -5354,9 +6423,16 @@ const App = {
               </button>
 
               <!-- Nút Xem trước & Chọn Bố cục Đề PDF + Ô Đáp Án -->
-              <button type="button" id="adminLayoutBtn" onclick="App.showExamLayoutModal()" class="ui-btn-icon md:w-auto md:px-3 bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold border border-slate-700 shadow-xs md:gap-1.5" title="Xem trước & chọn bố cục hiển thị Đề PDF và Ô điền đáp án">
+              <button type="button" id="adminLayoutBtn" onclick="App.showExamLayoutModal()" class="hidden sm:inline-flex ui-btn-icon md:w-auto md:px-3 bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold border border-slate-700 shadow-xs md:gap-1.5" title="Xem trước & chọn bố cục hiển thị Đề PDF và Ô điền đáp án">
                 <i class="fa-solid ${this.getExamLayoutMeta().icon} text-indigo-400"></i>
                 <span class="hidden md:inline">Bố cục thi</span>
+              </button>
+
+              <!-- Nút Đồng bộ Đề thi & PDF sang Điện thoại học sinh -->
+              <button type="button" id="adminCloudSyncBtn" onclick="App.showCloudSyncModal()" class="ui-btn-icon md:w-auto md:px-3 ${unsyncedExamsCount > 0 ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400' : (cloudReady ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500' : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700')} text-xs font-extrabold border shadow-xs md:gap-1.5 relative" title="Đồng bộ đề thi, file PDF & danh sách học sinh sang Điện thoại">
+                <i class="fa-solid ${isCloudSyncing ? 'fa-arrows-rotate fa-spin' : 'fa-cloud-arrow-up'}"></i>
+                <span class="hidden md:inline">${unsyncedExamsCount > 0 ? `Đồng bộ ĐT (${unsyncedExamsCount})` : 'Đồng bộ ĐT'}</span>
+                ${unsyncedExamsCount > 0 ? `<span class="md:hidden absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-600 text-white text-[9px] font-extrabold flex items-center justify-center">${unsyncedExamsCount}</span>` : ''}
               </button>
 
               <!-- Nút Quét QR Tạo App Điện Thoại (Android & iOS) cho Học Sinh -->
@@ -5366,7 +6442,7 @@ const App = {
               </button>
 
               <!-- Chuyển nhanh Sáng/Tối & Bảng màu -->
-              <button type="button" id="adminQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn-icon bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
+              <button type="button" id="adminQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
                 <i class="fa-solid ${thMeta.icon} text-indigo-400"></i>
               </button>
               <button type="button" id="adminThemeHeaderBtn" onclick="App.showThemeModal()" class="ui-btn-icon lg:w-auto lg:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 lg:gap-1.5" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
@@ -5389,6 +6465,40 @@ const App = {
 
         <!-- Main Body -->
         <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 py-5 sm:py-8 flex-1 space-y-5 sm:space-y-6">
+          ${showUnsyncedAlert ? `
+            <div id="adminUnsyncedBanner" class="p-4 rounded-2xl bg-amber-50 border border-amber-300 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div class="flex items-start gap-3">
+                <div class="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 shadow-xs">
+                  <i class="fa-solid fa-mobile-screen-button text-base"></i>
+                </div>
+                <div class="text-xs space-y-0.5">
+                  <div class="font-extrabold text-amber-950 text-sm">
+                    ${unsyncedExamsCount > 0
+                      ? `Có ${unsyncedExamsCount} đề thi / chuyên đề PDF đang lưu cục bộ trên máy tính này — Điện thoại học sinh chưa thể thấy!`
+                      : 'Có thay đổi mới trên máy tính chưa đẩy lên Điện thoại học sinh'}
+                  </div>
+                  <p class="text-amber-800 leading-relaxed">
+                    ${cloudReady
+                      ? 'Bấm nút bên phải để tải thẳng file PDF & đề thi lên Đám mây cho mọi điện thoại nhận ngay (không cần chọn lại file PDF).'
+                      : 'Kết nối Đồng bộ Đám mây 1 lần duy nhất để đẩy toàn bộ đề thi & PDF có sẵn sang mọi điện thoại (không cần chọn lại file PDF).'}
+                  </p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                ${cloudReady ? `
+                  <button type="button" onclick="App.pushAdminStateToCloud({ manual: true })" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white px-4 shadow-sm font-extrabold">
+                    <i class="fa-solid ${isCloudSyncing ? 'fa-arrows-rotate fa-spin' : 'fa-cloud-arrow-up'}"></i>
+                    <span>Đồng Bộ Lên Điện Thoại Ngay</span>
+                  </button>
+                ` : `
+                  <button type="button" onclick="App.showCloudSyncModal()" class="ui-btn bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 shadow-sm font-extrabold">
+                    <i class="fa-solid fa-plug-circle-bolt"></i>
+                    <span>Kết Nối &amp; Đẩy Đề Sang Điện Thoại</span>
+                  </button>
+                `}
+              </div>
+            </div>
+          ` : ''}
           <!-- Thanh Điều Hướng Cổng Giáo Viên -->
           <div class="bg-white rounded-2xl p-2.5 border border-slate-200 shadow-sm">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -5800,6 +6910,33 @@ const App = {
                   </button>
                 </div>
               </form>
+            </div>
+
+            <!-- Khối Đồng Bộ Đám Mây Máy Tính <-> Điện Thoại Học Sinh -->
+            <div class="pb-6 border-b border-slate-200">
+              <h4 class="text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <i class="fa-solid fa-cloud-arrow-up text-indigo-600"></i><span>Đồng Bộ Đề Thi, File PDF &amp; Bài Nộp Giữa Máy Tính Và Điện Thoại</span>
+              </h4>
+              <div class="p-4 sm:p-5 rounded-2xl border ${cloudReady ? 'border-emerald-200 bg-emerald-50/40' : 'border-amber-200 bg-amber-50/40'} flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div class="space-y-1 text-xs">
+                  <div class="font-extrabold text-slate-900 flex items-center gap-2">
+                    <span>${cloudReady ? 'Đã kết nối Đám mây — Tự động đẩy đề & PDF lên Điện thoại' : 'Chưa kết nối kênh đẩy đề từ Máy tính lên Điện thoại'}</span>
+                  </div>
+                  <p class="text-slate-600 leading-relaxed">
+                    Cấu hình GitHub Token và/hoặc Google Apps Script để mỗi khi Giáo viên đăng đề PDF trên máy tính, học sinh mở điện thoại vào là làm bài ngay và nộp điểm 2 chiều.
+                  </p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 shrink-0">
+                  ${cloudReady ? `
+                    <button type="button" onclick="App.pushAdminStateToCloud({ manual: true })" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 shadow-xs">
+                      <i class="fa-solid fa-cloud-arrow-up"></i><span>Đẩy Đề Lên ĐT Ngay</span>
+                    </button>
+                  ` : ''}
+                  <button type="button" onclick="App.showCloudSyncModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white px-4 shadow-xs">
+                    <i class="fa-solid fa-sliders"></i><span>Cấu Hình Đồng Bộ ĐT</span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <!-- Khối Giao Diện, Bộ Màu Tùy Ý & Độ Tương Phản -->
@@ -6384,7 +7521,7 @@ const App = {
       }
     }
 
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     this.render();
     this.showUpdatePdfModal(examId, true);
     this.notify(
@@ -6442,6 +7579,7 @@ const App = {
           const qFile = ex.pdf_name || ex.pdf_url || 'Chưa có';
           const sFile = ex.solution_pdf_name || ex.solution_pdf_url || '';
           const catMeta = this.getExamCategoryMeta(ex.category || this.inferExamCategory(ex));
+          const isLocalOnly = this.hasLocalOnlyPdf(ex);
 
           return `
             <div class="rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition flex flex-col justify-between p-5 space-y-3.5">
@@ -6455,6 +7593,9 @@ const App = {
                     <span class="px-2.5 py-0.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">${ex.roundLabel || 'Đợt 1'}</span>
                     <span class="px-2 py-0.5 rounded-lg text-[11px] font-mono font-semibold bg-slate-50 text-slate-500 border border-slate-200">${ex.id}</span>
                     <span class="text-xs text-slate-500 font-medium inline-flex items-center"><i class="fa-regular fa-clock mr-1 text-slate-400"></i>${ex.time_minutes || 90}p</span>
+                    ${isLocalOnly
+                      ? `<button type="button" onclick="App.showCloudSyncModal()" class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 inline-flex items-center gap-1 cursor-pointer" title="Đề này mới chỉ nằm trên máy tính, bấm để đồng bộ sang điện thoại"><i class="fa-solid fa-triangle-exclamation text-[10px]"></i><span>Chưa lên ĐT</span></button>`
+                      : `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1" title="File PDF đề thi đã sẵn sàng cho điện thoại"><i class="fa-solid fa-mobile-screen-button text-[10px]"></i><span>Đã lên ĐT</span></span>`}
                   </div>
                   <button onclick="App.toggleExamActive('${ex.id}')" class="px-2.5 py-1 rounded-full text-[11px] font-bold transition inline-flex items-center gap-1.5 cursor-pointer shrink-0 ${ex.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100' : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'}" title="Bấm để Đóng / Mở đề thi">
                     <span class="w-1.5 h-1.5 rounded-full ${ex.is_active ? 'bg-emerald-500' : 'bg-slate-400'}"></span>
@@ -6798,7 +7939,7 @@ const App = {
     exam.allowed_grades = mode === 'grade' ? checkedGrades : [grade];
     exam.allowed_students = mode === 'custom' ? checkedStudents : (exam.allowed_students || []);
 
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     const modal = document.getElementById('examAccessModal');
     if (modal) modal.remove();
     this.render();
@@ -6976,7 +8117,7 @@ const App = {
       this.state.currentUser.grade = g;
       sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
     }
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     this.render();
   },
 
@@ -7149,7 +8290,7 @@ const App = {
       sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
     }
 
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     document.getElementById('bulkGradeModal')?.remove();
     this.render();
     this.notify(`Đã xếp ${checkedIds.length} học sinh vào Khối ${targetGrade} thành công!`, 'success', 'Xếp khối thành công');
@@ -7281,7 +8422,7 @@ const App = {
       allowedHomeworks: []
     });
 
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     const modal = document.getElementById('addStudentModal');
     if (modal) modal.remove();
     this.render();
@@ -7465,7 +8606,10 @@ const App = {
       sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
     }
 
-    this.saveData();
+    if (newId !== originalId) {
+      this.markDeletedId(originalId);
+    }
+    this.saveData({ markAdminDirty: true });
     const modal = document.getElementById('editStudentModal');
     if (modal) modal.remove();
     this.render();
@@ -7569,6 +8713,7 @@ const App = {
     sessionStorage.setItem('thpt_current_user', JSON.stringify(u));
 
     this.saveData();
+    if (student) this.pushStudentSubmissionToCloud(null, student);
     const modal = document.getElementById('selfEditStudentModal');
     if (modal) modal.remove();
     this.render();
@@ -7579,7 +8724,8 @@ const App = {
     const s = this.state.students.find(x => x.studentId === id);
     if (s) {
       s.status = s.status === 'active' ? 'locked' : 'active';
-      this.saveData();
+      s.updatedAt = new Date().toISOString();
+      this.saveData({ markAdminDirty: true });
       this.render();
     }
   },
@@ -7590,7 +8736,8 @@ const App = {
       `Bạn có chắc chắn muốn xóa tài khoản học sinh ${st ? `"${st.fullName}" (${id})` : id} khỏi hệ thống?`,
       () => {
         this.state.students = this.state.students.filter(x => x.studentId !== id);
-        this.saveData();
+        this.markDeletedId(id);
+        this.saveData({ markAdminDirty: true });
         document.getElementById('editStudentModal')?.remove();
         this.render();
       },
@@ -8878,7 +10025,7 @@ const App = {
       }
     });
 
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     document.getElementById('updatePdfModal')?.remove();
     this.render();
     const p4Note = parts.part4.length > 0 ? ` • ${parts.part4.length} câu P.IV (Tự luận)` : '';
@@ -9133,7 +10280,7 @@ const App = {
     };
 
     this.state.exams.unshift(finalExam);
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     this.state.tempSelectedPdfFile = null;
     this.state.tempSelectedSolutionPdfFile = null;
     document.getElementById('createExamModal')?.remove();
@@ -9145,7 +10292,7 @@ const App = {
     const ex = this.state.exams.find(e => e.id === id);
     if (ex) {
       ex.is_active = !ex.is_active;
-      this.saveData();
+      this.saveData({ markAdminDirty: true });
       this.render();
     }
   },
@@ -9154,7 +10301,7 @@ const App = {
     const ex = this.state.exams.find(e => e.id === id);
     if (ex) {
       ex.allow_view_answers = ex.allow_view_answers === false ? true : false;
-      this.saveData();
+      this.saveData({ markAdminDirty: true });
       this.render();
     }
   },
@@ -9174,7 +10321,8 @@ const App = {
           PDFStorage.deletePdf(id);
           PDFStorage.deletePdf(id + '_sol');
         }
-        this.saveData();
+        this.markDeletedId(id);
+        this.saveData({ markAdminDirty: true });
         this.render();
       },
       {
@@ -9262,7 +10410,7 @@ const App = {
   toggleSetting(key) {
     if (this.state.settings && typeof this.state.settings[key] !== 'undefined') {
       this.state.settings[key] = !this.state.settings[key];
-      this.saveData();
+      this.saveData({ markAdminDirty: true });
       this.render();
     }
   },
@@ -9288,7 +10436,7 @@ const App = {
     this.state.settings.studentCompareScope = valid;
     if (valid === 'class') this.state.studentCompareMode = 'class';
     else if (valid === 'grade') this.state.studentCompareMode = 'grade';
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     this.render();
   },
 
@@ -9412,17 +10560,9 @@ const App = {
   },
 
   async openPdfModal(title, pdfUrl, storageId = null) {
-    let finalUrl = pdfUrl || '';
-    if (storageId && typeof PDFStorage !== 'undefined') {
-      const idbUrl = await PDFStorage.getPdfBlobUrl(storageId);
-      if (idbUrl) finalUrl = idbUrl;
-    } else if (pdfUrl && pdfUrl.startsWith('idb:') && typeof PDFStorage !== 'undefined') {
-      const key = pdfUrl.replace('idb:', '');
-      const idbUrl = await PDFStorage.getPdfBlobUrl(key);
-      if (idbUrl) finalUrl = idbUrl;
-    }
+    const finalUrl = await this.resolvePdfSourceUrl(pdfUrl, storageId);
     if (!finalUrl) {
-      this.notify('Mục này hiện chưa có file PDF đính kèm!', 'warning', 'Chưa có file PDF');
+      this.notify('Mục này hiện chưa có file PDF đính kèm (hoặc Giáo viên chưa đồng bộ file PDF lên Đám mây)!', 'warning', 'Chưa có file PDF');
       return;
     }
 
@@ -9878,7 +11018,7 @@ const App = {
     const hw = this.state.homeworks.find(h => h.id === hwId);
     if (!hw) return;
     hw.grade = parseInt(newGrade, 10) || 12;
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     this.render();
   },
 
@@ -9929,7 +11069,7 @@ const App = {
     };
 
     this.state.homeworks.unshift(newHw);
-    this.saveData();
+    this.saveData({ markAdminDirty: true });
     this.state.tempSelectedHwFile = null;
     const m = document.getElementById('addHomeworkModal');
     if (m) m.remove();
@@ -9947,7 +11087,8 @@ const App = {
         if (typeof PDFStorage !== 'undefined') {
           PDFStorage.deletePdf(hwId);
         }
-        this.saveData();
+        this.markDeletedId(hwId);
+        this.saveData({ markAdminDirty: true });
         this.render();
       },
       {
@@ -10421,7 +11562,9 @@ const App = {
   // shortcut: Mobile browsers require user-initiated PWA install or Add to Home Screen; QR opens ?install=android|ios to open the matching guide tab
   getRecommendedAppUrl(loc = (typeof window !== 'undefined' ? window.location : null), platform = 'ios') {
     const pTag = platform === 'android' ? 'android' : 'ios';
-    const fallback = `${this.PUBLIC_APP_URL}?install=${pTag}`;
+    const gasUrl = this.getCloudConfig().gasWebAppUrl;
+    const cloudParam = gasUrl ? `&cloud=${encodeURIComponent(gasUrl)}` : '';
+    const fallback = `${this.PUBLIC_APP_URL}?install=${pTag}${cloudParam}`;
     if (!loc || !loc.protocol || loc.protocol === 'file:') {
       return { url: fallback, isFallbackPublic: true };
     }
@@ -10431,7 +11574,7 @@ const App = {
     }
     const cleanPath = String(loc.pathname || '/');
     const base = `${loc.origin}${cleanPath}`;
-    return { url: `${base}?install=${pTag}`, isFallbackPublic: false };
+    return { url: `${base}?install=${pTag}${cloudParam}`, isFallbackPublic: false };
   },
 
   isIosDevice(uaStr) {
