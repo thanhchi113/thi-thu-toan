@@ -332,4 +332,15 @@ App.state.settings.studentCompareScope = 'both';
 App.state.exams = [];
 App.state.submissions = [];
 
-console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, PARSER .TEX/.TXT/OCR, SO SÁNH LỚP/KHỐI & GIÁM SÁT ĐÃ ĐẠT 100%!');
+// Test 11: Nhận diện thiết bị Android & tạo liên kết QR ?install=android
+const localAndroidRec = App.getRecommendedAppUrl({ protocol: 'http:', hostname: 'localhost', origin: 'http://localhost:8000', pathname: '/' }, 'android');
+console.assert(localAndroidRec.isFallbackPublic === true && localAndroidRec.url === 'https://thanhchi113.github.io/thi-thu-toan/?install=android', 'Localhost Android QR fallback URL fail');
+
+const liveAndroidRec = App.getRecommendedAppUrl({ protocol: 'https:', hostname: 'thanhchi113.github.io', origin: 'https://thanhchi113.github.io', pathname: '/thi-thu-toan/' }, 'android');
+console.assert(liveAndroidRec.isFallbackPublic === false && liveAndroidRec.url === 'https://thanhchi113.github.io/thi-thu-toan/?install=android', 'Live GitHub Pages Android QR URL fail');
+
+console.assert(App.isAndroidDevice('Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36') === true, 'Samsung Android UA detect fail');
+console.assert(App.isAndroidDevice('Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15') === false, 'iPhone must not match Android');
+console.assert(App.isAndroidDevice('Mozilla/5.0 (Windows NT 10.0; Win64; x64)') === false, 'Windows must not match Android');
+
+console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, PARSER .TEX/.TXT/OCR, SO SÁNH LỚP/KHỐI, APP ANDROID/iOS & GIÁM SÁT ĐÃ ĐẠT 100%!');

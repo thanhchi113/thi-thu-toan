@@ -282,16 +282,21 @@ const App = {
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       this._deferredInstallPrompt = e;
+      if (document.getElementById('iosAppGuideModal')) {
+        this.showIosAppModal(this._appGuideAutoOpened, this._appGuidePlatform);
+      }
     });
     const params = new URLSearchParams(window.location.search);
-    if (params.get('install') === 'ios') {
+    const installTarget = (params.get('install') || '').toLowerCase();
+    if (installTarget === 'ios' || installTarget === 'android' || installTarget === 'app') {
       params.delete('install');
       const rest = params.toString();
       if (window.history && window.history.replaceState) {
         window.history.replaceState({}, document.title, window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
       }
       if (!this.isStandaloneApp()) {
-        setTimeout(() => this.showIosAppModal(true), 150);
+        const targetPlatform = installTarget === 'android' ? 'android' : (installTarget === 'ios' ? 'ios' : null);
+        setTimeout(() => this.showIosAppModal(true, targetPlatform), 150);
       }
     }
   },
@@ -1445,9 +1450,9 @@ const App = {
       <div class="min-h-screen bg-slate-50 flex flex-col justify-center py-6 sm:py-12 sm:px-6 lg:px-8 relative text-slate-900">
         <!-- Thanh công cụ đồng bộ: gọn gàng trên điện thoại, ghim góc phải trên máy tính -->
         <div class="w-full max-w-md mx-auto px-4 mb-5 sm:mb-0 sm:w-auto sm:px-0 sm:fixed sm:top-4 sm:right-4 z-30 flex items-center justify-between sm:justify-end gap-2">
-          <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex-1 sm:flex-initial" title="Quét mã QR & Hướng dẫn tạo App trên iPhone / iPad">
+          <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex-1 sm:flex-initial" title="Quét mã QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
             <i class="fa-solid fa-qrcode"></i>
-            <span>Tạo App iOS / QR</span>
+            <span>Tạo App ĐT / QR</span>
           </button>
           <button type="button" id="loginQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn bg-white border border-slate-200 shadow-xs hover:bg-slate-100 text-slate-700 px-3" title="Chuyển nhanh chế độ Sáng / Dịu mắt / Tối">
             <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
@@ -1560,24 +1565,38 @@ const App = {
             </form>
           </div>
 
-          <!-- Thẻ mở nhanh Mã QR & Hướng dẫn Tạo App trên iOS -->
-          <button type="button" id="loginIosPromoCard" onclick="App.showIosAppModal()" class="mt-4 w-full bg-white hover:bg-indigo-50/60 p-3.5 sm:p-4 rounded-2xl border border-indigo-200 shadow-sm transition flex items-center justify-between gap-3 text-left cursor-pointer group">
-            <div class="flex items-center gap-3 min-w-0">
-              <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                <i class="fa-brands fa-apple text-xl"></i>
-              </div>
-              <div class="min-w-0">
-                <div class="text-xs font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
-                  <span>Quét QR tạo App trên điện thoại iOS</span>
-                  <span class="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[10px] font-bold">iPhone / iPad</span>
+          <!-- Hộp mở nhanh Mã QR & Hướng dẫn Tạo App cho Điện thoại Android & iOS -->
+          <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button type="button" id="loginAndroidPromoCard" onclick="App.showIosAppModal(false, 'android')" class="w-full bg-white hover:bg-emerald-50/60 p-3.5 rounded-2xl border border-emerald-200 shadow-sm transition flex items-center justify-between gap-2.5 text-left cursor-pointer group">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <i class="fa-brands fa-android text-lg"></i>
                 </div>
-                <p class="text-[11px] text-slate-500 mt-0.5 leading-snug">Xem đề PDF đa trang sắc nét &amp; nộp đáp án trực tiếp trên App • Hướng dẫn 4 bước</p>
+                <div class="min-w-0">
+                  <div class="text-xs font-extrabold text-slate-900 truncate">Tạo App trên Android</div>
+                  <p class="text-[11px] text-slate-500 mt-0.5 truncate">Samsung, Oppo, Xiaomi • 4 bước</p>
+                </div>
               </div>
-            </div>
-            <div class="ui-btn-icon bg-indigo-50 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white border border-indigo-200">
-              <i class="fa-solid fa-qrcode text-base"></i>
-            </div>
-          </button>
+              <div class="w-8 h-8 rounded-xl bg-emerald-50 group-hover:bg-emerald-600 text-emerald-600 group-hover:text-white border border-emerald-200 flex items-center justify-center shrink-0 transition">
+                <i class="fa-solid fa-qrcode text-sm"></i>
+              </div>
+            </button>
+
+            <button type="button" id="loginIosPromoCard" onclick="App.showIosAppModal(false, 'ios')" class="w-full bg-white hover:bg-indigo-50/60 p-3.5 rounded-2xl border border-indigo-200 shadow-sm transition flex items-center justify-between gap-2.5 text-left cursor-pointer group">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <i class="fa-brands fa-apple text-lg"></i>
+                </div>
+                <div class="min-w-0">
+                  <div class="text-xs font-extrabold text-slate-900 truncate">Tạo App trên iOS</div>
+                  <p class="text-[11px] text-slate-500 mt-0.5 truncate">iPhone / iPad (Safari) • 4 bước</p>
+                </div>
+              </div>
+              <div class="w-8 h-8 rounded-xl bg-indigo-50 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white border border-indigo-200 flex items-center justify-center shrink-0 transition">
+                <i class="fa-solid fa-qrcode text-sm"></i>
+              </div>
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -1729,10 +1748,10 @@ const App = {
                 <span>Trang chủ</span>
               </button>
 
-              <!-- Nút Quét QR / Tạo App iOS -->
-              <button type="button" id="studentIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs md:gap-1.5" title="Quét QR & Hướng dẫn tạo App trên iPhone / iPad">
+              <!-- Nút Quét QR / Tạo App Điện thoại (Android & iOS) -->
+              <button type="button" id="studentIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs md:gap-1.5" title="Quét QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
                 <i class="fa-solid fa-qrcode"></i>
-                <span class="hidden md:inline">App iOS / QR</span>
+                <span class="hidden md:inline">App ĐT / QR</span>
               </button>
 
               <!-- Nút Chuyển Nhanh Sáng/Tối & Bảng Màu -->
@@ -1782,8 +1801,11 @@ const App = {
                   <button type="button" onclick="App.showStudentSelfEditModal()" class="ui-btn bg-white/20 hover:bg-white/30 text-white backdrop-blur-md border border-white/25 shadow-xs">
                     <i class="fa-solid fa-user-pen"></i><span>Hồ sơ cá nhân &amp; Đổi mật khẩu</span>
                   </button>
-                  <button type="button" id="studentBannerIosBtn" onclick="App.showIosAppModal()" class="ui-btn bg-white text-indigo-700 hover:bg-indigo-50 font-extrabold shadow-sm">
-                    <i class="fa-brands fa-apple text-sm"></i><span>Quét QR Cài App iOS</span>
+                  <button type="button" id="studentBannerAndroidBtn" onclick="App.showIosAppModal(false, 'android')" class="ui-btn bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold shadow-sm">
+                    <i class="fa-brands fa-android text-sm"></i><span>Cài App Android</span>
+                  </button>
+                  <button type="button" id="studentBannerIosBtn" onclick="App.showIosAppModal(false, 'ios')" class="ui-btn bg-white text-indigo-700 hover:bg-indigo-50 font-extrabold shadow-sm">
+                    <i class="fa-brands fa-apple text-sm"></i><span>Cài App iOS</span>
                   </button>
                 </div>
               </div>
@@ -3995,10 +4017,10 @@ const App = {
                 <span>Trang chủ</span>
               </button>
 
-              <!-- Nút Quét QR Tạo App iOS cho Học Sinh -->
-              <button type="button" id="adminIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold border border-indigo-500 shadow-xs md:gap-1.5" title="Hiển thị mã QR để học sinh quét tạo App trên iPhone / iPad">
+              <!-- Nút Quét QR Tạo App Điện Thoại (Android & iOS) cho Học Sinh -->
+              <button type="button" id="adminIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold border border-indigo-500 shadow-xs md:gap-1.5" title="Hiển thị mã QR để học sinh quét tạo App trên điện thoại Android & iOS">
                 <i class="fa-solid fa-qrcode"></i>
-                <span class="hidden md:inline">App iOS / QR</span>
+                <span class="hidden md:inline">App ĐT / QR</span>
               </button>
 
               <!-- Chuyển nhanh Sáng/Tối & Bảng màu -->
@@ -4625,6 +4647,9 @@ const App = {
                 </button>
                 <button onclick="App.setAdminMainTab('settings');" class="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-purple-200 cursor-pointer">
                   <i class="fa-solid fa-sliders"></i><span>Cài đặt &amp; bảo mật</span>
+                </button>
+                <button onclick="App.showIosAppModal(false, 'android');" class="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-teal-200 cursor-pointer">
+                  <i class="fa-brands fa-android"></i><span>Hướng dẫn App Android / iOS</span>
                 </button>
               </div>
             </div>
@@ -9042,10 +9067,11 @@ const App = {
     this.notify('Đặt lại mật khẩu Giáo viên thành công! Bạn có thể sử dụng mật khẩu mới ngay bây giờ.', 'success', 'Đặt lại mật khẩu hoàn tất');
   },
 
-  // --- HỖ TRỢ QUÉT QR TẠO APP iOS (iPHONE / iPAD) & XEM ĐỀ PDF ĐA TRANG TRỰC TIẾP TRONG APP ---
-  // shortcut: iOS Safari has no programmatic install API; QR opens ?install=ios to guide Add to Home Screen, upgrade to Universal Links if a native App Store wrapper is ever shipped
-  getRecommendedAppUrl(loc = (typeof window !== 'undefined' ? window.location : null)) {
-    const fallback = `${this.PUBLIC_APP_URL}?install=ios`;
+  // --- HỖ TRỢ QUÉT QR & HƯỚNG DẪN TẠO APP TRÊN ĐIỆN THOẠI ANDROID & iOS (iPHONE / iPAD) ---
+  // shortcut: Mobile browsers require user-initiated PWA install or Add to Home Screen; QR opens ?install=android|ios to open the matching guide tab
+  getRecommendedAppUrl(loc = (typeof window !== 'undefined' ? window.location : null), platform = 'ios') {
+    const pTag = platform === 'android' ? 'android' : 'ios';
+    const fallback = `${this.PUBLIC_APP_URL}?install=${pTag}`;
     if (!loc || !loc.protocol || loc.protocol === 'file:') {
       return { url: fallback, isFallbackPublic: true };
     }
@@ -9055,7 +9081,7 @@ const App = {
     }
     const cleanPath = String(loc.pathname || '/');
     const base = `${loc.origin}${cleanPath}`;
-    return { url: `${base}?install=ios`, isFallbackPublic: false };
+    return { url: `${base}?install=${pTag}`, isFallbackPublic: false };
   },
 
   isIosDevice(uaStr) {
@@ -9065,6 +9091,11 @@ const App = {
       return true;
     }
     return false;
+  },
+
+  isAndroidDevice(uaStr) {
+    const ua = String(uaStr !== undefined ? uaStr : (typeof navigator !== 'undefined' ? navigator.userAgent : ''));
+    return /Android/i.test(ua);
   },
 
   isInAppWebView(uaStr) {
@@ -9094,14 +9125,15 @@ const App = {
     return `
       <div class="p-4 text-center text-xs text-slate-600 space-y-2">
         <i class="fa-solid fa-qrcode text-3xl text-indigo-600"></i>
-        <div class="font-bold">Mở liên kết trực tiếp trên Safari:</div>
+        <div class="font-bold">Mở liên kết trực tiếp trên trình duyệt:</div>
         <div class="font-mono text-[11px] break-all text-indigo-700">${cleanUrl}</div>
       </div>
     `;
   },
 
   updateIosQrUrl(rawVal) {
-    const clean = String(rawVal || '').trim() || `${this.PUBLIC_APP_URL}?install=ios`;
+    const pTag = this._appGuidePlatform === 'android' ? 'android' : 'ios';
+    const clean = String(rawVal || '').trim() || `${this.PUBLIC_APP_URL}?install=${pTag}`;
     const box = document.getElementById('iosQrSvgContainer');
     if (box) box.innerHTML = this.buildQrSvgHtml(clean);
   },
@@ -9109,7 +9141,8 @@ const App = {
   async copyIosAppUrl() {
     const inp = document.getElementById('iosAppUrlInput');
     const btn = document.getElementById('copyIosAppUrlBtn');
-    const url = (inp && inp.value.trim()) || `${this.PUBLIC_APP_URL}?install=ios`;
+    const pTag = this._appGuidePlatform === 'android' ? 'android' : 'ios';
+    const url = (inp && inp.value.trim()) || `${this.PUBLIC_APP_URL}?install=${pTag}`;
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(url);
@@ -9142,18 +9175,36 @@ const App = {
     document.getElementById('iosAppGuideModal')?.remove();
   },
 
-  showIosAppModal(autoOpened = false) {
+  switchAppGuideTab(platform) {
+    const next = platform === 'android' ? 'android' : 'ios';
+    this.showIosAppModal(Boolean(this._appGuideAutoOpened), next);
+  },
+
+  showIosAppModal(autoOpened = false, preferredPlatform = null) {
     this.closeIosAppModal();
-    const rec = this.getRecommendedAppUrl();
     const isIos = this.isIosDevice();
+    const isAndroid = this.isAndroidDevice();
+    const activePlatform = (preferredPlatform === 'android' || preferredPlatform === 'ios')
+      ? preferredPlatform
+      : (this._appGuidePlatform || (isAndroid ? 'android' : 'ios'));
+    this._appGuidePlatform = activePlatform;
+    this._appGuideAutoOpened = Boolean(autoOpened);
+
+    const isAndroidTab = activePlatform === 'android';
+    const rec = this.getRecommendedAppUrl(undefined, activePlatform);
     const inWebView = this.isInAppWebView();
     const standalone = this.isStandaloneApp();
+    const isOnMobileCurrent = (isAndroidTab && isAndroid) || (!isAndroidTab && isIos);
 
     const statusBadge = standalone
       ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"><i class="fa-solid fa-circle-check text-emerald-600"></i>Đang sử dụng trực tiếp trong App</span>`
-      : (isIos
-        ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200"><i class="fa-brands fa-apple text-indigo-700"></i>Đã mở trên iPhone/iPad • Làm Bước 2 &amp; 3 để tạo App</span>`
-        : `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-sky-50 text-sky-800 border border-sky-200"><i class="fa-solid fa-camera text-sky-600"></i>Mở Camera iPhone/iPad quét mã QR bên dưới</span>`);
+      : (isAndroidTab
+        ? (isAndroid
+          ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"><i class="fa-brands fa-android text-emerald-700"></i>Đã mở trên Android • Làm Bước 2 &amp; 3 để cài App</span>`
+          : `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200"><i class="fa-solid fa-camera text-emerald-600"></i>Dùng điện thoại Android quét mã QR bên dưới</span>`)
+        : (isIos
+          ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200"><i class="fa-brands fa-apple text-indigo-700"></i>Đã mở trên iPhone/iPad • Làm Bước 2 &amp; 3 để tạo App</span>`
+          : `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-sky-50 text-sky-800 border border-sky-200"><i class="fa-solid fa-camera text-sky-600"></i>Mở Camera iPhone/iPad quét mã QR bên dưới</span>`));
 
     const modal = document.createElement('div');
     modal.id = 'iosAppGuideModal';
@@ -9161,14 +9212,14 @@ const App = {
     modal.innerHTML = `
       <div class="dialog-card bg-white rounded-3xl max-w-3xl w-full max-h-[92dvh] border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
         <!-- Header -->
-        <div class="px-5 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50/80 via-white to-slate-50 flex items-center justify-between gap-3 shrink-0">
+        <div class="px-5 py-4 border-b border-slate-200 ${isAndroidTab ? 'bg-gradient-to-r from-emerald-50/80 via-white to-slate-50' : 'bg-gradient-to-r from-indigo-50/80 via-white to-slate-50'} flex items-center justify-between gap-3 shrink-0">
           <div class="flex items-center gap-3 min-w-0">
-            <div class="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
-              <i class="fa-brands fa-apple text-xl"></i>
+            <div class="w-10 h-10 rounded-2xl ${isAndroidTab ? 'bg-emerald-600' : 'bg-indigo-600'} text-white flex items-center justify-center shadow-sm shrink-0">
+              <i class="fa-brands ${isAndroidTab ? 'fa-android' : 'fa-apple'} text-xl"></i>
             </div>
             <div class="min-w-0">
-              <h3 class="text-sm sm:text-base font-extrabold text-slate-900 truncate">Quét Mã QR &amp; Hướng Dẫn Tạo App Trên Điện Thoại iOS</h3>
-              <p class="text-[11px] sm:text-xs text-slate-500 truncate">Cài biểu tượng App ra Màn hình chính iPhone / iPad • Xem đề PDF đa trang &amp; nộp đáp án trực tiếp</p>
+              <h3 class="text-sm sm:text-base font-extrabold text-slate-900 truncate">Quét Mã QR &amp; Hướng Dẫn Tạo App Trên Điện Thoại (Android &amp; iOS)</h3>
+              <p class="text-[11px] sm:text-xs text-slate-500 truncate">Cài biểu tượng App ra Màn hình chính • Xem đề PDF đa trang &amp; nộp đáp án trực tiếp</p>
             </div>
           </div>
           <button type="button" onclick="App.closeIosAppModal()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer shrink-0" title="Đóng">
@@ -9177,13 +9228,31 @@ const App = {
         </div>
 
         <!-- Body -->
-        <div class="p-4 sm:p-6 overflow-y-auto space-y-5 text-slate-800">
+        <div class="p-4 sm:p-6 overflow-y-auto space-y-4 text-slate-800">
+          <!-- Thanh chuyển đổi Android / iOS -->
+          <div class="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200">
+            <button type="button" id="appGuideTab_android" onclick="App.switchAppGuideTab('android')"
+              class="py-2.5 px-3 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer ${isAndroidTab ? 'bg-emerald-600 text-white font-extrabold shadow-xs' : 'text-slate-600 hover:text-slate-900 font-bold'}">
+              <i class="fa-brands fa-android text-base"></i>
+              <span>Điện thoại Android</span>
+            </button>
+            <button type="button" id="appGuideTab_ios" onclick="App.switchAppGuideTab('ios')"
+              class="py-2.5 px-3 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer ${!isAndroidTab ? 'bg-indigo-600 text-white font-extrabold shadow-xs' : 'text-slate-600 hover:text-slate-900 font-bold'}">
+              <i class="fa-brands fa-apple text-base"></i>
+              <span>iPhone / iPad (iOS)</span>
+            </button>
+          </div>
+
           ${autoOpened && !standalone ? `
-            <div class="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-start gap-3 text-xs text-indigo-900">
-              <i class="fa-solid fa-wand-magic-sparkles text-indigo-600 text-base mt-0.5"></i>
+            <div class="p-3.5 rounded-2xl ${isAndroidTab ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-indigo-50 border-indigo-200 text-indigo-900'} border flex items-start gap-3 text-xs">
+              <i class="fa-solid fa-wand-magic-sparkles ${isAndroidTab ? 'text-emerald-600' : 'text-indigo-600'} text-base mt-0.5"></i>
               <div>
                 <div class="font-extrabold">Bạn vừa mở liên kết cài đặt từ Mã QR!</div>
-                <p class="mt-0.5 text-indigo-800">Thực hiện ngay <strong>Bước 2</strong> và <strong>Bước 3</strong> bên dưới trên trình duyệt Safari để đưa ứng dụng <strong>Khảo Thí Toán</strong> ra Màn hình chính điện thoại.</p>
+                <p class="mt-0.5">
+                  ${isAndroidTab
+                    ? 'Thực hiện ngay <strong>Bước 2</strong> và <strong>Bước 3</strong> bên dưới trên trình duyệt <strong>Google Chrome</strong> (hoặc bấm nút <em>Cài đặt App ngay</em> nếu hiện) để đưa ứng dụng <strong>Khảo Thí Toán</strong> ra Màn hình chính.'
+                    : 'Thực hiện ngay <strong>Bước 2</strong> và <strong>Bước 3</strong> bên dưới trên trình duyệt <strong>Safari</strong> để đưa ứng dụng <strong>Khảo Thí Toán</strong> ra Màn hình chính điện thoại.'}
+                </p>
               </div>
             </div>
           ` : ''}
@@ -9193,88 +9262,154 @@ const App = {
               <i class="fa-solid fa-triangle-exclamation text-amber-600 text-base mt-0.5"></i>
               <div>
                 <div class="font-extrabold">Lưu ý quan trọng: Bạn đang mở trong ứng dụng trung gian (Zalo / Messenger)</div>
-                <p class="mt-0.5">Hãy nhấn biểu tượng <strong>ba chấm (...)</strong> ở góc trên bên phải màn hình và chọn <strong>"Mở bằng Safari"</strong> để hiện chức năng <em>Thêm vào Màn hình chính</em> của iOS.</p>
+                <p class="mt-0.5">
+                  ${isAndroidTab
+                    ? 'Hãy nhấn biểu tượng <strong>ba chấm</strong> ở góc trên bên phải màn hình và chọn <strong>"Mở bằng trình duyệt" (Mở bằng Chrome)</strong> để hiện tính năng <em>Cài đặt ứng dụng</em> trên Android.'
+                    : 'Hãy nhấn biểu tượng <strong>ba chấm (...)</strong> ở góc trên bên phải màn hình và chọn <strong>"Mở bằng Safari"</strong> để hiện chức năng <em>Thêm vào Màn hình chính</em> của iOS.'}
+                </p>
               </div>
             </div>
           ` : ''}
 
           <div class="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
             <!-- Cột Trái: Mã QR & Liên kết -->
-            <div class="md:col-span-5 ${isIos && !standalone ? 'order-2 md:order-1' : 'order-1'} bg-slate-50 rounded-2xl p-4 border border-slate-200 flex flex-col items-center text-center space-y-3">
+            <div class="md:col-span-5 ${isOnMobileCurrent && !standalone ? 'order-2 md:order-1' : 'order-1'} bg-slate-50 rounded-2xl p-4 border border-slate-200 flex flex-col items-center text-center space-y-3">
               ${statusBadge}
 
-              <div id="iosQrSvgContainer" class="w-48 h-48 sm:w-52 sm:h-52 bg-white p-3 rounded-2xl border-2 border-indigo-100 shadow-sm flex items-center justify-center">
+              <div id="iosQrSvgContainer" class="w-48 h-48 sm:w-52 sm:h-52 bg-white p-3 rounded-2xl border-2 ${isAndroidTab ? 'border-emerald-200' : 'border-indigo-100'} shadow-sm flex items-center justify-center">
                 ${this.buildQrSvgHtml(rec.url)}
               </div>
 
               <div class="w-full text-left space-y-1.5">
-                <label for="iosAppUrlInput" class="block text-[11px] font-bold text-slate-600">Liên kết tạo App (Có thể chỉnh sửa nếu đổi tên miền):</label>
+                <label for="iosAppUrlInput" class="block text-[11px] font-bold text-slate-600">Liên kết tạo App ${isAndroidTab ? 'Android' : 'iOS'}:</label>
                 <input type="text" id="iosAppUrlInput" value="${rec.url}" oninput="App.updateIosQrUrl(this.value)"
                   class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-[11px] font-mono text-slate-800 focus:border-indigo-600 outline-none">
                 <button type="button" id="copyIosAppUrlBtn" onclick="App.copyIosAppUrl()"
-                  class="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition inline-flex items-center justify-center gap-1.5 cursor-pointer shadow-xs">
+                  class="w-full py-2 px-3 rounded-xl ${isAndroidTab ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'} text-white text-xs font-bold transition inline-flex items-center justify-center gap-1.5 cursor-pointer shadow-xs">
                   <i class="fa-regular fa-copy"></i><span>Sao chép link</span>
                 </button>
                 ${this._deferredInstallPrompt ? `
-                  <button type="button" onclick="App.triggerNativeInstallPrompt()"
-                    class="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition inline-flex items-center justify-center gap-1.5 cursor-pointer shadow-xs">
-                    <i class="fa-solid fa-download"></i><span>Cài đặt App ngay trên thiết bị này</span>
+                  <button type="button" id="directInstallAppBtn" onclick="App.triggerNativeInstallPrompt()"
+                    class="w-full py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-extrabold transition inline-flex items-center justify-center gap-1.5 cursor-pointer shadow-sm">
+                    <i class="fa-solid fa-download"></i><span>Cài đặt App ngay trên thiết bị này (1 chạm)</span>
                   </button>
                 ` : ''}
                 ${rec.isFallbackPublic ? `
                   <p class="text-[10px] text-slate-500 leading-snug pt-0.5">
-                    <i class="fa-solid fa-circle-info text-indigo-500 mr-1"></i>Đang tự động dùng địa chỉ trực tuyến công khai để điện thoại iOS quét được ngay.
+                    <i class="fa-solid fa-circle-info ${isAndroidTab ? 'text-emerald-600' : 'text-indigo-500'} mr-1"></i>Đang tự động dùng địa chỉ trực tuyến công khai để điện thoại quét được ngay.
                   </p>
                 ` : ''}
               </div>
             </div>
 
-            <!-- Cột Phải: Hướng dẫn 4 bước tạo App trên iOS -->
-            <div class="md:col-span-7 ${isIos && !standalone ? 'order-1 md:order-2' : 'order-2'} space-y-3">
-              <div class="text-xs font-extrabold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5">
-                <i class="fa-solid fa-list-ol"></i>
-                <span>Hướng dẫn 4 bước tạo App trên iPhone / iPad (iOS)</span>
-              </div>
-
-              <div class="space-y-2.5 text-xs">
-                <div class="p-3 rounded-2xl bg-white border border-slate-200 flex items-start gap-3 shadow-2xs">
-                  <span class="w-7 h-7 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center justify-center shrink-0">1</span>
-                  <div>
-                    <div class="font-extrabold text-slate-900">Quét mã QR bằng Camera mở trong Safari</div>
-                    <p class="text-slate-600 mt-0.5 leading-relaxed">Mở ứng dụng <strong>Camera</strong> mặc định trên iPhone/iPad, hướng vào mã QR bên cạnh và chạm vào thông báo hiện ra để mở bằng trình duyệt <strong>Safari</strong>.</p>
-                  </div>
+            <!-- Cột Phải: Hướng dẫn 4 bước theo nền tảng đang chọn -->
+            <div class="md:col-span-7 ${isOnMobileCurrent && !standalone ? 'order-1 md:order-2' : 'order-2'} space-y-3">
+              ${isAndroidTab ? `
+                <div class="text-xs font-extrabold uppercase tracking-wider text-emerald-700 flex items-center gap-1.5">
+                  <i class="fa-brands fa-android text-sm"></i>
+                  <span>Hướng dẫn 4 bước tạo App trên điện thoại Android</span>
                 </div>
 
-                <div class="p-3 rounded-2xl bg-white border-2 border-indigo-200 flex items-start gap-3 shadow-2xs">
-                  <span class="w-7 h-7 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center justify-center shrink-0">2</span>
-                  <div>
-                    <div class="font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
-                      <span>Nhấn biểu tượng Chia sẻ (Share)</span>
-                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold text-[11px]"><i class="fa-solid fa-arrow-up-from-bracket"></i>Share</span>
+                ${this._deferredInstallPrompt ? `
+                  <div class="p-3.5 rounded-2xl bg-emerald-50 border-2 border-emerald-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div>
+                      <div class="font-extrabold text-emerald-900">Thiết bị này hỗ trợ cài App tự động 1 chạm!</div>
+                      <p class="text-emerald-700 mt-0.5">Bấm nút bên cạnh để cài trực tiếp mà không cần mở menu thủ công.</p>
                     </div>
-                    <p class="text-slate-600 mt-0.5 leading-relaxed">Chạm vào nút <strong>Chia sẻ</strong> (ô vuông có mũi tên hướng lên) nằm ở thanh công cụ dưới cùng của Safari trên iPhone (hoặc góc trên bên phải trên iPad).</p>
+                    <button type="button" onclick="App.triggerNativeInstallPrompt()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold shrink-0 cursor-pointer inline-flex items-center gap-1.5 shadow-xs">
+                      <i class="fa-solid fa-download"></i><span>Cài Đặt Ngay</span>
+                    </button>
                   </div>
-                </div>
+                ` : ''}
 
-                <div class="p-3 rounded-2xl bg-white border-2 border-indigo-200 flex items-start gap-3 shadow-2xs">
-                  <span class="w-7 h-7 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center justify-center shrink-0">3</span>
-                  <div>
-                    <div class="font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
-                      <span>Chọn "Thêm vào Màn hình chính"</span>
-                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]"><i class="fa-regular fa-square-plus"></i>Add to Home Screen</span>
+                <div class="space-y-2.5 text-xs" id="androidStepsContainer">
+                  <div class="p-3 rounded-2xl bg-white border border-slate-200 flex items-start gap-3 shadow-2xs">
+                    <span class="w-7 h-7 rounded-xl bg-emerald-600 text-white font-extrabold flex items-center justify-center shrink-0">1</span>
+                    <div>
+                      <div class="font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
+                        <span>Quét mã QR hoặc mở link bằng Google Chrome</span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]"><i class="fa-brands fa-chrome"></i>Chrome</span>
+                      </div>
+                      <p class="text-slate-600 mt-0.5 leading-relaxed">Dùng <strong>Máy ảnh / Zalo QR</strong> trên điện thoại Android (Samsung, Oppo, Xiaomi, Vivo, Realme...) quét mã QR và mở trang bằng trình duyệt <strong>Google Chrome</strong> hoặc <strong>Samsung Internet</strong>.</p>
                     </div>
-                    <p class="text-slate-600 mt-0.5 leading-relaxed">Cuộn danh sách menu xuống dưới, chọn <strong>"Thêm vào Màn hình chính"</strong>, sau đó nhấn chữ <strong>"Thêm" (Add)</strong> ở góc trên bên phải màn hình.</p>
                   </div>
+
+                  <div class="p-3 rounded-2xl bg-white border-2 border-emerald-200 flex items-start gap-3 shadow-2xs">
+                    <span class="w-7 h-7 rounded-xl bg-emerald-600 text-white font-extrabold flex items-center justify-center shrink-0">2</span>
+                    <div>
+                      <div class="font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
+                        <span>Nhấn biểu tượng Menu ba chấm ở góc trình duyệt</span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]"><i class="fa-solid fa-ellipsis-vertical"></i>Menu</span>
+                      </div>
+                      <p class="text-slate-600 mt-0.5 leading-relaxed">Chạm vào biểu tượng <strong>ba chấm dọc</strong> ở góc trên bên phải của <strong>Chrome</strong> <em>(hoặc biểu tượng 3 gạch ngang <i class="fa-solid fa-bars mx-0.5"></i> ở góc dưới bên phải nếu dùng Samsung Internet)</em>.</p>
+                    </div>
+                  </div>
+
+                  <div class="p-3 rounded-2xl bg-white border-2 border-emerald-200 flex items-start gap-3 shadow-2xs">
+                    <span class="w-7 h-7 rounded-xl bg-emerald-600 text-white font-extrabold flex items-center justify-center shrink-0">3</span>
+                    <div>
+                      <div class="font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
+                        <span>Chọn "Cài đặt ứng dụng" hoặc "Thêm vào Màn hình chính"</span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold text-[11px]"><i class="fa-solid fa-mobile-screen-button"></i>Install App</span>
+                      </div>
+                      <p class="text-slate-600 mt-0.5 leading-relaxed">Nhấn vào mục <strong>"Cài đặt ứng dụng"</strong> <em>(Install app)</em> hoặc <strong>"Thêm vào Màn hình chính"</strong>, sau đó chọn <strong>"Cài đặt"</strong> trong hộp xác nhận hiện ra.</p>
+                    </div>
+                  </div>
+
+                  <div class="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200 flex items-start gap-3">
+                    <span class="w-7 h-7 rounded-xl bg-emerald-600 text-white font-extrabold flex items-center justify-center shrink-0">4</span>
+                    <div>
+                      <div class="font-extrabold text-slate-900">Mở App Khảo Thí Toán từ Màn hình chính</div>
+                      <p class="text-slate-600 mt-0.5 leading-relaxed">Sau vài giây, biểu tượng <strong>Khảo Thí Toán</strong> xuất hiện ngay trên Màn hình chính điện thoại như một ứng dụng độc lập. Mở App toàn màn hình để xem đề PDF và làm bài thi!</p>
+                    </div>
+                  </div>
+                </div>
+              ` : `
+                <div class="text-xs font-extrabold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5">
+                  <i class="fa-brands fa-apple text-sm"></i>
+                  <span>Hướng dẫn 4 bước tạo App trên iPhone / iPad (iOS)</span>
                 </div>
 
-                <div class="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-200 flex items-start gap-3">
-                  <span class="w-7 h-7 rounded-xl bg-emerald-600 text-white font-extrabold flex items-center justify-center shrink-0">4</span>
-                  <div>
-                    <div class="font-extrabold text-slate-900">Mở App Khảo Thí Toán — Xem Đề PDF &amp; Nộp Bài</div>
-                    <p class="text-slate-600 mt-0.5 leading-relaxed">Biểu tượng <strong>Khảo Thí Toán</strong> xuất hiện ngay trên Màn hình chính. Học sinh mở App toàn màn hình, vuốt xem trọn bộ đề PDF nhiều trang, điền phiếu 3 phần và bấm <strong>Nộp Bài</strong> chấm điểm tức thì!</p>
+                <div class="space-y-2.5 text-xs" id="iosStepsContainer">
+                  <div class="p-3 rounded-2xl bg-white border border-slate-200 flex items-start gap-3 shadow-2xs">
+                    <span class="w-7 h-7 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center justify-center shrink-0">1</span>
+                    <div>
+                      <div class="font-extrabold text-slate-900">Quét mã QR bằng Camera mở trong Safari</div>
+                      <p class="text-slate-600 mt-0.5 leading-relaxed">Mở ứng dụng <strong>Camera</strong> mặc định trên iPhone/iPad, hướng vào mã QR bên cạnh và chạm vào thông báo hiện ra để mở bằng trình duyệt <strong>Safari</strong>.</p>
+                    </div>
+                  </div>
+
+                  <div class="p-3 rounded-2xl bg-white border-2 border-indigo-200 flex items-start gap-3 shadow-2xs">
+                    <span class="w-7 h-7 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center justify-center shrink-0">2</span>
+                    <div>
+                      <div class="font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
+                        <span>Nhấn biểu tượng Chia sẻ (Share)</span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold text-[11px]"><i class="fa-solid fa-arrow-up-from-bracket"></i>Share</span>
+                      </div>
+                      <p class="text-slate-600 mt-0.5 leading-relaxed">Chạm vào nút <strong>Chia sẻ</strong> (ô vuông có mũi tên hướng lên) nằm ở thanh công cụ dưới cùng của Safari trên iPhone (hoặc góc trên bên phải trên iPad).</p>
+                    </div>
+                  </div>
+
+                  <div class="p-3 rounded-2xl bg-white border-2 border-indigo-200 flex items-start gap-3 shadow-2xs">
+                    <span class="w-7 h-7 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center justify-center shrink-0">3</span>
+                    <div>
+                      <div class="font-extrabold text-slate-900 flex flex-wrap items-center gap-1.5">
+                        <span>Chọn "Thêm vào Màn hình chính"</span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]"><i class="fa-regular fa-square-plus"></i>Add to Home Screen</span>
+                      </div>
+                      <p class="text-slate-600 mt-0.5 leading-relaxed">Cuộn danh sách menu xuống dưới, chọn <strong>"Thêm vào Màn hình chính"</strong>, sau đó nhấn chữ <strong>"Thêm" (Add)</strong> ở góc trên bên phải màn hình.</p>
+                    </div>
+                  </div>
+
+                  <div class="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-200 flex items-start gap-3">
+                    <span class="w-7 h-7 rounded-xl bg-emerald-600 text-white font-extrabold flex items-center justify-center shrink-0">4</span>
+                    <div>
+                      <div class="font-extrabold text-slate-900">Mở App Khảo Thí Toán — Xem Đề PDF &amp; Nộp Bài</div>
+                      <p class="text-slate-600 mt-0.5 leading-relaxed">Biểu tượng <strong>Khảo Thí Toán</strong> xuất hiện ngay trên Màn hình chính. Học sinh mở App toàn màn hình, vuốt xem trọn bộ đề PDF nhiều trang, điền phiếu trả lời và bấm <strong>Nộp Bài</strong> chấm điểm tức thì!</p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              `}
 
               <!-- Tóm tắt quyền lợi khi dùng trên App -->
               <div class="grid grid-cols-3 gap-2 pt-1 text-center text-[11px] font-bold">
@@ -9292,16 +9427,21 @@ const App = {
           </div>
         </div>
 
-        <!-- Footer / Thanh chỉ dẫn trực tiếp trên Safari iOS -->
+        <!-- Footer / Thanh chỉ dẫn trực tiếp trên trình duyệt điện thoại -->
         <div class="px-5 py-3 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2 shrink-0 ios-safe-bottom">
-          ${isIos && !standalone ? `
+          ${isAndroid && !standalone && isAndroidTab ? `
+            <div class="text-xs font-bold text-emerald-700 flex items-center gap-2">
+              <i class="fa-solid fa-arrow-up animate-bounce text-emerald-600"></i>
+              <span>Nhấn nút <i class="fa-solid fa-ellipsis-vertical mx-0.5"></i> góc trên phải Chrome &rarr; chọn "Cài đặt ứng dụng"</span>
+            </div>
+          ` : (isIos && !standalone && !isAndroidTab ? `
             <div class="text-xs font-bold text-indigo-700 flex items-center gap-2">
               <i class="fa-solid fa-arrow-down animate-bounce text-indigo-600"></i>
               <span>Nhấn nút <i class="fa-solid fa-arrow-up-from-bracket mx-0.5"></i> ở thanh dưới Safari &rarr; chọn "Thêm vào Màn hình chính"</span>
             </div>
           ` : `
-            <span class="text-[11px] text-slate-500"><i class="fa-solid fa-mobile-screen-button text-indigo-600 mr-1"></i>Tương thích hoàn toàn với iOS (iPhone / iPad) &amp; Android</span>
-          `}
+            <span class="text-[11px] text-slate-500"><i class="fa-solid fa-mobile-screen-button text-indigo-600 mr-1"></i>Hỗ trợ tạo App độc lập trên cả điện thoại Android &amp; iOS (iPhone / iPad)</span>
+          `)}
           <button type="button" onclick="App.closeIosAppModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer ml-auto">
             Đã hiểu &amp; Đóng
           </button>
