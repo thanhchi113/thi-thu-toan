@@ -79,16 +79,19 @@ const App = {
     studentHwSearchQuery: '',
     studentHwGradeFilter: 'ALL',
 
-    // Cấu hình quyền xem điểm, ẩn danh & giám sát chống thoát màn hình khi thi
+    // Cấu hình quyền xem điểm, so sánh Lớp/Khối, ẩn danh & giám sát chống thoát màn hình khi thi
     settings: {
       allowStudentViewOwnScore: true,    // Cho phép học sinh tra cứu điểm của bản thân
-      allowStudentViewClassBoard: true,  // Cho phép học sinh xem bảng điểm/thứ hạng của lớp
+      allowStudentViewClassBoard: false, // Mặc định KHÓA: Học sinh chỉ có quyền xem bảng so sánh khi Admin mở
+      studentCompareScope: 'both',       // 'both' (Lớp mình & Toàn khối) | 'class' (Chỉ Lớp mình) | 'grade' (Chỉ Toàn khối)
       anonymizeOtherStudents: true,      // Ẩn thông tin các bạn khác để bảo vệ sự riêng tư
       allowStudentViewAnswers: true,     // Cho phép học sinh xem đáp án & lời giải sau khi nộp
       warnOnExitExam: true,              // Cảnh báo & ghi nhận vi phạm khi thoát ra ngoài lúc đang thi (Điện thoại / App / Web)
     },
     violationLogs: [],
-    studentScoreTab: 'mine',             // 'mine' (Kết quả cá nhân) | 'classBoard' (Bảng xếp hạng lớp)
+    studentScoreTab: 'mine',             // 'mine' (Kết quả cá nhân) | 'classBoard' (So sánh Lớp / Khối)
+    studentCompareMode: 'class',         // 'class' (Lớp của mình) | 'grade' (Toàn khối của mình)
+    studentCompareExamFilter: 'ALL',     // 'ALL' (Điểm TB các đề trong khối) | examId cụ thể
   },
 
   // Ép ô nhập Tài khoản đăng nhập luôn là chữ IN HOA (giữ nguyên vị trí con trỏ khi gõ trên điện thoại)
@@ -368,6 +371,129 @@ const App = {
         return e.returnValue;
       }
     });
+
+    // Hệ thống Hộp lựa chọn <select> tùy chỉnh đồng bộ giao diện toàn web (thay thế popup mặc định của HĐH)
+    document.addEventListener('mousedown', (e) => {
+      const pop = document.getElementById('appCustomSelectMenu');
+      if (pop && pop.contains(e.target)) return;
+      const sel = e.target.closest && e.target.closest('select');
+      if (sel && !sel.disabled && !sel.multiple) {
+        e.preventDefault();
+        sel.focus();
+        App._selectDownAt = Date.now();
+        App.toggleCustomSelectPopover(sel);
+        return;
+      }
+      if (pop) App.closeCustomSelectPopover();
+    });
+
+    document.addEventListener('click', (e) => {
+      const sel = e.target.closest && e.target.closest('select');
+      if (sel && !sel.disabled && !sel.multiple) {
+        e.preventDefault();
+        if (!App._selectDownAt || Date.now() - App._selectDownAt > 250) {
+          App.toggleCustomSelectPopover(sel);
+        }
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      const pop = document.getElementById('appCustomSelectMenu');
+      if (e.key === 'Escape' && pop) {
+        e.preventDefault();
+        App.closeCustomSelectPopover();
+        return;
+      }
+      const active = document.activeElement;
+      if (active && active.tagName === 'SELECT' && !active.disabled && (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+        App.openCustomSelectPopover(active);
+      }
+    });
+
+    window.addEventListener('resize', () => App.closeCustomSelectPopover());
+    document.addEventListener('scroll', (e) => {
+      const pop = document.getElementById('appCustomSelectMenu');
+      if (!pop) return;
+      if (e.target && e.target.closest && e.target.closest('#appCustomSelectMenu')) return;
+      App.closeCustomSelectPopover();
+    }, true);
+  },
+
+  closeCustomSelectPopover() {
+    if (this._activeCustomSelectEl) {
+      this._activeCustomSelectEl.classList.remove('ui-select-open');
+      this._activeCustomSelectEl = null;
+    }
+    const existing = document.getElementById('appCustomSelectMenu');
+    if (existing) existing.remove();
+  },
+
+  toggleCustomSelectPopover(selectEl) {
+    if (this._activeCustomSelectEl === selectEl && document.getElementById('appCustomSelectMenu')) {
+      this.closeCustomSelectPopover();
+    } else {
+      this.openCustomSelectPopover(selectEl);
+    }
+  },
+
+  openCustomSelectPopover(selectEl) {
+    if (!selectEl || selectEl.disabled) return;
+    this.closeCustomSelectPopover();
+    this._activeCustomSelectEl = selectEl;
+    selectEl.classList.add('ui-select-open');
+
+    const menu = document.createElement('div');
+    menu.id = 'appCustomSelectMenu';
+    menu.className = 'ui-select-popover';
+    menu.setAttribute('role', 'listbox');
+
+    const options = Array.from(selectEl.options || []);
+    options.forEach((opt) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('role', 'option');
+      const isSel = opt.value === selectEl.value;
+      btn.setAttribute('aria-selected', isSel ? 'true' : 'false');
+      btn.className = `ui-select-option ${isSel ? 'is-selected' : ''}`;
+      btn.innerHTML = `
+        <span class="truncate">${String(opt.textContent || '').replace(/</g, '&lt;')}</span>
+        ${isSel ? '<i class="fa-solid fa-check text-[11px] shrink-0"></i>' : ''}
+      `;
+      btn.onclick = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const changed = selectEl.value !== opt.value;
+        selectEl.value = opt.value;
+        this.closeCustomSelectPopover();
+        if (changed) {
+          selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      };
+      menu.appendChild(btn);
+    });
+
+    document.body.appendChild(menu);
+
+    const rect = selectEl.getBoundingClientRect();
+    const minW = Math.max(rect.width, 176);
+    menu.style.minWidth = `${Math.round(minW)}px`;
+    menu.style.maxWidth = `${Math.min(360, window.innerWidth - 16)}px`;
+
+    const menuRect = menu.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - 10;
+    const topPos = (spaceBelow < menuRect.height && rect.top > menuRect.height + 12)
+      ? Math.max(8, rect.top - menuRect.height - 6)
+      : Math.min(window.innerHeight - menuRect.height - 8, rect.bottom + 6);
+    const leftPos = Math.max(8, Math.min(rect.left, window.innerWidth - menuRect.width - 8));
+
+    menu.style.top = `${Math.round(topPos)}px`;
+    menu.style.left = `${Math.round(leftPos)}px`;
+
+    const selItem = menu.querySelector('.ui-select-option.is-selected');
+    if (selItem && typeof selItem.scrollIntoView === 'function') {
+      selItem.scrollIntoView({ block: 'nearest' });
+    }
   },
 
   showAntiCheatWarning() {
@@ -548,16 +674,26 @@ const App = {
 
     this.state.submissions = storedSubmissions ? JSON.parse(storedSubmissions) : (INITIAL_SEED_DATA.submissions || []).map(s => ({ ...s }));
 
-    // Tải cấu hình quyền riêng tư, xem điểm & giám sát chống thoát màn hình khi thi
+    // Tải cấu hình quyền riêng tư, xem điểm, so sánh Lớp/Khối & giám sát chống thoát màn hình khi thi
     const defaultSettings = {
       allowStudentViewOwnScore: true,
-      allowStudentViewClassBoard: true,
+      allowStudentViewClassBoard: false,
+      studentCompareScope: 'both',
       anonymizeOtherStudents: true,
       allowStudentViewAnswers: true,
       warnOnExitExam: true,
+      peerCompareDefaultLockedV1: true
     };
     const storedSettings = localStorage.getItem('thpt_settings');
     this.state.settings = storedSettings ? { ...defaultSettings, ...JSON.parse(storedSettings) } : defaultSettings;
+    if (!this.state.settings.peerCompareDefaultLockedV1) {
+      this.state.settings.allowStudentViewClassBoard = false;
+      this.state.settings.studentCompareScope = 'both';
+      this.state.settings.peerCompareDefaultLockedV1 = true;
+    }
+    if (!['both', 'class', 'grade'].includes(this.state.settings.studentCompareScope)) {
+      this.state.settings.studentCompareScope = 'both';
+    }
     if (typeof this.state.settings.allowStudentViewAnswers === 'undefined') {
       this.state.settings.allowStudentViewAnswers = true;
     }
@@ -1274,6 +1410,7 @@ const App = {
 
   // 4. Render Router chính
   render() {
+    this.closeCustomSelectPopover();
     const appContainer = document.getElementById('app');
     if (!appContainer) return;
 
@@ -1809,24 +1946,26 @@ const App = {
             ` : ''}
 
             ${this.state.studentMainTab === 'grades' ? `
-            <!-- 3. Kết Quả & Xếp Hạng -->
+            <!-- 3. Kết Quả & So Sánh Lớp / Khối -->
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div class="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
                 <div>
                   <h3 class="text-lg font-bold text-slate-900 flex items-center">
                     <i class="fa-solid fa-chart-simple text-indigo-600 mr-2"></i>
-                    Kết Quả Làm Bài &amp; Bảng Xếp Hạng
+                    Kết Quả Làm Bài &amp; So Sánh Lớp / Khối
                   </h3>
-                  <p class="text-xs text-slate-500 mt-0.5">Theo dõi điểm số các lượt thi đã nộp và đối chiếu thứ hạng trong lớp</p>
+                  <p class="text-xs text-slate-500 mt-0.5">Theo dõi điểm số cá nhân và đối chiếu kết quả trong phạm vi lớp hoặc khối của bạn khi Giáo viên mở quyền</p>
                 </div>
 
-                ${(this.state.settings && this.state.settings.allowStudentViewClassBoard && this.state.settings.allowStudentViewOwnScore) ? `
+                ${(this.state.settings && this.state.settings.allowStudentViewOwnScore) ? `
                   <div class="bg-slate-100 p-1 rounded-xl border border-slate-200 flex text-xs font-semibold self-start sm:self-auto">
-                    <button onclick="App.setStudentScoreTab('mine')" class="px-3 py-1.5 rounded-lg transition cursor-pointer ${this.state.studentScoreTab === 'mine' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
+                    <button id="studentTabMineBtn" onclick="App.setStudentScoreTab('mine')" class="px-3 py-1.5 rounded-lg transition cursor-pointer ${this.state.studentScoreTab === 'mine' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
                       <i class="fa-solid fa-user mr-1.5"></i>Kết Quả Cá Nhân
                     </button>
-                    <button onclick="App.setStudentScoreTab('classBoard')" class="px-3 py-1.5 rounded-lg transition cursor-pointer ${this.state.studentScoreTab === 'classBoard' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
-                      <i class="fa-solid fa-ranking-star mr-1.5"></i>Bảng Xếp Hạng Lớp
+                    <button id="studentTabClassBoardBtn" onclick="App.setStudentScoreTab('classBoard')" class="px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center ${this.state.studentScoreTab === 'classBoard' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
+                      <i class="fa-solid fa-ranking-star mr-1.5"></i>
+                      <span>So Sánh Lớp / Khối</span>
+                      ${!this.isStudentCompareAllowed() ? '<i class="fa-solid fa-lock text-[10px] ml-1.5 text-slate-400" title="Đang khóa bởi Giáo viên"></i>' : ''}
                     </button>
                   </div>
                 ` : ''}
@@ -1845,101 +1984,190 @@ const App = {
                     Bài làm của bạn đã được ghi nhận an toàn trên hệ thống. Giáo viên đang khóa chế độ xem điểm để tổng kết chung cho cả lớp. Kết quả sẽ hiển thị ngay khi giáo viên công bố.
                   </p>
                 </div>
-              ` : (this.state.studentScoreTab === 'classBoard' && this.state.settings && this.state.settings.allowStudentViewClassBoard) ? `
-                <!-- TAB 2: BẢNG SO SÁNH VÀ XẾP HẠNG LỚP (CƠ CHẾ ẨN DANH THÔNG TIN BẠN KHÁC) -->
-                <div class="space-y-4">
-                  ${this.state.settings.anonymizeOtherStudents ? `
-                    <div class="p-3.5 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-900 flex items-center space-x-2.5">
-                      <div class="w-7 h-7 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 font-bold">
-                        <i class="fa-solid fa-user-secret"></i>
-                      </div>
-                      <div class="text-[11px] leading-relaxed">
-                        <strong>Chế độ so sánh ẩn danh đang BẬT:</strong> Thông tin họ tên và mã số của các bạn khác đã được ẩn để bảo vệ quyền riêng tư. Bạn hoàn toàn có thể đối chiếu điểm số của mình với thứ hạng chung của cả lớp.
-                      </div>
+              ` : (this.state.studentScoreTab === 'classBoard') ? `
+                ${!this.isStudentCompareAllowed() ? `
+                  <!-- Bảng so sánh đang khóa bởi Giáo viên -->
+                  <div id="studentPeerCompareLockedBox" class="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center text-slate-800 space-y-3">
+                    <div class="w-12 h-12 mx-auto rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-xl font-bold shadow-xs">
+                      <i class="fa-solid fa-lock"></i>
                     </div>
-                  ` : ''}
-
-                  <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-                    <div class="overflow-x-auto">
-                      <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
-                        <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
-                          <tr>
-                            <th class="px-4 py-3.5 text-center font-bold w-14">Hạng</th>
-                            <th class="px-4 py-3.5 font-bold font-mono">Mã HS</th>
-                            <th class="px-5 py-3.5 font-bold">Học Sinh</th>
-                            <th class="px-4 py-3.5 text-center font-bold">Khối / Lớp</th>
-                            ${this.state.exams.map((ex, idx) => `
-                              <th class="px-4 py-3.5 text-center font-bold min-w-[100px]">
-                                <div class="text-indigo-900 font-extrabold">${ex.roundLabel || ('Đợt ' + (idx + 1))}</div>
-                              </th>
-                            `).join('')}
-                            <th class="px-4 py-3.5 text-center font-bold bg-indigo-50/50 text-indigo-900">Điểm TB</th>
-                            <th class="px-4 py-3.5 text-center font-bold">Xếp Loại</th>
-                          </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-100">
-                          ${(() => {
-                            // Sắp xếp học sinh theo điểm trung bình từ cao xuống thấp
-                            const rankedList = this.state.students.map(st => {
-                              const examScores = this.state.exams.map(ex => {
-                                const sub = this.state.submissions.find(x => x.studentId === st.studentId && x.examId === ex.id);
-                                return sub ? Number(sub.scoreResult.totalScore) : null;
-                              });
-                              const valid = examScores.filter(x => x !== null);
-                              const avg = valid.length > 0 ? (valid.reduce((a, b) => a + b, 0) / valid.length) : -1;
-                              return { student: st, examScores, avg, completed: valid.length };
-                            }).sort((a, b) => b.avg - a.avg || b.completed - a.completed);
-
-                            return rankedList.map((item, rIdx) => {
-                              const isMe = item.student.studentId === u.studentId;
-                              const isAnon = this.state.settings.anonymizeOtherStudents && !isMe;
-                              const displayName = isMe ? `${u.fullName} (Bạn)` : (isAnon ? `Học sinh ẩn danh #${rIdx + 1}` : item.student.fullName);
-                              const displayId = isMe ? u.studentId : (isAnon ? 'HS******' : item.student.studentId);
-                              const avgStr = item.avg >= 0 ? item.avg.toFixed(2) : '--';
-
-                              let rankMedal = `<span class="text-xs font-bold text-slate-500">#${rIdx + 1}</span>`;
-                              if (rIdx === 0 && item.avg >= 0) rankMedal = `<span class="text-base" title="Hạng 1"><i class="fa-solid fa-medal text-amber-500"></i></span>`;
-                              else if (rIdx === 1 && item.avg >= 0) rankMedal = `<span class="text-base" title="Hạng 2"><i class="fa-solid fa-medal text-slate-400"></i></span>`;
-                              else if (rIdx === 2 && item.avg >= 0) rankMedal = `<span class="text-base" title="Hạng 3"><i class="fa-solid fa-medal text-amber-700"></i></span>`;
-
-                              let rankBadge = '<span class="text-xs text-slate-400">--</span>';
-                              if (item.avg >= 9.0) rankBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">Xuất sắc</span>';
-                              else if (item.avg >= 8.0) rankBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800">Giỏi</span>';
-                              else if (item.avg >= 6.5) rankBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800">Khá</span>';
-                              else if (item.avg >= 5.0) rankBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">Trung bình</span>';
-                              else if (item.avg >= 0) rankBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800">Yếu</span>';
-
-                              return `
-                                <tr class="${isMe ? 'bg-indigo-50/70 border-y-2 border-indigo-400 font-bold' : 'hover:bg-slate-50/80'} transition">
-                                  <td class="px-4 py-3.5 text-center">${rankMedal}</td>
-                                  <td class="px-4 py-3.5 font-mono text-xs ${isMe ? 'text-indigo-800 font-extrabold' : 'text-slate-500'}">${displayId}</td>
-                                  <td class="px-5 py-3.5 text-sm ${isMe ? 'text-indigo-900 font-extrabold flex items-center space-x-1.5' : 'text-slate-700'}">
-                                    <span>${displayName}</span>
-                                    ${isMe ? `<span class="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-bold">Chính Bạn</span>` : ''}
-                                  </td>
-                                  <td class="px-4 py-3.5 text-center text-xs font-semibold text-slate-600 whitespace-nowrap">K${this.getStudentGrade(item.student)} • ${item.student.className || '12'}</td>
-                                  ${item.examScores.map(sc => `
-                                    <td class="px-4 py-3.5 text-center font-mono text-xs">
-                                      ${sc !== null ? `
-                                        <span class="font-extrabold ${sc >= 8.0 ? 'text-emerald-700' : (sc >= 6.5 ? 'text-indigo-700' : 'text-slate-700')}">${sc.toFixed(2)}</span>
-                                      ` : `<span class="text-slate-300 font-normal">--</span>`}
-                                    </td>
-                                  `).join('')}
-                                  <td class="px-4 py-3.5 text-center font-mono font-extrabold text-sm ${isMe ? 'text-indigo-700' : 'text-slate-800'} bg-indigo-50/30">
-                                    ${avgStr}
-                                  </td>
-                                  <td class="px-4 py-3.5 text-center">
-                                    ${rankBadge}
-                                  </td>
-                                </tr>
-                              `;
-                            }).join('');
-                          })()}
-                        </tbody>
-                      </table>
+                    <h4 class="text-base font-bold text-slate-900">Bảng So Sánh Lớp / Khối Đang Khóa</h4>
+                    <p class="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
+                      Học sinh chỉ có quyền xem bảng đối chiếu kết quả với <strong>Lớp của mình</strong> hoặc <strong>Toàn khối của mình</strong> khi Giáo viên mở quyền hiển thị.
+                    </p>
+                    <div class="pt-1">
+                      <button type="button" onclick="App.setStudentScoreTab('mine')" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer inline-flex items-center gap-1.5">
+                        <i class="fa-solid fa-arrow-left"></i><span>Quay lại Kết Quả Cá Nhân</span>
+                      </button>
                     </div>
                   </div>
-                </div>
+                ` : (() => {
+                  const cmp = this.getStudentPeerComparison(u);
+                  const scopeLabel = cmp.scope === 'class'
+                    ? `Lớp ${cmp.myClass || ('K' + cmp.myGrade)}`
+                    : `Toàn Khối ${cmp.myGrade}`;
+                  return `
+                    <!-- TAB 2: BẢNG SO SÁNH LỚP CỦA BẠN HOẶC TOÀN KHỐI CỦA BẠN -->
+                    <div class="space-y-4" id="studentPeerCompareSection">
+                      <!-- Thanh chọn phạm vi (Lớp mình / Toàn khối) & lọc đề thi -->
+                      <div id="studentPeerCompareToolbar" class="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+                            <i class="fa-solid fa-users-viewfinder text-indigo-600"></i>
+                            <span>Phạm vi so sánh:</span>
+                          </span>
+                          ${cmp.allowedScopes.length > 1 ? `
+                            <div class="bg-white p-1 rounded-xl border border-slate-200 inline-flex text-xs font-semibold shadow-2xs">
+                              <button type="button" id="studentCompareScopeBtn_class" onclick="App.setStudentCompareMode('class')" class="px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${cmp.scope === 'class' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
+                                <i class="fa-solid fa-chalkboard-user"></i>
+                                <span>Lớp của bạn (${cmp.myClass || ('K' + cmp.myGrade)})</span>
+                              </button>
+                              <button type="button" id="studentCompareScopeBtn_grade" onclick="App.setStudentCompareMode('grade')" class="px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${cmp.scope === 'grade' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
+                                <i class="fa-solid fa-layer-group"></i>
+                                <span>Toàn Khối ${cmp.myGrade}</span>
+                              </button>
+                            </div>
+                          ` : `
+                            <span class="px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-bold inline-flex items-center gap-1.5">
+                              <i class="fa-solid ${cmp.scope === 'class' ? 'fa-chalkboard-user' : 'fa-layer-group'}"></i>
+                              <span>${cmp.scope === 'class' ? `Chỉ trong Lớp của bạn (${cmp.myClass || ('K' + cmp.myGrade)})` : `Chỉ trong Toàn Khối ${cmp.myGrade}`}</span>
+                            </span>
+                          `}
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                          <span class="text-xs font-semibold text-slate-500 shrink-0">Đề đối chiếu:</span>
+                          <select id="studentCompareExamSelect" onchange="App.setStudentCompareExamFilter(this.value)" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 min-w-[200px]">
+                            <option value="ALL" ${cmp.examFilter === 'ALL' ? 'selected' : ''}>Tổng hợp các đề (${cmp.allCohortExams.length} đề)</option>
+                            ${cmp.allCohortExams.map((ex, idx) => `
+                              <option value="${ex.id}" ${cmp.examFilter === ex.id ? 'selected' : ''}>${ex.roundLabel || ('Đợt ' + (idx + 1))} — ${ex.title}</option>
+                            `).join('')}
+                          </select>
+                        </div>
+                      </div>
+
+                      <!-- 3 thẻ tóm tắt vị trí của học sinh trong Lớp / Khối -->
+                      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div class="p-4 rounded-xl border border-indigo-200 bg-indigo-50/50 flex items-center justify-between">
+                          <div>
+                            <div class="text-[11px] font-bold uppercase tracking-wider text-indigo-700">Thứ hạng tại ${scopeLabel}</div>
+                            <div class="text-xl font-extrabold text-indigo-950 font-mono mt-0.5">
+                              ${cmp.myRank ? `#${cmp.myRank} <span class="text-xs font-semibold text-slate-500">/ ${cmp.rankedList.length} HS</span>` : `<span class="text-sm font-bold text-slate-500">Chưa có bài nộp</span>`}
+                            </div>
+                          </div>
+                          <div class="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-base">
+                            <i class="fa-solid fa-trophy"></i>
+                          </div>
+                        </div>
+
+                        <div class="p-4 rounded-xl border border-slate-200 bg-white flex items-center justify-between">
+                          <div>
+                            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">${cmp.examFilter === 'ALL' ? 'Điểm TB của bạn' : 'Điểm đề này của bạn'}</div>
+                            <div class="text-xl font-extrabold text-slate-900 font-mono mt-0.5">
+                              ${cmp.myEntry && cmp.myEntry.avg >= 0 ? `${cmp.myEntry.avg.toFixed(2)}đ` : '--'}
+                            </div>
+                          </div>
+                          <div class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-base">
+                            <i class="fa-solid fa-user-check"></i>
+                          </div>
+                        </div>
+
+                        <div class="p-4 rounded-xl border border-slate-200 bg-white flex items-center justify-between">
+                          <div>
+                            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Mặt bằng ${scopeLabel}</div>
+                            <div class="text-xl font-extrabold text-slate-900 font-mono mt-0.5">
+                              ${cmp.cohortAvg !== null ? `${cmp.cohortAvg.toFixed(2)}đ` : '--'}
+                              <span class="text-[11px] font-normal text-slate-500 ml-1">(${cmp.activeParticipants}/${cmp.rankedList.length} HS đã thi)</span>
+                            </div>
+                          </div>
+                          <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-base">
+                            <i class="fa-solid fa-chart-line"></i>
+                          </div>
+                        </div>
+                      </div>
+
+                      ${this.state.settings.anonymizeOtherStudents ? `
+                        <div class="p-3.5 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-900 flex items-center space-x-2.5">
+                          <div class="w-7 h-7 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 font-bold">
+                            <i class="fa-solid fa-user-secret"></i>
+                          </div>
+                          <div class="text-[11px] leading-relaxed">
+                            <strong>Chế độ so sánh ẩn danh đang BẬT:</strong> Họ tên và mã số của các bạn khác trong <strong>${scopeLabel}</strong> đã được ẩn để bảo vệ quyền riêng tư. Bạn chỉ xem được điểm số và thứ hạng đối chiếu trong phạm vi ${scopeLabel}.
+                          </div>
+                        </div>
+                      ` : ''}
+
+                      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                        <div class="overflow-x-auto">
+                          <table id="studentPeerCompareTable" class="min-w-full divide-y divide-slate-200 text-left text-sm">
+                            <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+                              <tr>
+                                <th class="px-4 py-3.5 text-center font-bold w-14">Hạng</th>
+                                <th class="px-4 py-3.5 font-bold font-mono">Mã HS</th>
+                                <th class="px-5 py-3.5 font-bold">Học Sinh</th>
+                                <th class="px-4 py-3.5 text-center font-bold">Khối / Lớp</th>
+                                ${cmp.targetExams.map((ex, idx) => `
+                                  <th class="px-4 py-3.5 text-center font-bold min-w-[100px]" title="${ex.title}">
+                                    <div class="text-indigo-900 font-extrabold">${ex.roundLabel || ('Đợt ' + (idx + 1))}</div>
+                                  </th>
+                                `).join('')}
+                                <th class="px-4 py-3.5 text-center font-bold bg-indigo-50/50 text-indigo-900">${cmp.examFilter === 'ALL' ? 'Điểm TB' : 'Điểm Đề'}</th>
+                                <th class="px-4 py-3.5 text-center font-bold">Xếp Loại</th>
+                              </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                              ${cmp.rankedList.map((item, rIdx) => {
+                                const isMe = item.student.studentId === u.studentId;
+                                const isAnon = this.state.settings.anonymizeOtherStudents && !isMe;
+                                const displayName = isMe ? `${u.fullName} (Bạn)` : (isAnon ? `Học sinh ẩn danh #${rIdx + 1}` : item.student.fullName);
+                                const displayId = isMe ? u.studentId : (isAnon ? 'HS******' : item.student.studentId);
+                                const avgStr = item.avg >= 0 ? item.avg.toFixed(2) : '--';
+
+                                let rankMedal = '<span class="text-xs text-slate-400">--</span>';
+                                if (item.rank === 1) rankMedal = '<span class="text-base" title="Hạng 1"><i class="fa-solid fa-medal text-amber-500"></i></span>';
+                                else if (item.rank === 2) rankMedal = '<span class="text-base" title="Hạng 2"><i class="fa-solid fa-medal text-slate-400"></i></span>';
+                                else if (item.rank === 3) rankMedal = '<span class="text-base" title="Hạng 3"><i class="fa-solid fa-medal text-amber-700"></i></span>';
+                                else if (item.rank) rankMedal = `<span class="text-xs font-bold text-slate-500">#${item.rank}</span>`;
+
+                                let rankBadge = '<span class="text-xs text-slate-400">--</span>';
+                                if (item.avg >= 9.0) rankBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">Xuất sắc</span>';
+                                else if (item.avg >= 8.0) rankBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800">Giỏi</span>';
+                                else if (item.avg >= 6.5) rankBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800">Khá</span>';
+                                else if (item.avg >= 5.0) rankBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">Trung bình</span>';
+                                else if (item.avg >= 0) rankBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800">Yếu</span>';
+
+                                return `
+                                  <tr data-peer-student="${isAnon ? 'ANON' : item.student.studentId}" class="${isMe ? 'bg-indigo-50/70 border-y-2 border-indigo-400 font-bold' : 'hover:bg-slate-50/80'} transition">
+                                    <td class="px-4 py-3.5 text-center">${rankMedal}</td>
+                                    <td class="px-4 py-3.5 font-mono text-xs ${isMe ? 'text-indigo-800 font-extrabold' : 'text-slate-500'}">${displayId}</td>
+                                    <td class="px-5 py-3.5 text-sm ${isMe ? 'text-indigo-900 font-extrabold flex items-center space-x-1.5' : 'text-slate-700'}">
+                                      <span>${displayName}</span>
+                                      ${isMe ? `<span class="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-bold">Chính Bạn</span>` : ''}
+                                    </td>
+                                    <td class="px-4 py-3.5 text-center text-xs font-semibold text-slate-600 whitespace-nowrap">K${this.getStudentGrade(item.student)} • ${item.student.className || '12'}</td>
+                                    ${item.examScores.map(sc => `
+                                      <td class="px-4 py-3.5 text-center font-mono text-xs">
+                                        ${sc !== null ? `
+                                          <span class="font-extrabold ${sc >= 8.0 ? 'text-emerald-700' : (sc >= 6.5 ? 'text-indigo-700' : 'text-slate-700')}">${sc.toFixed(2)}</span>
+                                        ` : `<span class="text-slate-300 font-normal">--</span>`}
+                                      </td>
+                                    `).join('')}
+                                    <td class="px-4 py-3.5 text-center font-mono font-extrabold text-sm ${isMe ? 'text-indigo-700' : 'text-slate-800'} bg-indigo-50/30">
+                                      ${avgStr}
+                                    </td>
+                                    <td class="px-4 py-3.5 text-center">
+                                      ${rankBadge}
+                                    </td>
+                                  </tr>
+                                `;
+                              }).join('')}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                })()}
               ` : `
                 <!-- TAB 1: BÀI LÀM VÀ LỜI GIẢI CỦA BẢN THÂN -->
                 <!-- Thống kê tổng hợp các đợt thi của học sinh -->
@@ -1991,9 +2219,10 @@ const App = {
                             <th class="px-3 py-3.5 font-semibold text-center">Lần Thi</th>
                             <th class="px-3 py-3.5 font-semibold text-center">Giám Sát</th>
                             <th class="px-5 py-3.5 font-semibold">Thời gian nộp</th>
-                            <th class="px-4 py-3.5 font-semibold text-center">Phần I (3đ)</th>
-                            <th class="px-4 py-3.5 font-semibold text-center">Phần II (4đ)</th>
-                            <th class="px-4 py-3.5 font-semibold text-center">Phần III (3đ)</th>
+                            <th class="px-4 py-3.5 font-semibold text-center">Phần I</th>
+                            <th class="px-4 py-3.5 font-semibold text-center">Phần II</th>
+                            <th class="px-4 py-3.5 font-semibold text-center">Phần III</th>
+                            <th class="px-4 py-3.5 font-semibold text-center">Phần IV</th>
                             <th class="px-4 py-3.5 font-semibold text-center">Tổng Điểm</th>
                             <th class="px-5 py-3.5 font-semibold text-right">Thao tác</th>
                           </tr>
@@ -2018,9 +2247,16 @@ const App = {
                               <td class="px-4 py-4 text-center font-mono font-semibold text-slate-700">${sub.scoreResult.part1.score}đ</td>
                               <td class="px-4 py-4 text-center font-mono font-semibold text-slate-700">${sub.scoreResult.part2.score}đ</td>
                               <td class="px-4 py-4 text-center font-mono text-xs font-semibold">${sub.scoreResult.part3.score}đ</td>
+                              <td class="px-4 py-4 text-center font-mono text-xs font-semibold">
+                                ${sub.scoreResult.part4 && sub.scoreResult.part4.totalQuestions > 0
+                                  ? (sub.scoreResult.part4.pendingManual
+                                    ? '<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-sans font-bold">Chờ chấm</span>'
+                                    : `${sub.scoreResult.part4.score}đ`)
+                                  : '<span class="text-slate-300">—</span>'}
+                              </td>
                               <td class="px-4 py-4 text-center">
                                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${sub.scoreResult.totalScore >= 8.0 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">
-                                  ${sub.scoreResult.totalScore} / 10.0
+                                  ${sub.scoreResult.totalScore} / ${Number(sub.scoreResult.maxTotal || 10).toFixed(1)}
                                 </span>
                               </td>
                               <td class="px-5 py-4 text-right">
@@ -4232,10 +4468,13 @@ const App = {
                     Khi bật: Nếu học sinh thi trên điện thoại (App iOS / Safari / Chrome) hoặc máy tính mà vuốt ra màn hình chính, chuyển sang ứng dụng khác (Zalo, Camera, trình duyệt...), mở đa nhiệm hoặc rời tab khi đang làm bài, hệ thống sẽ lập tức <strong>rung cảnh báo, hiện bảng nhắc vi phạm quy chế</strong> và <strong>cộng số lần vi phạm vào sổ điểm gửi Giáo viên</strong>.
                   </p>
                 </div>
-                <button type="button" id="toggleWarnOnExitExamBtn" onclick="App.toggleSetting('warnOnExitExam')" class="ui-btn px-4 shrink-0 ${this.isExamExitWarningEnabled() ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm' : 'bg-slate-800 hover:bg-slate-900 text-white shadow-sm'}">
-                  <i class="fa-solid ${this.isExamExitWarningEnabled() ? 'fa-shield-halved' : 'fa-power-off'}"></i>
-                  <span>${this.isExamExitWarningEnabled() ? 'Tắt Cảnh Báo Thoát Màn Hình' : 'Bật Cảnh Báo Thoát Màn Hình'}</span>
-                </button>
+                <div class="flex items-center gap-3 shrink-0">
+                  <input type="checkbox" class="ui-switch switch-rose" ${this.isExamExitWarningEnabled() ? 'checked' : ''} onchange="App.toggleSetting('warnOnExitExam')" aria-label="Bật tắt cảnh báo thoát màn hình">
+                  <button type="button" id="toggleWarnOnExitExamBtn" onclick="App.toggleSetting('warnOnExitExam')" class="ui-btn px-4 shrink-0 ${this.isExamExitWarningEnabled() ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm' : 'bg-slate-800 hover:bg-slate-900 text-white shadow-sm'}">
+                    <i class="fa-solid ${this.isExamExitWarningEnabled() ? 'fa-shield-halved' : 'fa-power-off'}"></i>
+                    <span>${this.isExamExitWarningEnabled() ? 'Tắt Cảnh Báo Thoát Màn Hình' : 'Bật Cảnh Báo Thoát Màn Hình'}</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -4245,15 +4484,18 @@ const App = {
               </h4>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <!-- Cấu hình 1: Cho phép xem điểm bản thân -->
-              <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between space-y-3">
-                <div class="flex items-start justify-between gap-2">
-                  <div>
+              <div class="p-4 rounded-xl border ${this.state.settings.allowStudentViewOwnScore ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-slate-50/60'} flex flex-col justify-between space-y-3">
+                <div class="space-y-2">
+                  <div class="flex items-start justify-between gap-2">
                     <h4 class="text-xs font-bold text-slate-800">1. Xem Điểm Bản Thân</h4>
-                    <p class="text-[11px] text-slate-500 mt-1">Học sinh được tra cứu kết quả bài làm của chính mình.</p>
+                    <input type="checkbox" class="ui-switch switch-emerald" ${this.state.settings.allowStudentViewOwnScore ? 'checked' : ''} onchange="App.toggleSetting('allowStudentViewOwnScore')" aria-label="Cho phép học sinh xem điểm bản thân">
                   </div>
-                  <span class="text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${this.state.settings.allowStudentViewOwnScore ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
-                    ${this.state.settings.allowStudentViewOwnScore ? 'Đang Mở' : 'Đang Khóa'}
-                  </span>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${this.state.settings.allowStudentViewOwnScore ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
+                      ${this.state.settings.allowStudentViewOwnScore ? 'Đang Mở' : 'Đang Khóa'}
+                    </span>
+                  </div>
+                  <p class="text-[11px] text-slate-500 leading-relaxed">Học sinh được tra cứu kết quả bài làm của chính mình.</p>
                 </div>
                 <button type="button" onclick="App.toggleSetting('allowStudentViewOwnScore')" class="ui-btn w-full ${this.state.settings.allowStudentViewOwnScore ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
                   <i class="fa-solid ${this.state.settings.allowStudentViewOwnScore ? 'fa-lock-open' : 'fa-lock'}"></i>
@@ -4261,33 +4503,47 @@ const App = {
                 </button>
               </div>
 
-              <!-- Cấu hình 2: Bảng điểm cả lớp để so sánh -->
-              <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between space-y-3">
-                <div class="flex items-start justify-between gap-2">
-                  <div>
-                    <h4 class="text-xs font-bold text-slate-800">2. Bảng Điểm Cả Lớp</h4>
-                    <p class="text-[11px] text-slate-500 mt-1">Cho phép học sinh xem bảng xếp hạng lớp để đối chiếu năng lực.</p>
+              <!-- Cấu hình 2: So sánh kết quả Lớp / Khối (chỉ mở khi Admin cho phép) -->
+              <div class="p-4 rounded-xl border ${this.state.settings.allowStudentViewClassBoard ? 'border-indigo-300 bg-indigo-50/40' : 'border-slate-200 bg-slate-50/60'} flex flex-col justify-between space-y-3">
+                <div class="space-y-2">
+                  <div class="flex items-start justify-between gap-2">
+                    <h4 class="text-xs font-bold text-slate-800">2. So Sánh Lớp / Khối</h4>
+                    <input type="checkbox" id="togglePeerCompareSwitch" class="ui-switch" ${this.state.settings.allowStudentViewClassBoard ? 'checked' : ''} onchange="App.toggleSetting('allowStudentViewClassBoard')" aria-label="Mở quyền so sánh kết quả lớp hoặc khối">
                   </div>
-                  <span class="text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200 text-slate-600'}">
-                    ${this.state.settings.allowStudentViewClassBoard ? 'Cho Phép' : 'Chỉ Xem Riêng'}
-                  </span>
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span id="peerCompareStatusBadge" class="text-[11px] font-bold px-2 py-0.5 rounded-full ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200 text-slate-600'}">
+                      ${this.state.settings.allowStudentViewClassBoard ? 'Đang Mở Cho Xem' : 'Đang Khóa'}
+                    </span>
+                  </div>
+                  <p class="text-[11px] text-slate-500 leading-relaxed">Học sinh chỉ xem được khi Admin mở, và chỉ đối chiếu trong <strong>Lớp mình</strong> hoặc <strong>Toàn khối mình</strong>.</p>
+                  <div class="pt-1 space-y-1">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Phạm vi cho phép khi mở:</div>
+                    <div class="grid grid-cols-3 gap-1 bg-white p-1 rounded-xl border border-slate-200 text-[11px] font-bold">
+                      <button type="button" id="compareScopePill_both" onclick="App.setStudentCompareScope('both')" class="py-1 px-1.5 rounded-lg transition cursor-pointer ${(!this.state.settings.studentCompareScope || this.state.settings.studentCompareScope === 'both') ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'}">Lớp &amp; Khối</button>
+                      <button type="button" id="compareScopePill_class" onclick="App.setStudentCompareScope('class')" class="py-1 px-1.5 rounded-lg transition cursor-pointer ${this.state.settings.studentCompareScope === 'class' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'}">Chỉ Lớp</button>
+                      <button type="button" id="compareScopePill_grade" onclick="App.setStudentCompareScope('grade')" class="py-1 px-1.5 rounded-lg transition cursor-pointer ${this.state.settings.studentCompareScope === 'grade' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'}">Chỉ Khối</button>
+                    </div>
+                  </div>
                 </div>
-                <button type="button" onclick="App.toggleSetting('allowStudentViewClassBoard')" class="ui-btn w-full ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
-                  <i class="fa-solid fa-chart-simple"></i>
-                  <span>${this.state.settings.allowStudentViewClassBoard ? 'Khóa Bảng Lớp' : 'Mở Bảng So Sánh'}</span>
+                <button type="button" id="togglePeerCompareBtn" onclick="App.toggleSetting('allowStudentViewClassBoard')" class="ui-btn w-full ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
+                  <i class="fa-solid ${this.state.settings.allowStudentViewClassBoard ? 'fa-lock' : 'fa-unlock-keyhole'}"></i>
+                  <span>${this.state.settings.allowStudentViewClassBoard ? 'Khóa Bảng So Sánh' : 'Mở Bảng So Sánh'}</span>
                 </button>
               </div>
 
               <!-- Cấu hình 3: Ẩn danh thông tin học sinh khác -->
-              <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between space-y-3">
-                <div class="flex items-start justify-between gap-2">
-                  <div>
+              <div class="p-4 rounded-xl border ${this.state.settings.anonymizeOtherStudents ? 'border-purple-200 bg-purple-50/30' : 'border-slate-200 bg-slate-50/60'} flex flex-col justify-between space-y-3">
+                <div class="space-y-2">
+                  <div class="flex items-start justify-between gap-2">
                     <h4 class="text-xs font-bold text-slate-800">3. Ẩn Danh Bạn Khác</h4>
-                    <p class="text-[11px] text-slate-500 mt-1">Che tên/mã bạn khác (VD "Học sinh ẩn danh #1"), giữ nguyên điểm.</p>
+                    <input type="checkbox" class="ui-switch switch-purple" ${this.state.settings.anonymizeOtherStudents ? 'checked' : ''} onchange="App.toggleSetting('anonymizeOtherStudents')" aria-label="Ẩn danh tên học sinh khác">
                   </div>
-                  <span class="text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${this.state.settings.anonymizeOtherStudents ? 'bg-purple-100 text-purple-800' : 'bg-amber-100 text-amber-800'}">
-                    ${this.state.settings.anonymizeOtherStudents ? 'Đang Ẩn Danh' : 'Hiện Tên Thật'}
-                  </span>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${this.state.settings.anonymizeOtherStudents ? 'bg-purple-100 text-purple-800' : 'bg-amber-100 text-amber-800'}">
+                      ${this.state.settings.anonymizeOtherStudents ? 'Đang Ẩn Danh' : 'Hiện Tên Thật'}
+                    </span>
+                  </div>
+                  <p class="text-[11px] text-slate-500 leading-relaxed">Che tên/mã bạn khác (VD "Học sinh ẩn danh #1"), giữ nguyên điểm.</p>
                 </div>
                 <button type="button" onclick="App.toggleSetting('anonymizeOtherStudents')" class="ui-btn w-full ${this.state.settings.anonymizeOtherStudents ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
                   <i class="fa-solid ${this.state.settings.anonymizeOtherStudents ? 'fa-user-secret' : 'fa-users'}"></i>
@@ -4296,19 +4552,22 @@ const App = {
               </div>
 
               <!-- Cấu hình 4: Bật/Tắt hiển thị đáp án đúng & lời giải chi tiết -->
-              <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between space-y-3">
-                <div class="flex items-start justify-between gap-2">
-                  <div>
-                    <h4 class="text-xs font-bold text-slate-800">4. Đáp Án & Lời Giải</h4>
-                    <p class="text-[11px] text-slate-500 mt-1">Cho phép học sinh xem đáp án đúng (A/B/C/D) và lời giải sau khi nộp.</p>
+              <div class="p-4 rounded-xl border ${this.state.settings.allowStudentViewAnswers ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-slate-50/60'} flex flex-col justify-between space-y-3">
+                <div class="space-y-2">
+                  <div class="flex items-start justify-between gap-2">
+                    <h4 class="text-xs font-bold text-slate-800">4. Đáp Án &amp; Lời Giải</h4>
+                    <input type="checkbox" class="ui-switch switch-emerald" ${this.state.settings.allowStudentViewAnswers ? 'checked' : ''} onchange="App.toggleSetting('allowStudentViewAnswers')" aria-label="Cho phép xem đáp án và lời giải">
                   </div>
-                  <span class="text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${this.state.settings.allowStudentViewAnswers ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
-                    ${this.state.settings.allowStudentViewAnswers ? 'Đang Mở' : 'Đang Khóa'}
-                  </span>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${this.state.settings.allowStudentViewAnswers ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
+                      ${this.state.settings.allowStudentViewAnswers ? 'Đang Mở' : 'Đang Khóa'}
+                    </span>
+                  </div>
+                  <p class="text-[11px] text-slate-500 leading-relaxed">Cho phép học sinh xem đáp án đúng (A/B/C/D) và lời giải sau khi nộp.</p>
                 </div>
                 <button type="button" onclick="App.toggleSetting('allowStudentViewAnswers')" class="ui-btn w-full ${this.state.settings.allowStudentViewAnswers ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}">
                   <i class="fa-solid ${this.state.settings.allowStudentViewAnswers ? 'fa-eye' : 'fa-eye-slash'}"></i>
-                  <span>${this.state.settings.allowStudentViewAnswers ? 'Khóa Đáp Án & Lời Giải' : 'Mở Cho Xem Đáp Án'}</span>
+                  <span>${this.state.settings.allowStudentViewAnswers ? 'Khóa Đáp Án &amp; Lời Giải' : 'Mở Cho Xem Đáp Án'}</span>
                 </button>
               </div>
             </div>
@@ -4388,9 +4647,9 @@ const App = {
               </div>
 
               <div class="flex flex-wrap items-center gap-2.5">
-                <div class="flex items-center bg-white rounded-xl px-3 py-1.5 border border-slate-200 text-xs">
+                <div class="flex items-center bg-white rounded-xl pl-3 pr-1.5 py-1 border border-slate-200 text-xs">
                   <span class="text-slate-500 mr-1.5 font-medium">Khối:</span>
-                  <select onchange="App.filterAdminGrade(this.value)" class="bg-transparent font-bold text-indigo-700 outline-none cursor-pointer">
+                  <select id="adminGradeFilterSelect" onchange="App.filterAdminGrade(this.value)" class="bg-transparent font-bold text-indigo-700 outline-none cursor-pointer py-0.5 pl-1">
                     <option value="ALL" ${(!this.state.adminGradeFilter || this.state.adminGradeFilter === 'ALL') ? 'selected' : ''}>Tất cả khối</option>
                     ${[6, 7, 8, 9, 10, 11, 12].map(g => `
                       <option value="${g}" ${String(this.state.adminGradeFilter) === String(g) ? 'selected' : ''}>Khối ${g}</option>
@@ -4398,15 +4657,20 @@ const App = {
                   </select>
                 </div>
 
-                <div class="flex items-center bg-white rounded-xl px-3 py-1.5 border border-slate-200 text-xs">
+                <div class="flex items-center bg-white rounded-xl pl-3 pr-1.5 py-1 border border-slate-200 text-xs">
                   <span class="text-slate-500 mr-1.5 font-medium">Lớp:</span>
-                  <select onchange="App.filterAdminGradebook(this.value)" class="bg-transparent font-bold text-slate-700 outline-none cursor-pointer">
+                  <select id="adminClassFilterSelect" onchange="App.filterAdminGradebook(this.value)" class="bg-transparent font-bold text-slate-700 outline-none cursor-pointer py-0.5 pl-1">
                     <option value="ALL" ${this.state.adminClassFilter === 'ALL' ? 'selected' : ''}>Tất cả các lớp</option>
                     ${allClasses.map(c => `
                       <option value="${c}" ${this.state.adminClassFilter === c ? 'selected' : ''}>Lớp ${c}</option>
                     `).join('')}
                   </select>
                 </div>
+
+                <button type="button" id="quickTogglePeerCompareBtn" onclick="App.toggleSetting('allowStudentViewClassBoard')" class="px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-xs' : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}" title="Bật/tắt cho phép học sinh so sánh điểm trong Lớp hoặc Khối của mình">
+                  <i class="fa-solid ${this.state.settings.allowStudentViewClassBoard ? 'fa-ranking-star' : 'fa-lock'}"></i>
+                  <span>${this.state.settings.allowStudentViewClassBoard ? 'So sánh HS: Đang Mở' : 'So sánh HS: Đang Khóa'}</span>
+                </button>
 
                 <div class="bg-slate-100 p-1 rounded-xl border border-slate-200 flex text-xs font-semibold">
                   <button onclick="App.setAdminViewTab('matrix')" class="px-3 py-1.5 rounded-lg transition cursor-pointer ${this.state.adminViewTab === 'matrix' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
@@ -5068,13 +5332,13 @@ const App = {
 
           <!-- Tùy chọn nhanh trạng thái đề & đáp án -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-            <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50/60 cursor-pointer">
-              <input type="checkbox" id="accessExamIsActive" ${exam.is_active ? 'checked' : ''} class="rounded text-emerald-600">
-              <span class="font-bold text-slate-700">Đang mở đề cho học sinh làm bài</span>
+            <label class="ui-check-card flex items-center justify-between gap-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50/60 cursor-pointer transition">
+              <span class="font-bold text-slate-700 text-xs">Đang mở đề cho học sinh làm bài</span>
+              <input type="checkbox" id="accessExamIsActive" ${exam.is_active ? 'checked' : ''} class="ui-switch switch-emerald">
             </label>
-            <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50/60 cursor-pointer">
-              <input type="checkbox" id="accessExamAllowAnswers" ${exam.allow_view_answers !== false ? 'checked' : ''} class="rounded text-indigo-600">
-              <span class="font-bold text-slate-700">Cho phép xem đáp án & lời giải PDF</span>
+            <label class="ui-check-card flex items-center justify-between gap-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50/60 cursor-pointer transition">
+              <span class="font-bold text-slate-700 text-xs">Cho phép xem đáp án &amp; lời giải PDF</span>
+              <input type="checkbox" id="accessExamAllowAnswers" ${exam.allow_view_answers !== false ? 'checked' : ''} class="ui-switch">
             </label>
           </div>
         </form>
@@ -7631,6 +7895,145 @@ const App = {
       this.saveData();
       this.render();
     }
+  },
+
+  isStudentCompareAllowed() {
+    return Boolean(
+      this.state.settings &&
+      this.state.settings.allowStudentViewOwnScore !== false &&
+      this.state.settings.allowStudentViewClassBoard === true
+    );
+  },
+
+  getAllowedCompareScopes() {
+    const cfg = (this.state.settings && this.state.settings.studentCompareScope) || 'both';
+    if (cfg === 'class') return ['class'];
+    if (cfg === 'grade') return ['grade'];
+    return ['class', 'grade'];
+  },
+
+  setStudentCompareScope(scope) {
+    const valid = ['both', 'class', 'grade'].includes(scope) ? scope : 'both';
+    if (!this.state.settings) this.state.settings = {};
+    this.state.settings.studentCompareScope = valid;
+    if (valid === 'class') this.state.studentCompareMode = 'class';
+    else if (valid === 'grade') this.state.studentCompareMode = 'grade';
+    this.saveData();
+    this.render();
+  },
+
+  setStudentCompareMode(mode) {
+    const allowed = this.getAllowedCompareScopes();
+    this.state.studentCompareMode = allowed.includes(mode) ? mode : allowed[0];
+    this.render();
+  },
+
+  setStudentCompareExamFilter(examId) {
+    this.state.studentCompareExamFilter = examId || 'ALL';
+    this.render();
+  },
+
+  // Tính bảng so sánh kết quả: Học sinh CHỈ được so với Lớp mình hoặc Toàn khối mình khi Admin mở
+  getStudentPeerComparison(student, requestedScope = null, examFilterId = null) {
+    const myGrade = student ? this.getStudentGrade(student) : 12;
+    const myClass = student ? String(student.className || '').trim() : '';
+    const allowedScopes = this.getAllowedCompareScopes();
+    if (!student || !this.isStudentCompareAllowed()) {
+      return {
+        allowed: false,
+        scope: allowedScopes[0] || 'class',
+        allowedScopes,
+        myGrade,
+        myClass,
+        peerStudents: [],
+        allCohortExams: [],
+        targetExams: [],
+        examFilter: 'ALL',
+        rankedList: [],
+        myRank: null,
+        myEntry: null,
+        cohortAvg: null,
+        activeParticipants: 0
+      };
+    }
+
+    const desiredScope = requestedScope || this.state.studentCompareMode || 'class';
+    const scope = allowedScopes.includes(desiredScope) ? desiredScope : allowedScopes[0];
+
+    const peerStudents = (this.state.students || []).filter(st => {
+      if (this.getStudentGrade(st) !== myGrade) return false;
+      if (scope === 'class') {
+        return String(st.className || '').trim() === myClass;
+      }
+      return true;
+    });
+
+    const peerIds = new Set(peerStudents.map(st => st.studentId));
+    const allCohortExams = (this.state.exams || []).filter(ex => {
+      if ((Number(ex.grade) || 12) === myGrade) return true;
+      return (this.state.submissions || []).some(sub => sub.examId === ex.id && peerIds.has(sub.studentId));
+    });
+
+    const rawExamFilter = examFilterId || this.state.studentCompareExamFilter || 'ALL';
+    const examFilter = (rawExamFilter !== 'ALL' && allCohortExams.some(ex => ex.id === rawExamFilter))
+      ? rawExamFilter
+      : 'ALL';
+    const targetExams = examFilter === 'ALL'
+      ? allCohortExams
+      : allCohortExams.filter(ex => ex.id === examFilter);
+
+    const rawRanked = peerStudents.map(st => {
+      const examScores = targetExams.map(ex => {
+        const sub = (this.state.submissions || []).find(x => x.studentId === st.studentId && x.examId === ex.id);
+        return sub && sub.scoreResult ? Number(sub.scoreResult.totalScore) : null;
+      });
+      const valid = examScores.filter(x => x !== null && !Number.isNaN(x));
+      const avg = valid.length > 0 ? (valid.reduce((a, b) => a + b, 0) / valid.length) : -1;
+      return { student: st, examScores, avg, completed: valid.length, rank: null };
+    }).sort((a, b) => b.avg - a.avg || b.completed - a.completed || String(a.student.studentId).localeCompare(String(b.student.studentId)));
+
+    // Gán thứ hạng chuẩn đồng hạng (chỉ xếp hạng các học sinh đã có bài nộp)
+    let prevScoreKey = null;
+    let prevRank = 0;
+    let activeCount = 0;
+    rawRanked.forEach((item) => {
+      if (item.avg >= 0) {
+        activeCount++;
+        const scoreKey = item.avg.toFixed(4);
+        if (scoreKey === prevScoreKey) {
+          item.rank = prevRank;
+        } else {
+          item.rank = activeCount;
+          prevRank = activeCount;
+          prevScoreKey = scoreKey;
+        }
+      } else {
+        item.rank = null;
+      }
+    });
+
+    const myEntry = rawRanked.find(item => item.student.studentId === student.studentId) || null;
+    const activeEntries = rawRanked.filter(item => item.avg >= 0);
+    const cohortAvg = activeEntries.length > 0
+      ? (activeEntries.reduce((sum, item) => sum + item.avg, 0) / activeEntries.length)
+      : null;
+
+    return {
+      allowed: true,
+      scope,
+      allowedScopes,
+      myGrade,
+      myClass,
+      peerStudents,
+      allCohortExams,
+      targetExams,
+      examFilter,
+      rankedList: rawRanked,
+      myRank: myEntry ? myEntry.rank : null,
+      myEntry,
+      cohortAvg,
+      activeParticipants: activeEntries.length
+    };
   },
 
   setStudentScoreTab(tab) {

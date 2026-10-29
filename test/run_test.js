@@ -274,4 +274,62 @@ console.assert(parsedOcr.p2.length === 2 && parsedOcr.p2[0].a === true && parsed
 console.assert(parsedOcr.p3.length === 4 && parsedOcr.p3[0] === '12.5' && parsedOcr.p3[1] === '-0.5' && parsedOcr.p3[3] === '8', 'OCR continuous P3 parse fail');
 console.assert(parsedOcr.p4.length === 1 && parsedOcr.p4[0] === 'x = 5' && parsedOcr.qPoints.p4[0] === '1', 'OCR P4 parse fail');
 
-console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, PARSER .TEX/.TXT/OCR, THANG ĐIỂM & GIÁM SÁT ĐÃ ĐẠT 100%!');
+// Test 10: Phân quyền & Phạm vi So sánh Kết quả của Học sinh (Chỉ Lớp mình hoặc Toàn khối mình, chỉ mở khi Admin bật)
+App.state.students = SeedData.students.map(s => ({ ...s }));
+App.state.exams = [
+  { id: 'EX_K12_1', title: 'Đề Khối 12 - Đợt 1', roundLabel: 'Đợt 1', grade: 12, is_active: true },
+  { id: 'EX_K11_1', title: 'Đề Khối 11 - Đợt 1', roundLabel: 'Đợt 1', grade: 11, is_active: true }
+];
+const hs001 = App.state.students.find(s => s.studentId === 'HS001'); // Quốc Việt - K12 - 12B 2K9
+const hs002 = App.state.students.find(s => s.studentId === 'HS002'); // K12 - 12B 2K9
+const hs12A = App.state.students.find(s => s.grade === 12 && s.className === '12A 2K9'); // K12 - lớp khác (12A 2K9)
+const hsK11 = App.state.students.find(s => s.grade === 11); // Khối 11
+
+App.state.submissions = [
+  { id: 'SUB_1', studentId: hs001.studentId, examId: 'EX_K12_1', scoreResult: { totalScore: 8.5 } },
+  { id: 'SUB_2', studentId: hs002.studentId, examId: 'EX_K12_1', scoreResult: { totalScore: 9.25 } },
+  { id: 'SUB_3', studentId: hs12A.studentId, examId: 'EX_K12_1', scoreResult: { totalScore: 9.75 } },
+  { id: 'SUB_4', studentId: hsK11.studentId, examId: 'EX_K11_1', scoreResult: { totalScore: 10.0 } }
+];
+
+// 10.1 Mặc định khóa (allowStudentViewClassBoard = false) -> học sinh KHÔNG được xem bất kỳ dữ liệu đối chiếu nào
+App.state.settings.allowStudentViewOwnScore = true;
+App.state.settings.allowStudentViewClassBoard = false;
+App.state.settings.studentCompareScope = 'both';
+const cmpLocked = App.getStudentPeerComparison(hs001, 'class');
+console.assert(cmpLocked.allowed === false && cmpLocked.rankedList.length === 0, 'Locked peer comparison must block access');
+
+// 10.2 Khi Admin mở quyền (allowStudentViewClassBoard = true):
+// - Chế độ 'class': HS001 (12B 2K9) chỉ thấy đúng 10 học sinh cùng lớp 12B 2K9, thứ hạng #2 (sau HS002 9.25đ), không lẫn 12A hay Khối 10/11
+App.state.settings.allowStudentViewClassBoard = true;
+const cmpClass = App.getStudentPeerComparison(hs001, 'class');
+console.assert(cmpClass.allowed === true && cmpClass.scope === 'class', 'Class scope open fail');
+console.assert(cmpClass.rankedList.length === 10, `Expected 10 peers in 12B 2K9, got ${cmpClass.rankedList.length}`);
+console.assert(cmpClass.rankedList.every(it => it.student.grade === 12 && it.student.className === '12B 2K9'), 'Class scope leaked other class/grade');
+console.assert(cmpClass.targetExams.length === 1 && cmpClass.targetExams[0].id === 'EX_K12_1', 'Cohort exam filter leaked K11 exam');
+console.assert(cmpClass.myRank === 2, `Expected HS001 rank #2 in class, got ${cmpClass.myRank}`);
+
+// - Chế độ 'grade': HS001 chỉ thấy đúng 16 học sinh Toàn Khối 12 (12A + 12B), tuyệt đối không thấy Khối 10 hay Khối 11, thứ hạng #3 (sau 12A 9.75đ và HS002 9.25đ)
+const cmpGrade = App.getStudentPeerComparison(hs001, 'grade');
+console.assert(cmpGrade.allowed === true && cmpGrade.scope === 'grade', 'Grade scope open fail');
+console.assert(cmpGrade.rankedList.length === 16, `Expected 16 peers in Grade 12, got ${cmpGrade.rankedList.length}`);
+console.assert(cmpGrade.rankedList.every(it => it.student.grade === 12), 'Grade scope leaked Grade 10/11 students');
+console.assert(cmpGrade.myRank === 3, `Expected HS001 rank #3 in Grade 12, got ${cmpGrade.myRank}`);
+
+// - Khi Admin giới hạn 'class' (Chỉ Lớp mình): dù học sinh truyền 'grade' hay 'all' vẫn ép chặt về 'class'
+App.state.settings.studentCompareScope = 'class';
+const cmpForcedClass = App.getStudentPeerComparison(hs001, 'grade');
+console.assert(cmpForcedClass.scope === 'class' && cmpForcedClass.rankedList.length === 10, 'Admin scope restriction to class fail');
+
+// - Khi Admin giới hạn 'grade' (Chỉ Toàn khối): ép chặt về 'grade'
+App.state.settings.studentCompareScope = 'grade';
+const cmpForcedGrade = App.getStudentPeerComparison(hs001, 'class');
+console.assert(cmpForcedGrade.scope === 'grade' && cmpForcedGrade.rankedList.length === 16, 'Admin scope restriction to grade fail');
+
+// Reset về mặc định khóa
+App.state.settings.allowStudentViewClassBoard = false;
+App.state.settings.studentCompareScope = 'both';
+App.state.exams = [];
+App.state.submissions = [];
+
+console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, PARSER .TEX/.TXT/OCR, SO SÁNH LỚP/KHỐI & GIÁM SÁT ĐÃ ĐẠT 100%!');
