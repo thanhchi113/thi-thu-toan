@@ -423,6 +423,159 @@ const App = {
       if (e.target && e.target.closest && e.target.closest('#appCustomSelectMenu')) return;
       App.closeCustomSelectPopover();
     }, true);
+
+    // Hệ thống Kéo & Thả File trực tiếp vào mọi ô tải lên (PDF, .TEX, .TXT, Ảnh OCR, Ảnh bài làm Tự luận)
+    const hasDraggedFiles = (e) => {
+      const dt = e && e.dataTransfer;
+      if (!dt) return false;
+      if (dt.files && dt.files.length > 0) return true;
+      return Array.from(dt.types || []).includes('Files');
+    };
+
+    document.addEventListener('dragover', (e) => {
+      if (!hasDraggedFiles(e)) return;
+      e.preventDefault();
+      const zone = e.target && e.target.closest ? e.target.closest('[data-drop-target]') : null;
+      try { e.dataTransfer.dropEffect = zone ? 'copy' : 'none'; } catch (_) {}
+      if (zone !== App._activeDropZoneEl) {
+        if (App._activeDropZoneEl) App._activeDropZoneEl.classList.remove('is-dragover');
+        App._activeDropZoneEl = zone;
+        if (zone) zone.classList.add('is-dragover');
+      }
+    });
+
+    document.addEventListener('dragleave', (e) => {
+      if (!App._activeDropZoneEl) return;
+      if (!e.relatedTarget || !App._activeDropZoneEl.contains(e.relatedTarget)) {
+        App.clearActiveDropZone();
+      }
+    });
+
+    document.addEventListener('drop', (e) => {
+      if (!hasDraggedFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const zone = e.target && e.target.closest ? e.target.closest('[data-drop-target]') : null;
+      App.clearActiveDropZone();
+      if (zone && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        App.handleDropZoneFiles(zone, e.dataTransfer.files);
+      }
+    });
+  },
+
+  clearActiveDropZone() {
+    if (this._activeDropZoneEl) {
+      this._activeDropZoneEl.classList.remove('is-dragover');
+      this._activeDropZoneEl = null;
+    }
+  },
+
+  doesFileMatchAccept(file, acceptStr) {
+    if (!file) return false;
+    const rawAccept = String(acceptStr || '').trim();
+    if (!rawAccept) return true;
+    const name = String(file.name || '').toLowerCase();
+    const mime = String(file.type || '').toLowerCase();
+    const tokens = rawAccept.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+    return tokens.some((tok) => {
+      if (tok.startsWith('.')) {
+        return name.endsWith(tok);
+      }
+      if (tok.endsWith('/*')) {
+        const prefix = tok.slice(0, -1);
+        if (mime && mime.startsWith(prefix)) return true;
+        if (tok === 'image/*') return /\.(png|jpe?g|webp|gif|bmp)$/i.test(name);
+        return false;
+      }
+      return Boolean(mime && mime === tok);
+    });
+  },
+
+  describeAcceptedFormats(acceptStr) {
+    const s = String(acceptStr || '').toLowerCase();
+    if (s.includes('.tex') || s.includes('.txt')) return '.TXT hoặc .TEX';
+    if (s.includes('.pdf')) return '.PDF';
+    if (s.includes('image/*')) return 'Ảnh (.PNG, .JPG, .WEBP)';
+    return acceptStr || 'hợp lệ';
+  },
+
+  dispatchFilesToInput(inputEl, files) {
+    if (!inputEl || !files || !files.length) return false;
+    const validFiles = inputEl.multiple ? Array.from(files) : [files[0]];
+    if (/^p4ImgInput_/.test(inputEl.id || '')) {
+      this.suppressAntiCheatTemporarily(4000);
+    }
+    let assignedNative = false;
+    if (typeof DataTransfer !== 'undefined') {
+      try {
+        const dt = new DataTransfer();
+        validFiles.forEach(f => dt.items.add(f));
+        inputEl.files = dt.files;
+        assignedNative = Boolean(inputEl.files && inputEl.files.length === validFiles.length);
+      } catch (_) {}
+    }
+    if (assignedNative && typeof Event === 'function') {
+      inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+    if (typeof inputEl.onchange === 'function') {
+      inputEl.onchange({ target: { files: validFiles, value: '' } });
+      return true;
+    }
+    return false;
+  },
+
+  handleDropZoneFiles(zoneEl, fileList, doc = (typeof document !== 'undefined' ? document : null)) {
+    const files = Array.from(fileList || []);
+    if (!zoneEl || !files.length || !doc) return false;
+    const targetId = zoneEl.getAttribute('data-drop-target') || '';
+
+    // Định tuyến thông minh trong khu vực Bảng Đáp Án (.TXT / .TEX / Ảnh OCR)
+    if (targetId === 'ansKeyEditorSmart' || targetId === 'ansKeyFileInput' || targetId === 'ansKeyImageInput') {
+      const txtTexFiles = files.filter(f => /\.(txt|tex)$/i.test(f.name || ''));
+      const imgFiles = files.filter(f => this.doesFileMatchAccept(f, 'image/*') && !/\.(txt|tex)$/i.test(f.name || ''));
+      let handled = false;
+      if (txtTexFiles.length > 0) {
+        const keyInp = doc.getElementById('ansKeyFileInput');
+        if (keyInp) handled = this.dispatchFilesToInput(keyInp, [txtTexFiles[0]]) || handled;
+      }
+      if (imgFiles.length > 0 && !handled) {
+        const imgInp = doc.getElementById('ansKeyImageInput');
+        if (imgInp) handled = this.dispatchFilesToInput(imgInp, [imgFiles[0]]) || handled;
+      }
+      if (!handled) {
+        this.notify(
+          `Ô bảng đáp án chỉ nhận file .TXT, .TEX hoặc Ảnh chụp đáp án. File "${files[0].name}" không phù hợp!`,
+          'warning',
+          'Sai định dạng file kéo thả'
+        );
+      }
+      return handled;
+    }
+
+    const inputEl = doc.getElementById(targetId);
+    if (!inputEl) return false;
+
+    const acceptAttr = inputEl.getAttribute('accept') || '';
+    const matched = files.filter(f => this.doesFileMatchAccept(f, acceptAttr));
+
+    // Hỗ trợ kéo thả đồng thời cả file PDF Đề thi + file .TXT/.TEX đáp án vào cùng hộp tạo đề
+    const extraKeyFile = files.find(f => /\.(txt|tex)$/i.test(f.name || ''));
+    const keyInpInModal = doc.getElementById('ansKeyFileInput');
+    if (extraKeyFile && keyInpInModal && !acceptAttr.includes('.tex')) {
+      this.dispatchFilesToInput(keyInpInModal, [extraKeyFile]);
+      if (matched.length === 0) return true;
+    }
+
+    if (matched.length === 0) {
+      this.notify(
+        `Ô này chỉ nhận file ${this.describeAcceptedFormats(acceptAttr)}. File "${files[0].name}" không phù hợp!`,
+        'warning',
+        'Sai định dạng file kéo thả'
+      );
+      return false;
+    }
+    return this.dispatchFilesToInput(inputEl, matched);
   },
 
   closeCustomSelectPopover() {
@@ -3204,7 +3357,7 @@ const App = {
             const qMax = +GradingSystem.getQuestionMaxPoints(ex, 'part4', q).toFixed(2);
             const imgs = Array.isArray(entry.images) ? entry.images : [];
             return `
-              <div id="row_p4_${q.id}" class="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5 transition">
+              <div id="row_p4_${q.id}" data-drop-target="p4ImgInput_${q.id}" class="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5 transition">
                 <div class="flex items-center justify-between">
                   <span class="font-extrabold text-xs text-slate-800">Câu ${q.id} (Tự luận):</span>
                   <span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-mono font-bold text-[11px]">${qMax} điểm</span>
@@ -3213,7 +3366,7 @@ const App = {
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <input type="file" id="p4ImgInput_${q.id}" accept="image/*" multiple class="hidden" onchange="App.handlePart4ImageSelect(event, ${q.id})">
                   <button type="button" onclick="App.suppressAntiCheatTemporarily(90000); document.getElementById('p4ImgInput_${q.id}').click();" class="ui-btn px-3 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs">
-                    <i class="fa-solid fa-camera"></i><span>Chụp / Đính kèm ảnh bài giải</span>
+                    <i class="fa-solid fa-camera"></i><span>Chụp / Kéo thả ảnh bài giải</span>
                   </button>
                   <span class="text-[11px] text-slate-400 font-mono">${imgs.length} ảnh đính kèm</span>
                 </div>
@@ -4976,12 +5129,12 @@ const App = {
               </span>
               <span class="text-[11px] font-mono text-slate-500 truncate" title="${exam.pdf_name || exam.pdf_url || ''}">${exam.pdf_name || exam.pdf_url || 'Chưa có'}</span>
             </div>
-            <div class="border-2 border-dashed border-indigo-200 rounded-xl p-3 text-center bg-white hover:bg-indigo-50/50 transition cursor-pointer">
+            <div data-drop-target="changeQuestionPdfInput" class="border-2 border-dashed border-indigo-200 rounded-xl p-3 text-center bg-white hover:bg-indigo-50/50 transition cursor-pointer">
               <input type="file" id="changeQuestionPdfInput" accept=".pdf,application/pdf" class="hidden" onchange="App.handleDirectPdfUpdate(event, '${examId}', 'question')">
               <label for="changeQuestionPdfInput" class="cursor-pointer block">
                 <i class="fa-solid fa-cloud-arrow-up text-xl text-indigo-600 mb-0.5"></i>
-                <div class="text-xs font-bold text-slate-800">Tải PDF Đề Thi mới</div>
-                <div class="text-[10px] text-slate-400">Lưu trực tiếp vào trình duyệt</div>
+                <div class="text-xs font-bold text-slate-800">Kéo thả hoặc bấm tải PDF Đề Thi mới</div>
+                <div class="text-[10px] text-slate-400">Hỗ trợ thả trực tiếp file .PDF vào ô này</div>
               </label>
             </div>
           </div>
@@ -4994,19 +5147,19 @@ const App = {
               </span>
               <span class="text-[11px] font-mono text-slate-500 truncate" title="${exam.solution_pdf_name || exam.solution_pdf_url || ''}">${exam.solution_pdf_name || exam.solution_pdf_url || 'Chưa có'}</span>
             </div>
-            <div class="border-2 border-dashed border-emerald-200 rounded-xl p-3 text-center bg-white hover:bg-emerald-50/50 transition cursor-pointer">
+            <div data-drop-target="changeSolutionPdfInput" class="border-2 border-dashed border-emerald-200 rounded-xl p-3 text-center bg-white hover:bg-emerald-50/50 transition cursor-pointer">
               <input type="file" id="changeSolutionPdfInput" accept=".pdf,application/pdf" class="hidden" onchange="App.handleDirectPdfUpdate(event, '${examId}', 'solution')">
               <label for="changeSolutionPdfInput" class="cursor-pointer block">
                 <i class="fa-solid fa-cloud-arrow-up text-xl text-emerald-600 mb-0.5"></i>
-                <div class="text-xs font-bold text-slate-800">Tải PDF Đáp Án &amp; Lời Giải</div>
-                <div class="text-[10px] text-slate-400">Hiển thị sau khi học sinh nộp bài</div>
+                <div class="text-xs font-bold text-slate-800">Kéo thả hoặc bấm tải PDF Lời Giải</div>
+                <div class="text-[10px] text-slate-400">Hỗ trợ thả trực tiếp file .PDF vào ô này</div>
               </label>
             </div>
           </div>
         </div>
 
         <!-- 3. Bảng Đáp Án Chấm Điểm Tự Động -->
-        <div id="answerKeyEditorHost">
+        <div id="answerKeyEditorHost" data-drop-target="ansKeyEditorSmart">
           ${this.renderAnswerKeyEditorHtml()}
         </div>
 
@@ -7284,15 +7437,15 @@ const App = {
           </button>
         </div>
 
-        <!-- Thanh công cụ Nhập nhanh bằng File .TXT / .TEX hoặc Dán ảnh Ctrl+V -->
+        <!-- Thanh công cụ Kéo thả / Tải File .TXT, .TEX hoặc Dán ảnh Ctrl+V -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-white p-3 rounded-xl border border-indigo-100 shadow-2xs">
-          <div class="flex items-center justify-between gap-2 p-2 rounded-lg bg-indigo-50/50 border border-indigo-100">
+          <div id="ansKeyTxtTexDropZone" data-drop-target="ansKeyFileInput" class="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-indigo-50/50 border border-dashed border-indigo-300 hover:bg-indigo-50 transition">
             <div class="min-w-0">
               <div class="font-bold text-indigo-900 flex items-center gap-1.5">
                 <i class="fa-solid fa-file-code text-indigo-600"></i>
-                <span>Nhập từ file .TXT hoặc .TEX</span>
+                <span>Kéo thả hoặc tải file .TXT / .TEX</span>
               </div>
-              <div class="text-[10px] text-slate-500 mt-0.5">Tự bóc <code class="font-mono">\\True</code>, <code class="font-mono">\\choiceTF</code>, <code class="font-mono">\\shortans</code>, <code class="font-mono">\\dapso</code> hoặc bảng chữ</div>
+              <div class="text-[10px] text-slate-500 mt-0.5">Thả trực tiếp file vào ô này • Tự bóc <code class="font-mono">\\True</code>, <code class="font-mono">\\choiceTF</code>, <code class="font-mono">\\shortans</code>, <code class="font-mono">\\dapso</code></div>
             </div>
             <input type="file" id="ansKeyFileInput" accept=".txt,.tex,text/plain,application/x-tex" class="hidden" onchange="App.handleAnswerKeyFileUpload(event)">
             <button type="button" onclick="document.getElementById('ansKeyFileInput').click()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-[11px] shrink-0 cursor-pointer inline-flex items-center gap-1.5 shadow-2xs">
@@ -7300,13 +7453,13 @@ const App = {
             </button>
           </div>
 
-          <div tabindex="0" class="flex items-center justify-between gap-2 p-2 rounded-lg bg-emerald-50/60 border border-dashed border-emerald-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 outline-none" title="Chụp màn hình bảng đáp án rồi nhấn Ctrl+V ngay tại cửa sổ này">
+          <div id="ansKeyImageDropZone" data-drop-target="ansKeyImageInput" tabindex="0" class="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-emerald-50/60 border border-dashed border-emerald-300 hover:bg-emerald-50 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 outline-none transition" title="Kéo thả ảnh vào ô này hoặc chụp màn hình rồi nhấn Ctrl+V">
             <div class="min-w-0">
               <div class="font-bold text-emerald-900 flex items-center gap-1.5">
                 <i class="fa-solid fa-paste text-emerald-600"></i>
-                <span>Nhấn <kbd class="px-1.5 py-0.5 bg-white border border-emerald-300 rounded font-mono text-[10px] shadow-2xs">Ctrl + V</kbd> để dán ảnh đáp án</span>
+                <span>Kéo thả ảnh hoặc nhấn <kbd class="px-1.5 py-0.5 bg-white border border-emerald-300 rounded font-mono text-[10px] shadow-2xs">Ctrl + V</kbd></span>
               </div>
-              <div class="text-[10px] text-emerald-700 mt-0.5">Tự động nhận diện ảnh chụp màn hình bảng đáp án ngay lập tức</div>
+              <div class="text-[10px] text-emerald-700 mt-0.5">Thả ảnh đáp án vào đây hoặc dán trực tiếp để tự nhận diện OCR</div>
             </div>
             <input type="file" id="ansKeyImageInput" accept="image/*" class="hidden" onchange="App.handleAnswerKeyImageSelect(event)">
             <button type="button" onclick="document.getElementById('ansKeyImageInput').click()" class="px-2.5 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-[11px] shrink-0 cursor-pointer inline-flex items-center gap-1">
@@ -7616,45 +7769,45 @@ const App = {
           </div>
 
           <!-- 1. UPLOAD FILE PDF ĐỀ THI -->
-          <div class="border border-slate-200 rounded-2xl p-4 bg-slate-50 space-y-2">
-            <div class="flex items-center justify-between">
+          <div id="questionPdfDropZone" data-drop-target="pdfFileInput" class="border-2 border-dashed border-indigo-200 rounded-2xl p-4 bg-slate-50/80 hover:bg-indigo-50/30 transition space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-1">
               <label class="text-xs font-bold text-slate-800 flex items-center">
                 <i class="fa-solid fa-file-pdf text-red-500 mr-1.5"></i>1. File PDF Đề Thi *:
               </label>
-              <span class="text-[11px] text-slate-400">Hiển thị trực tiếp trong phòng thi</span>
+              <span class="text-[11px] font-medium text-indigo-600"><i class="fa-solid fa-hand-pointer mr-1"></i>Kéo thả trực tiếp file .PDF vào ô này hoặc chọn file</span>
             </div>
 
             <div class="flex flex-col sm:flex-row gap-2">
               <input type="file" id="pdfFileInput" accept=".pdf,application/pdf" class="hidden" onchange="App.handlePdfFileSelect(event)">
               <button type="button" onclick="document.getElementById('pdfFileInput').click()" class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 rounded-xl font-bold text-xs shadow-sm transition flex items-center justify-center shrink-0 cursor-pointer">
-                <i class="fa-solid fa-arrow-up-from-bracket mr-2"></i>Chọn File PDF Đề Thi
+                <i class="fa-solid fa-arrow-up-from-bracket mr-2"></i>Chọn / Kéo Thả PDF Đề Thi
               </button>
-              <input type="text" id="newExamPdfUrl" placeholder="Hoặc dán đường dẫn trực tiếp tới file .pdf..." class="flex-1 px-3 py-2 border rounded-xl font-mono text-xs bg-white">
+              <input type="text" id="newExamPdfUrl" placeholder="Kéo thả file .pdf vào đây hoặc dán đường dẫn..." class="flex-1 px-3 py-2 border rounded-xl font-mono text-xs bg-white">
             </div>
             <div id="pdfSelectedBadge" class="text-xs text-emerald-600 font-semibold hidden"></div>
           </div>
 
           <!-- 2. UPLOAD FILE PDF ĐÁP ÁN & LỜI GIẢI CHI TIẾT -->
-          <div class="border border-slate-200 rounded-2xl p-4 bg-emerald-50/40 space-y-2">
-            <div class="flex items-center justify-between">
+          <div id="solutionPdfDropZone" data-drop-target="solutionPdfFileInput" class="border-2 border-dashed border-emerald-200 rounded-2xl p-4 bg-emerald-50/40 hover:bg-emerald-50/70 transition space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-1">
               <label class="text-xs font-bold text-slate-800 flex items-center">
                 <i class="fa-solid fa-file-circle-check text-emerald-600 mr-1.5"></i>2. File PDF Đáp Án &amp; Lời Giải Chi Tiết (Tùy chọn):
               </label>
-              <span class="text-[11px] text-slate-400">Học sinh xem sau khi nộp bài</span>
+              <span class="text-[11px] font-medium text-emerald-700"><i class="fa-solid fa-hand-pointer mr-1"></i>Kéo thả trực tiếp file .PDF vào ô này</span>
             </div>
 
             <div class="flex flex-col sm:flex-row gap-2">
               <input type="file" id="solutionPdfFileInput" accept=".pdf,application/pdf" class="hidden" onchange="App.handleSolutionPdfFileSelect(event)">
               <button type="button" onclick="document.getElementById('solutionPdfFileInput').click()" class="px-4 py-2 bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-xl font-bold text-xs shadow-sm transition flex items-center justify-center shrink-0 cursor-pointer">
-                <i class="fa-solid fa-file-arrow-up mr-2"></i>Chọn File PDF Đáp Án
+                <i class="fa-solid fa-file-arrow-up mr-2"></i>Chọn / Kéo Thả PDF Đáp Án
               </button>
-              <input type="text" id="newExamSolutionPdfUrl" placeholder="Hoặc dán đường dẫn file PDF đáp án..." class="flex-1 px-3 py-2 border rounded-xl font-mono text-xs bg-white">
+              <input type="text" id="newExamSolutionPdfUrl" placeholder="Kéo thả file .pdf đáp án vào đây hoặc dán đường dẫn..." class="flex-1 px-3 py-2 border rounded-xl font-mono text-xs bg-white">
             </div>
             <div id="solutionPdfSelectedBadge" class="text-xs text-emerald-700 font-semibold hidden"></div>
           </div>
 
           <!-- 3. BẢNG ĐÁP ÁN CHẤM ĐIỂM TỰ ĐỘNG -->
-          <div id="answerKeyEditorHost">
+          <div id="answerKeyEditorHost" data-drop-target="ansKeyEditorSmart">
             ${this.renderAnswerKeyEditorHtml()}
           </div>
 
@@ -8402,11 +8555,11 @@ const App = {
           </div>
           <div>
             <label class="block text-xs font-bold text-slate-700 mb-1">File PDF chuyên đề từ máy tính</label>
-            <div class="border-2 border-dashed border-indigo-200 rounded-xl p-4 text-center bg-indigo-50/40 hover:bg-indigo-50/80 transition cursor-pointer">
-              <input type="file" id="newHwFileInput" accept=".pdf" class="hidden" onchange="App.handleHwFileSelect(event)">
+            <div id="newHwDropZone" data-drop-target="newHwFileInput" class="border-2 border-dashed border-indigo-200 rounded-xl p-4 text-center bg-indigo-50/40 hover:bg-indigo-50/80 transition cursor-pointer">
+              <input type="file" id="newHwFileInput" accept=".pdf,application/pdf" class="hidden" onchange="App.handleHwFileSelect(event)">
               <label for="newHwFileInput" class="cursor-pointer block">
                 <i class="fa-solid fa-cloud-arrow-up text-2xl text-indigo-600 mb-1"></i>
-                <div class="text-xs font-bold text-slate-800">Bấm vào đây để chọn file PDF</div>
+                <div class="text-xs font-bold text-slate-800">Kéo thả file PDF vào ô này hoặc bấm để chọn file</div>
                 <div id="newHwFileBadge" class="text-[11px] text-slate-500 mt-1">Lưu trực tiếp vào trình duyệt (IndexedDB), học sinh xem ngay</div>
               </label>
             </div>

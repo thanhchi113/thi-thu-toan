@@ -343,4 +343,48 @@ console.assert(App.isAndroidDevice('Mozilla/5.0 (Linux; Android 14; SM-S928B) Ap
 console.assert(App.isAndroidDevice('Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15') === false, 'iPhone must not match Android');
 console.assert(App.isAndroidDevice('Mozilla/5.0 (Windows NT 10.0; Win64; x64)') === false, 'Windows must not match Android');
 
-console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, PARSER .TEX/.TXT/OCR, SO SÁNH LỚP/KHỐI, APP ANDROID/iOS & GIÁM SÁT ĐÃ ĐẠT 100%!');
+// Test 12: Kéo & thả file trực tiếp vào ô tải lên (.pdf, .tex không có MIME trên Windows, .txt, ảnh OCR, định tuyến thông minh)
+console.assert(App.doesFileMatchAccept({ name: 'De_Toan_12.pdf', type: 'application/pdf' }, '.pdf,application/pdf') === true, 'PDF accept match fail');
+console.assert(App.doesFileMatchAccept({ name: 'dethi.TEX', type: '' }, '.txt,.tex,text/plain,application/x-tex') === true, 'Windows TEX empty MIME match fail');
+console.assert(App.doesFileMatchAccept({ name: 'dapan.txt', type: 'text/plain' }, '.txt,.tex,text/plain,application/x-tex') === true, 'TXT accept match fail');
+console.assert(App.doesFileMatchAccept({ name: 'chup_dapan.PNG', type: '' }, 'image/*') === true, 'Image extension fallback match fail');
+console.assert(App.doesFileMatchAccept({ name: 'virus.exe', type: 'application/octet-stream' }, '.pdf,application/pdf') === false, 'Invalid extension must be rejected');
+
+let capturedPdfFiles = null;
+let capturedKeyFiles = null;
+const mockDoc = {
+  getElementById(id) {
+    if (id === 'pdfFileInput') {
+      return {
+        id: 'pdfFileInput',
+        multiple: false,
+        getAttribute: (k) => (k === 'accept' ? '.pdf,application/pdf' : ''),
+        onchange: (ev) => { capturedPdfFiles = ev.target.files; }
+      };
+    }
+    if (id === 'ansKeyFileInput') {
+      return {
+        id: 'ansKeyFileInput',
+        multiple: false,
+        getAttribute: (k) => (k === 'accept' ? '.txt,.tex,text/plain,application/x-tex' : ''),
+        onchange: (ev) => { capturedKeyFiles = ev.target.files; }
+      };
+    }
+    return null;
+  }
+};
+
+// Kéo thả đồng thời cả De_Thi.pdf + Dap_An.tex vào ô PDF đề thi -> tự nạp cả 2!
+const dualDropOk = App.handleDropZoneFiles(
+  { getAttribute: () => 'pdfFileInput' },
+  [
+    { name: 'De_Thi_GK1_Toan_12.pdf', type: 'application/pdf' },
+    { name: 'Dap_An_GK1.tex', type: '' }
+  ],
+  mockDoc
+);
+console.assert(dualDropOk === true, 'Dual PDF + TEX drop fail');
+console.assert(capturedPdfFiles && capturedPdfFiles[0].name === 'De_Thi_GK1_Toan_12.pdf', 'Dropped PDF dispatch fail');
+console.assert(capturedKeyFiles && capturedKeyFiles[0].name === 'Dap_An_GK1.tex', 'Dropped TEX smart route fail');
+
+console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, PARSER .TEX/.TXT/OCR, KÉO THẢ FILE, SO SÁNH LỚP/KHỐI & APP ĐT ĐÃ ĐẠT 100%!');

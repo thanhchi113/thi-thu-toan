@@ -947,6 +947,46 @@ body[data-theme="dark"] .ui-select-option:not(.is-selected):hover {
   color: #ffffff;
 }
 
+/* --- Ô Kéo Thả File Trực Tiếp (Drag & Drop Upload Zones: PDF, .TEX, .TXT, Ảnh) --- */
+[data-drop-target] {
+  position: relative;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+[data-drop-target].is-dragover {
+  border-style: dashed !important;
+  border-color: rgb(var(--accent-600)) !important;
+  background-color: rgb(var(--accent-50) / 0.92) !important;
+  box-shadow: 0 0 0 4px rgb(var(--accent-500) / 0.2), 0 10px 24px -6px rgb(var(--accent-700) / 0.18) !important;
+  transform: translateY(-1px);
+}
+
+[data-drop-target].is-dragover::after {
+  content: "Thả file vào đây để tải lên ngay";
+  position: absolute;
+  top: 0.5rem;
+  right: 0.65rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  background-color: rgb(var(--accent-600));
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
+  z-index: 10;
+}
+
+body[data-theme="sepia"] [data-drop-target].is-dragover {
+  background-color: rgb(var(--accent-100) / 0.55) !important;
+}
+
+body[data-theme="dark"] [data-drop-target].is-dragover {
+  background-color: rgb(var(--accent-500) / 0.22) !important;
+  border-color: rgb(var(--accent-400)) !important;
+}
+
 /* Print Stylesheet */
 @media print {
   body {
