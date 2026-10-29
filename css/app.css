@@ -987,6 +987,18 @@ body[data-theme="dark"] [data-drop-target].is-dragover {
   border-color: rgb(var(--accent-400)) !important;
 }
 
+/* Ô theo dõi quá trình làm bài (Đã chọn / Đang làm dở / Chưa chọn) */
+.q-matrix-btn.partial {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #f59e0b;
+}
+body[data-theme="dark"] .q-matrix-btn.partial {
+  background-color: rgba(245, 158, 11, 0.22) !important;
+  color: #fcd34d !important;
+  border-color: rgba(251, 191, 36, 0.5) !important;
+}
+
 /* Print Stylesheet */
 @media print {
   body {

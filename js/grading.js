@@ -15,16 +15,18 @@ const GradingSystem = {
     return v !== null && v !== undefined && String(v).trim() !== '' && !isNaN(Number(v)) && Number(v) >= 0;
   },
 
-  // Chuẩn hóa câu trả lời ngắn: trim, đổi dấu trừ Unicode & dấu phẩy thập phân thành chuẩn
+  // Chuẩn hóa câu trả lời ngắn: trim, đổi dấu trừ Unicode & chấp nhận cả dấu "." lẫn dấu "," cho số thập phân
   normalizeAnswer(ans) {
     if (ans === undefined || ans === null) return '';
     let s = String(ans).trim().toLowerCase()
       .replace(/[\u2212\u2013\u2014]/g, '-')
       .replace(/,/g, '.')
       .replace(/\s+/g, '');
+    s = s.replace(/^(-?)\.(\d+)$/, '$10.$2').replace(/^(-?\d+)\.$/, '$1');
     if (s.includes('.') && /^-?\d+\.\d+$/.test(s)) {
       s = s.replace(/\.?0+$/, '');
     }
+    if (s === '-0') s = '0';
     return s;
   },
 

@@ -387,4 +387,72 @@ console.assert(dualDropOk === true, 'Dual PDF + TEX drop fail');
 console.assert(capturedPdfFiles && capturedPdfFiles[0].name === 'De_Thi_GK1_Toan_12.pdf', 'Dropped PDF dispatch fail');
 console.assert(capturedKeyFiles && capturedKeyFiles[0].name === 'Dap_An_GK1.tex', 'Dropped TEX smart route fail');
 
-console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, PARSER .TEX/.TXT/OCR, KÉO THẢ FILE, SO SÁNH LỚP/KHỐI & APP ĐT ĐÃ ĐẠT 100%!');
+// Test 13: Phần III Trả lời ngắn chấp nhận cả dấu "." và dấu "," ở mọi định dạng
+console.assert(GradingSystem.isShortAnsMatch('12,5', '12.5') === true, 'Comma vs dot decimal fail');
+console.assert(GradingSystem.isShortAnsMatch('12.5', '12,5') === true, 'Dot vs comma decimal fail');
+console.assert(GradingSystem.isShortAnsMatch('-0,25', '-0.25') === true, 'Negative comma vs dot fail');
+console.assert(GradingSystem.isShortAnsMatch(',5', '0.5') === true, 'Leading comma decimal fail');
+console.assert(GradingSystem.isShortAnsMatch('-,25', '-0,25') === true, 'Negative leading comma decimal fail');
+console.assert(GradingSystem.isShortAnsMatch('12,50', '12.5') === true, 'Trailing zero with comma fail');
+console.assert(GradingSystem.isShortAnsMatch('12,', '12') === true, 'Trailing comma integer fail');
+console.assert(GradingSystem.isShortAnsMatch('0,5', '1/2') === true, 'Comma decimal vs fraction fail');
+
+// Test 14: getPart3BoxCount tự mở rộng lên 5-6 ô nếu đáp án có nhiều hơn 4 ký tự (VD: -0,25) và giữ 4 ô cho đề chuẩn
+console.assert(App.getPart3BoxCount({ part3: [{ id: 1, correct_answer: '12,5' }, { id: 2, correct_answer: '-1.5' }] }) === 4, 'Standard 4-box count fail');
+console.assert(App.getPart3BoxCount({ part3: [{ id: 1, correct_answer: '-0,25' }, { id: 2, correct_answer: '3' }] }) === 5, '5-char answer box expansion fail');
+
+// Test 15: Theo dõi quá trình làm bài (số câu đã làm, câu làm dở P.II, câu chưa tích chọn, đánh dấu xem lại)
+App.state.activeExam = {
+  id: 'EX-PROG-TEST',
+  part1: [{ id: 1, correct_answer: 'A' }, { id: 2, correct_answer: 'B' }, { id: 3, correct_answer: 'C' }],
+  part2: [
+    { id: 1, statements: [{ sub_id: 'a', correct: true }, { sub_id: 'b', correct: false }, { sub_id: 'c', correct: true }, { sub_id: 'd', correct: false }] },
+    { id: 2, statements: [{ sub_id: 'a', correct: true }, { sub_id: 'b', correct: true }, { sub_id: 'c', correct: false }, { sub_id: 'd', correct: false }] }
+  ],
+  part3: [{ id: 1, correct_answer: '12.5' }, { id: 2, correct_answer: '-0,5' }],
+  part4: [{ id: 1, correct_answer: 'x=2' }]
+};
+App.state.answers = {
+  part1: { 1: 'A', 3: 'D' },
+  part2: { 1: { a: true, b: false }, 2: { a: true, b: true, c: false, d: false } },
+  part3: { 1: ['1', '2', ',', '5'], 2: ['', '', '', ''] },
+  part4: { 1: { text: '', images: [] } },
+  flagged: { p1_2: true, p2_1: true }
+};
+const prog = App.calculateProgress();
+console.assert(prog.total === 8, 'Total progress count fail: ' + prog.total);
+console.assert(prog.answered === 4, 'Answered count fail: ' + prog.answered); // P1: 2, P2: 1 (câu 2 đủ 4 ý), P3: 1 (câu 1 = 12,5), P4: 0
+console.assert(prog.partial === 1, 'Partial P2 count fail: ' + prog.partial);  // P2 câu 1 mới chọn 2/4 ý
+console.assert(prog.unanswered === 3, 'Unanswered count fail: ' + prog.unanswered); // P1 câu 2, P3 câu 2, P4 câu 1
+console.assert(prog.flagged === 2, 'Flagged count fail: ' + prog.flagged);
+console.assert(App.getQuestionProgressState('p1', 1).label === 'Đã chọn A', 'P1 answered label fail');
+console.assert(App.getQuestionProgressState('p1', 2).label === 'Chưa chọn', 'P1 unanswered label fail');
+console.assert(App.getQuestionProgressState('p2', 1).status === 'partial' && App.getQuestionProgressState('p2', 1).shortVal === '2/4 ý', 'P2 partial state fail');
+console.assert(App.getQuestionProgressState('p3', 1).label === 'Đã điền: 12,5', 'P3 comma value progress label fail');
+
+// Test 16: Bảng đáp án ngang khi xem lời giải chi tiết + bộ lọc Sai/Đúng
+const mockSub = {
+  id: 'SUB-HORIZ-1',
+  examId: 'EX-PROG-TEST',
+  answers: {
+    part1: { 1: 'A', 2: 'A', 3: '' },
+    part2: { 1: { a: true, b: false, c: true, d: false }, 2: { a: false, b: true, c: false, d: false } },
+    part3: { 1: '12,5', 2: '' },
+    part4: { 1: { text: 'Em giải ra x=2', images: [] } }
+  }
+};
+const mockRes = GradingSystem.grade(mockSub.answers, App.state.activeExam);
+console.assert(mockRes.part3.details[1].isCorrect === true, 'P3 comma submission must grade correct against dot key');
+
+App.state.detailAnswerFilter = 'all';
+const allHtml = App.renderSubmissionAnswerSheetBody(App.state.activeExam, mockSub, mockRes, true, true);
+console.assert(allHtml.includes('lg:grid-cols-12') && allHtml.includes('md:grid-cols-6'), 'Horizontal grid classes missing in answer sheet body');
+
+App.state.detailAnswerFilter = 'correct';
+const onlyCorrectHtml = App.renderSubmissionAnswerSheetBody(App.state.activeExam, mockSub, mockRes, true, true);
+console.assert(onlyCorrectHtml.includes('C1') && !onlyCorrectHtml.includes('C2') && !onlyCorrectHtml.includes('C3'), 'Correct filter must keep C1 and hide wrong C2/C3');
+
+App.state.detailAnswerFilter = 'all';
+App.state.activeExam = null;
+
+console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, DẤU ./, PHẦN III, TIẾN ĐỘ LÀM BÀI & BẢNG ĐÁP ÁN NGANG ĐÃ ĐẠT 100%!');

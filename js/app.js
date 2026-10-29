@@ -46,6 +46,9 @@ const App = {
     activeSectionTab: 'p1',   // 'p1' | 'p2' | 'p3'
     mobileExamPane: 'both',   // 'pdf' | 'both' | 'sheet'
     paletteFilter: 'all',     // 'all' | 'unanswered' | 'answered' | 'flagged'
+    collapseAnswerSheetInDetail: false, // Thu gọn / Mở rộng bảng đáp án ngang khi xem PDF lời giải
+    detailAnswerFilter: 'all', // 'all' | 'wrong' | 'correct'
+    currentDetailSubId: null,
     activePart3Target: { qId: 1, boxIdx: 0 },
     theme: 'light',           // 'light' | 'sepia' | 'dark'
     accentHex: '#4f46e5',     // Mã màu chủ đạo (#RRGGBB)
@@ -2772,9 +2775,10 @@ const App = {
       flagged: {}
     };
 
-    // Khởi tạo 4 ô ký tự cho mỗi câu Phần III & khung bài làm Phần IV (Tự luận)
+    // Khởi tạo ô ký tự cho mỗi câu Phần III & khung bài làm Phần IV (Tự luận)
+    const p3Boxes = this.getPart3BoxCount(exam);
     exam.part3.forEach(q => {
-      this.state.answers.part3[q.id] = ['', '', '', ''];
+      this.state.answers.part3[q.id] = Array(p3Boxes).fill('');
     });
     exam.part4.forEach(q => {
       this.state.answers.part4[q.id] = { text: '', images: [] };
@@ -2787,6 +2791,8 @@ const App = {
     this.resetExamMonitorState();
     this.state.activeSectionTab = exam.part1.length ? 'p1' : (exam.part2.length ? 'p2' : (exam.part3.length ? 'p3' : 'p4'));
     this.state.mobileExamPane = 'both';
+    this.state.paletteFilter = 'all';
+    this.state.activePart3Target = { qId: 1, boxIdx: 0 };
 
     // Đọc file PDF thực tế từ IndexedDB nếu có
     if (typeof PDFStorage !== 'undefined') {
@@ -2840,9 +2846,9 @@ const App = {
       const btn = document.getElementById(`sectionTabBtn_${t}`);
       if (btn) {
         if (t === tab) {
-          btn.className = 'flex-1 h-9 rounded-lg text-center transition cursor-pointer bg-indigo-600 text-white shadow font-bold';
+          btn.className = 'flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap bg-indigo-600 text-white shadow font-bold';
         } else {
-          btn.className = 'flex-1 h-9 rounded-lg text-center transition cursor-pointer text-slate-600 hover:bg-slate-50 font-semibold';
+          btn.className = 'flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap text-slate-600 hover:bg-slate-50 font-semibold';
         }
       }
     });
@@ -2854,13 +2860,18 @@ const App = {
 
   setPaletteFilter(filter) {
     this.state.paletteFilter = filter;
-    this.render();
+    const body = document.getElementById('examProgressDrawerBody');
+    if (body && this.state.activeExam) {
+      body.innerHTML = this.renderPaletteMatrix(this.state.activeExam);
+    }
   },
 
   toggleFlag(qType, qId) {
+    if (!this.state.answers.flagged) this.state.answers.flagged = {};
     const key = `${qType}_${qId}`;
     this.state.answers.flagged[key] = !this.state.answers.flagged[key];
-    this.render();
+    this.refreshQuestionProgressDom(qType, qId);
+    this.updateProgressUi();
   },
 
   scrollToQuestion(part, qId) {
@@ -2882,41 +2893,130 @@ const App = {
     }, 60);
   },
 
+  getPart3BoxCount(ex) {
+    const list = Array.isArray(ex && ex.part3) ? ex.part3 : [];
+    const maxLen = list.reduce((m, q) => Math.max(m, String((q && q.correct_answer) || '').trim().length), 4);
+    return Math.min(6, Math.max(4, maxLen));
+  },
+
+  getQuestionProgressState(part, qId) {
+    const flaggedMap = (this.state.answers && this.state.answers.flagged) || {};
+    const isFlagged = Boolean(flaggedMap[`${part}_${qId}`]);
+
+    if (part === 'p1') {
+      const val = (this.state.answers && this.state.answers.part1 && this.state.answers.part1[qId]) || '';
+      return {
+        status: val ? 'answered' : 'unanswered',
+        label: val ? `Đã chọn ${val}` : 'Chưa chọn',
+        shortVal: val || '—',
+        isFlagged
+      };
+    }
+
+    if (part === 'p2') {
+      const ans = (this.state.answers && this.state.answers.part2 && this.state.answers.part2[qId]) || {};
+      const subs = ['a', 'b', 'c', 'd'];
+      const picked = subs.filter(k => ans[k] === true || ans[k] === false);
+      const detail = subs.map(k => ans[k] === true ? `${k}:Đ` : (ans[k] === false ? `${k}:S` : `${k}:-`)).join(' ');
+      if (picked.length === 4) {
+        return { status: 'answered', label: 'Đủ 4/4 ý', shortVal: '4/4 ý', detail, isFlagged };
+      }
+      if (picked.length > 0) {
+        return { status: 'partial', label: `Đã chọn ${picked.length}/4 ý`, shortVal: `${picked.length}/4 ý`, detail, isFlagged };
+      }
+      return { status: 'unanswered', label: 'Chưa chọn', shortVal: '0/4 ý', detail, isFlagged };
+    }
+
+    if (part === 'p3') {
+      const arr = (this.state.answers && this.state.answers.part3 && this.state.answers.part3[qId]) || [];
+      const raw = (Array.isArray(arr) ? arr.join('') : String(arr || '')).trim();
+      return {
+        status: raw.length > 0 ? 'answered' : 'unanswered',
+        label: raw.length > 0 ? `Đã điền: ${raw}` : 'Chưa điền',
+        shortVal: raw || 'Trống',
+        isFlagged
+      };
+    }
+
+    const entry = (this.state.answers && this.state.answers.part4 && this.state.answers.part4[qId]) || {};
+    const hasTxt = String(entry.text || '').trim().length > 0;
+    const imgCount = Array.isArray(entry.images) ? entry.images.length : 0;
+    const isAns = hasTxt || imgCount > 0;
+    return {
+      status: isAns ? 'answered' : 'unanswered',
+      label: isAns ? (imgCount > 0 ? `Đã làm (${imgCount} ảnh)` : 'Đã nhập bài') : 'Chưa làm',
+      shortVal: isAns ? 'Đã làm' : 'Trống',
+      isFlagged
+    };
+  },
+
   calculateProgress() {
     const ex = this.state.activeExam;
-    if (!ex) return { answered: 0, total: 22, percentage: 0 };
+    if (!ex) {
+      return {
+        answered: 0,
+        partial: 0,
+        unanswered: 22,
+        flagged: 0,
+        total: 22,
+        percentage: 0,
+        parts: {
+          p1: { answered: 0, total: 12 },
+          p2: { answered: 0, partial: 0, total: 4 },
+          p3: { answered: 0, total: 6 },
+          p4: { answered: 0, total: 0 }
+        }
+      };
+    }
 
-    let p1 = 0;
+    let p1 = 0, p2 = 0, p2Partial = 0, p3 = 0, p4 = 0, flagged = 0;
+
     ex.part1.forEach(q => {
-      if (this.state.answers.part1[q.id]) p1++;
+      const st = this.getQuestionProgressState('p1', q.id);
+      if (st.status === 'answered') p1++;
+      if (st.isFlagged) flagged++;
     });
 
-    let p2 = 0;
     ex.part2.forEach(q => {
-      const ans = this.state.answers.part2[q.id] || {};
-      if (Object.keys(ans).length === 4) p2++;
+      const st = this.getQuestionProgressState('p2', q.id);
+      if (st.status === 'answered') p2++;
+      else if (st.status === 'partial') p2Partial++;
+      if (st.isFlagged) flagged++;
     });
 
-    let p3 = 0;
     ex.part3.forEach(q => {
-      const raw = (this.state.answers.part3[q.id] || []).join('').trim();
-      if (raw.length > 0) p3++;
+      const st = this.getQuestionProgressState('p3', q.id);
+      if (st.status === 'answered') p3++;
+      if (st.isFlagged) flagged++;
     });
 
-    let p4 = 0;
     const p4List = Array.isArray(ex.part4) ? ex.part4 : [];
     p4List.forEach(q => {
-      const entry = (this.state.answers.part4 && this.state.answers.part4[q.id]) || {};
-      const hasTxt = String(entry.text || '').trim().length > 0;
-      const hasImg = Array.isArray(entry.images) && entry.images.length > 0;
-      if (hasTxt || hasImg) p4++;
+      const st = this.getQuestionProgressState('p4', q.id);
+      if (st.status === 'answered') p4++;
+      if (st.isFlagged) flagged++;
     });
 
     const answered = p1 + p2 + p3 + p4;
+    const partial = p2Partial;
     const total = ex.part1.length + ex.part2.length + ex.part3.length + p4List.length;
+    const unanswered = Math.max(0, total - answered - partial);
     const percentage = total > 0 ? Math.round((answered / total) * 100) : 0;
 
-    return { answered, total, percentage };
+    return {
+      answered,
+      partial,
+      unanswered,
+      flagged,
+      total,
+      percentage,
+      parts: {
+        p1: { answered: p1, total: ex.part1.length },
+        p2: { answered: p2, partial: p2Partial, total: ex.part2.length },
+        p3: { answered: p3, total: ex.part3.length },
+        p4: { answered: p4, total: p4List.length }
+      }
+    };
   },
 
   renderExamRoom(container) {
@@ -2961,16 +3061,16 @@ const App = {
 
           <!-- Controls & Actions -->
           <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <!-- Nút Lên Đầu Trang (Desktop/Tablet) -->
-            <button type="button" onclick="App.scrollToTop()" class="hidden md:inline-flex ui-btn bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 shadow-xs" title="Cuộn lên đầu trang">
-              <i class="fa-solid fa-arrow-up text-indigo-600"></i>
-              <span class="hidden lg:inline">Đầu trang</span>
+            <!-- Nút Xem Quá Trình Làm Bài (Desktop/Tablet) -->
+            <button type="button" id="examProgressTriggerBtn" onclick="App.toggleMobileDrawer()" class="hidden sm:inline-flex ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-xs" title="Xem quá trình đã làm, số câu đã tích chọn và câu còn bỏ trống">
+              <i class="fa-solid fa-list-check text-indigo-600"></i>
+              <span class="exam-header-progress-text">Quá trình: ${progress.answered}/${progress.total}</span>
             </button>
 
             <!-- Tải file PDF về máy (Desktop/Tablet) -->
-            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" onclick="App.suppressAntiCheatTemporarily(2000)" class="hidden md:inline-flex ui-btn bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200" title="Tải file PDF về máy nếu muốn in ấn">
+            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" onclick="App.suppressAntiCheatTemporarily(2000)" class="hidden xl:inline-flex ui-btn bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200" title="Tải file PDF về máy nếu muốn in ấn">
               <i class="fa-solid fa-cloud-arrow-down text-indigo-600"></i>
-              <span class="hidden lg:inline">Tải Đề</span>
+              <span>Tải Đề</span>
             </a>
 
             <!-- Nút chỉnh cỡ chữ A- / A+ -->
@@ -3006,7 +3106,7 @@ const App = {
           <div class="exam-progress-bar" style="width: ${progress.percentage}%;"></div>
         </div>
 
-        <!-- Thanh chuyển chế độ Đề PDF / Phiếu trả lời / Bảng câu tối ưu cho App iOS & Điện thoại -->
+        <!-- Thanh chuyển chế độ Đề PDF / Phiếu trả lời / Quá trình làm bài tối ưu cho Điện thoại -->
         <div class="lg:hidden bg-slate-900 border-b border-slate-800 px-2 py-1.5 flex items-center gap-1.5 shrink-0 z-20">
           <button type="button" id="mobPaneBtn_pdf" onclick="App.setMobileExamPane('pdf')" class="flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'pdf' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
             <i class="fa-solid fa-file-pdf text-red-400"></i><span>Đề PDF</span>
@@ -3017,8 +3117,8 @@ const App = {
           <button type="button" id="mobPaneBtn_sheet" onclick="App.setMobileExamPane('sheet')" class="flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'sheet' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
             <i class="fa-solid fa-pen-to-square text-emerald-300"></i><span>Phiếu (<span class="exam-mobile-ans-short">${progress.answered}/${progress.total}</span>)</span>
           </button>
-          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="h-9 px-3 rounded-xl text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap" title="Mở bảng câu hỏi">
-            <i class="fa-solid fa-list-check"></i><span id="mobilePaletteBtnText">Câu</span>
+          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="h-9 px-2.5 rounded-xl text-[11px] font-bold bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700 transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap" title="Xem quá trình đã làm & câu đã tích chọn">
+            <i class="fa-solid fa-list-check"></i><span id="mobilePaletteBtnText">Quá trình</span>
           </button>
         </div>
 
@@ -3027,20 +3127,24 @@ const App = {
           ${this.renderSplitViewContent(ex)}
         </div>
 
-        <!-- Mobile Drawer Backdrop & Content -->
+        <!-- Modal / Drawer Xem Quá Trình Làm Bài (Dùng chung cho cả Máy tính & Điện thoại) -->
         <div id="mobileDrawerBackdrop" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm transition" onclick="App.toggleMobileDrawer()"></div>
-        <div id="mobileDrawer" class="hidden fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-3xl shadow-2xl p-5 border-t border-slate-200 max-h-[80vh] overflow-y-auto space-y-4 ios-safe-bottom">
-          <div class="flex items-center justify-between border-b border-slate-100 pb-2">
-            <div class="flex items-center space-x-2">
-              <i class="fa-solid fa-list-check text-indigo-600 text-base"></i>
-              <h3 class="font-bold text-slate-900 text-sm">Bảng Điều Hướng Câu Hỏi</h3>
-              <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 exam-mobile-drawer-count">${progress.answered}/${progress.total} câu</span>
+        <div id="mobileDrawer" class="hidden fixed inset-x-0 bottom-0 lg:inset-auto lg:top-1/2 lg:left-1/2 lg:-translate-x-1/2 lg:-translate-y-1/2 lg:w-[92vw] lg:max-w-3xl z-50 bg-white rounded-t-3xl lg:rounded-3xl shadow-2xl p-4 sm:p-6 border-t lg:border border-slate-200 max-h-[84vh] overflow-y-auto space-y-4 ios-safe-bottom">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div class="flex items-center space-x-2.5 min-w-0">
+              <span class="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                <i class="fa-solid fa-list-check text-base"></i>
+              </span>
+              <div class="min-w-0">
+                <h3 class="font-extrabold text-slate-900 text-sm sm:text-base truncate">Quá Trình Làm Bài &amp; Trạng Thái Từng Câu</h3>
+                <p class="text-[11px] text-slate-500">Chạm vào bất kỳ câu nào để nhảy thẳng tới câu đó trên phiếu trả lời</p>
+              </div>
             </div>
-            <button onclick="App.toggleMobileDrawer()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center">
+            <button type="button" onclick="App.toggleMobileDrawer()" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center shrink-0 cursor-pointer">
               <i class="fa-solid fa-xmark text-sm"></i>
             </button>
           </div>
-          <div class="space-y-4">
+          <div id="examProgressDrawerBody" class="space-y-4">
             ${this.renderPaletteMatrix(ex)}
           </div>
         </div>
@@ -3055,6 +3159,11 @@ const App = {
     const backdrop = document.getElementById('mobileDrawerBackdrop');
     const drawer = document.getElementById('mobileDrawer');
     if (backdrop && drawer) {
+      const willOpen = drawer.classList.contains('hidden');
+      if (willOpen && this.state.activeExam) {
+        const body = document.getElementById('examProgressDrawerBody');
+        if (body) body.innerHTML = this.renderPaletteMatrix(this.state.activeExam);
+      }
       backdrop.classList.toggle('hidden');
       drawer.classList.toggle('hidden');
     }
@@ -3086,15 +3195,17 @@ const App = {
     });
   },
 
-  // 1. Chế độ Split View (Hiển thị trực tiếp file PDF đa trang trên cả Web & App iOS + Phiếu trả lời 3 phần)
+  // 1. Chế độ Split View (Hiển thị trực tiếp file PDF đa trang trên cả Web & App + Phiếu trả lời kèm Quá trình làm bài)
   renderSplitViewContent(ex) {
     const pdfSrc = this.state.resolvedPdfUrl || ex.pdf_url || '';
     const safeTitle = (ex.title || '').replace(/'/g, "\\'");
     const paneCls = this.getExamPaneClasses(this.state.mobileExamPane);
     const inStandalone = this.isStandaloneApp();
+    const progress = this.calculateProgress();
+    const remainCount = progress.total - progress.answered;
 
     return `
-      <!-- Cột trái: Trình xem PDF đa trang trực tiếp (Hỗ trợ đầy đủ iPhone / iPad Standalone App) -->
+      <!-- Cột trái: Trình xem PDF đa trang trực tiếp -->
       <div id="examLeftPdfPane" class="${paneCls.left}">
         <div class="bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0">
           <span class="flex items-center font-bold text-white truncate"><i class="fa-solid fa-file-pdf text-red-400 mr-2"></i><span class="truncate">Đề thi PDF gốc</span></span>
@@ -3115,22 +3226,38 @@ const App = {
         <div id="examRoomPdfViewer" class="flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950"></div>
       </div>
 
-      <!-- Cột phải: Phiếu trả lời 3 phần trực tuyến -->
+      <!-- Cột phải: Phiếu trả lời trực tuyến + Thanh theo dõi quá trình làm bài -->
       <div id="examRightSheetPane" class="${paneCls.right}">
         <div class="p-2.5 sm:p-3 border-b border-slate-200 bg-slate-50 sticky top-0 z-10 space-y-2">
+          <!-- Thanh tóm tắt quá trình đã làm ngay trên phiếu -->
+          <div class="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2 shadow-2xs">
+            <div class="min-w-0 flex items-center gap-2 text-xs">
+              <span class="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                <i class="fa-solid fa-chart-pie text-[11px]"></i>
+              </span>
+              <div class="truncate">
+                <span class="font-extrabold text-slate-800 exam-sheet-done-text">Đã làm: ${progress.answered}/${progress.total} câu (${progress.percentage}%)</span>
+                <span class="text-[11px] font-semibold ${remainCount > 0 ? 'text-amber-700' : 'text-emerald-700'} ml-1 exam-sheet-remain-text">• ${remainCount > 0 ? `Chưa xong: ${remainCount}` : 'Đã chọn đủ!'}</span>
+              </div>
+            </div>
+            <button type="button" id="sheetProgressDetailBtn" onclick="App.toggleMobileDrawer()" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold shrink-0 cursor-pointer flex items-center gap-1 shadow-xs" title="Mở bảng chi tiết câu nào đã tích chọn hay chưa">
+              <i class="fa-solid fa-list-check"></i><span>Xem quá trình</span>
+            </button>
+          </div>
+
           <div class="flex border border-slate-200 rounded-xl p-1 bg-white text-[11px] sm:text-xs font-bold gap-1 overflow-x-auto no-scrollbar">
             <button type="button" id="sectionTabBtn_p1" onclick="App.setSectionTab('p1')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'p1' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
-              P.I (${ex.part1.length})
+              P.I (${progress.parts.p1.answered}/${ex.part1.length})
             </button>
             <button type="button" id="sectionTabBtn_p2" onclick="App.setSectionTab('p2')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'p2' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
-              P.II (${ex.part2.length} Đ/S)
+              P.II (${progress.parts.p2.answered}/${ex.part2.length})
             </button>
             <button type="button" id="sectionTabBtn_p3" onclick="App.setSectionTab('p3')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'p3' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
-              P.III (${ex.part3.length})
+              P.III (${progress.parts.p3.answered}/${ex.part3.length})
             </button>
             ${Array.isArray(ex.part4) && ex.part4.length > 0 ? `
               <button type="button" id="sectionTabBtn_p4" onclick="App.setSectionTab('p4')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'p4' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
-                P.IV (${ex.part4.length} TL)
+                P.IV (${progress.parts.p4.answered}/${ex.part4.length})
               </button>
             ` : ''}
           </div>
@@ -3150,21 +3277,80 @@ const App = {
     `;
   },
 
-  // 2. Render Bảng điều hướng Matrix (Palette)
+  // 2. Render Bảng theo dõi Quá trình làm bài (Hiển thị rõ số câu đã làm & từng câu đã tích chọn gì hay bỏ trống)
   renderPaletteMatrix(ex) {
+    const progress = this.calculateProgress();
+    const filter = this.state.paletteFilter || 'all';
+    const matchFilter = (st) => {
+      if (filter === 'answered') return st.status === 'answered';
+      if (filter === 'unanswered') return st.status !== 'answered';
+      if (filter === 'flagged') return st.isFlagged;
+      return true;
+    };
+
+    const p1Filtered = ex.part1.filter(q => matchFilter(this.getQuestionProgressState('p1', q.id)));
+    const p2Filtered = ex.part2.filter(q => matchFilter(this.getQuestionProgressState('p2', q.id)));
+    const p3Filtered = ex.part3.filter(q => matchFilter(this.getQuestionProgressState('p3', q.id)));
+    const p4List = Array.isArray(ex.part4) ? ex.part4 : [];
+    const p4Filtered = p4List.filter(q => matchFilter(this.getQuestionProgressState('p4', q.id)));
+    const totalShown = p1Filtered.length + p2Filtered.length + p3Filtered.length + p4Filtered.length;
+
     return `
-      <div class="space-y-3">
-        ${ex.part1.length > 0 ? `
-        <div>
-          <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Phần I: Trắc nghiệm 4 lựa chọn (${ex.part1.length} câu)</div>
-          <div class="flex flex-wrap gap-1.5">
-            ${ex.part1.map(q => {
-              const isAns = Boolean(this.state.answers.part1[q.id]);
-              const isFlag = Boolean(this.state.answers.flagged[`p1_${q.id}`]);
+      <div class="space-y-4">
+        <!-- Thống kê tổng quan quá trình -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div class="p-2.5 rounded-xl bg-indigo-50 border border-indigo-100">
+            <div class="text-[11px] text-slate-500 font-semibold">Đã làm đủ</div>
+            <div class="text-base font-extrabold text-indigo-700 font-mono mt-0.5">${progress.answered}/${progress.total} <span class="text-[11px] font-sans font-bold">(${progress.percentage}%)</span></div>
+          </div>
+          <div class="p-2.5 rounded-xl bg-rose-50 border border-rose-100">
+            <div class="text-[11px] text-slate-500 font-semibold">Chưa tích chọn</div>
+            <div class="text-base font-extrabold text-rose-700 font-mono mt-0.5">${progress.unanswered} câu</div>
+          </div>
+          <div class="p-2.5 rounded-xl bg-amber-50 border border-amber-100">
+            <div class="text-[11px] text-slate-500 font-semibold">Đang làm dở (P.II)</div>
+            <div class="text-base font-extrabold text-amber-700 font-mono mt-0.5">${progress.partial} câu</div>
+          </div>
+          <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+            <div class="text-[11px] text-slate-500 font-semibold">Đánh dấu xem lại</div>
+            <div class="text-base font-extrabold text-slate-800 font-mono mt-0.5">${progress.flagged} câu</div>
+          </div>
+        </div>
+
+        <!-- Bộ lọc nhanh câu hỏi -->
+        <div class="flex flex-wrap items-center gap-1.5">
+          ${[
+            { id: 'all', label: `Tất cả (${progress.total})`, icon: 'fa-border-all' },
+            { id: 'unanswered', label: `Chưa xong (${progress.unanswered + progress.partial})`, icon: 'fa-circle-exclamation' },
+            { id: 'answered', label: `Đã chọn (${progress.answered})`, icon: 'fa-circle-check' },
+            { id: 'flagged', label: `Đánh dấu (${progress.flagged})`, icon: 'fa-star' }
+          ].map(f => `
+            <button type="button" onclick="App.setPaletteFilter('${f.id}')" class="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 ${filter === f.id ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}">
+              <i class="fa-solid ${f.icon} text-[11px]"></i><span>${f.label}</span>
+            </button>
+          `).join('')}
+        </div>
+
+        ${totalShown === 0 ? `
+          <div class="p-6 text-center rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-500 font-semibold">
+            ${filter === 'unanswered' ? 'Tuyệt vời! Bạn đã tích chọn đầy đủ tất cả các câu hỏi trong đề.' : 'Không có câu hỏi nào khớp với bộ lọc hiện tại.'}
+          </div>
+        ` : ''}
+
+        ${p1Filtered.length > 0 ? `
+        <div class="space-y-2">
+          <div class="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <span>Phần I: Trắc nghiệm 4 lựa chọn</span>
+            <span class="text-indigo-600">Đã chọn ${progress.parts.p1.answered}/${ex.part1.length} câu</span>
+          </div>
+          <div class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-1.5">
+            ${p1Filtered.map(q => {
+              const st = this.getQuestionProgressState('p1', q.id);
               return `
-                <button id="qmat_p1_${q.id}" onclick="App.scrollToQuestion('p1', ${q.id})" 
-                  class="q-matrix-btn ${isAns ? 'answered' : 'unanswered'} ${isFlag ? 'flagged' : ''}">
-                  ${q.id}
+                <button type="button" id="qmat_p1_${q.id}" onclick="App.scrollToQuestion('p1', ${q.id})"
+                  class="q-matrix-btn !w-full !h-auto py-1.5 px-2 flex-col gap-0.5 ${st.status} ${st.isFlagged ? 'flagged' : ''}">
+                  <span class="text-[10px] opacity-80 font-semibold">Câu ${q.id}</span>
+                  <span class="font-mono font-extrabold text-xs">${st.status === 'answered' ? st.shortVal : 'Chưa chọn'}</span>
                 </button>
               `;
             }).join('')}
@@ -3172,18 +3358,23 @@ const App = {
         </div>
         ` : ''}
 
-        ${ex.part2.length > 0 ? `
-        <div>
-          <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Phần II: Đúng/Sai (${ex.part2.length} câu)</div>
-          <div class="flex flex-wrap gap-1.5">
-            ${ex.part2.map(q => {
-              const ans = this.state.answers.part2[q.id] || {};
-              const isAns = Object.keys(ans).length === 4;
-              const isFlag = Boolean(this.state.answers.flagged[`p2_${q.id}`]);
+        ${p2Filtered.length > 0 ? `
+        <div class="space-y-2">
+          <div class="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <span>Phần II: Đúng / Sai (4 ý mỗi câu)</span>
+            <span class="text-emerald-700">Đủ 4 ý: ${progress.parts.p2.answered}/${ex.part2.length} câu</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+            ${p2Filtered.map(q => {
+              const st = this.getQuestionProgressState('p2', q.id);
               return `
-                <button id="qmat_p2_${q.id}" onclick="App.scrollToQuestion('p2', ${q.id})" 
-                  class="q-matrix-btn ${isAns ? 'answered' : 'unanswered'} ${isFlag ? 'flagged' : ''}">
-                  ${q.id}
+                <button type="button" id="qmat_p2_${q.id}" onclick="App.scrollToQuestion('p2', ${q.id})"
+                  class="q-matrix-btn !w-full !h-auto py-2 px-2.5 flex-col items-start gap-1 text-left ${st.status} ${st.isFlagged ? 'flagged' : ''}">
+                  <div class="w-full flex items-center justify-between text-xs font-extrabold">
+                    <span>Câu ${q.id}</span>
+                    <span class="font-mono text-[11px]">${st.shortVal}</span>
+                  </div>
+                  <div class="font-mono text-[10px] opacity-90 truncate w-full">${st.detail}</div>
                 </button>
               `;
             }).join('')}
@@ -3191,18 +3382,20 @@ const App = {
         </div>
         ` : ''}
 
-        ${ex.part3.length > 0 ? `
-        <div>
-          <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Phần III: Trả lời ngắn (${ex.part3.length} câu)</div>
-          <div class="flex flex-wrap gap-1.5">
-            ${ex.part3.map(q => {
-              const str = (this.state.answers.part3[q.id] || []).join('').trim();
-              const isAns = str.length > 0;
-              const isFlag = Boolean(this.state.answers.flagged[`p3_${q.id}`]);
+        ${p3Filtered.length > 0 ? `
+        <div class="space-y-2">
+          <div class="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <span>Phần III: Trả lời ngắn</span>
+            <span class="text-amber-700">Đã điền ${progress.parts.p3.answered}/${ex.part3.length} câu</span>
+          </div>
+          <div class="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+            ${p3Filtered.map(q => {
+              const st = this.getQuestionProgressState('p3', q.id);
               return `
-                <button id="qmat_p3_${q.id}" onclick="App.scrollToQuestion('p3', ${q.id})" 
-                  class="q-matrix-btn ${isAns ? 'answered' : 'unanswered'} ${isFlag ? 'flagged' : ''}">
-                  ${q.id}
+                <button type="button" id="qmat_p3_${q.id}" onclick="App.scrollToQuestion('p3', ${q.id})"
+                  class="q-matrix-btn !w-full !h-auto py-1.5 px-2 flex-col gap-0.5 ${st.status} ${st.isFlagged ? 'flagged' : ''}">
+                  <span class="text-[10px] opacity-80 font-semibold">Câu ${q.id}</span>
+                  <span class="font-mono font-extrabold text-xs truncate max-w-full">${st.shortVal}</span>
                 </button>
               `;
             }).join('')}
@@ -3210,18 +3403,20 @@ const App = {
         </div>
         ` : ''}
 
-        ${Array.isArray(ex.part4) && ex.part4.length > 0 ? `
-        <div>
-          <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Phần IV: Tự luận (${ex.part4.length} câu)</div>
-          <div class="flex flex-wrap gap-1.5">
-            ${ex.part4.map(q => {
-              const entry = (this.state.answers.part4 && this.state.answers.part4[q.id]) || {};
-              const isAns = String(entry.text || '').trim().length > 0 || (Array.isArray(entry.images) && entry.images.length > 0);
-              const isFlag = Boolean(this.state.answers.flagged[`p4_${q.id}`]);
+        ${p4Filtered.length > 0 ? `
+        <div class="space-y-2">
+          <div class="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <span>Phần IV: Tự luận</span>
+            <span class="text-purple-700">Đã làm ${progress.parts.p4.answered}/${p4List.length} câu</span>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+            ${p4Filtered.map(q => {
+              const st = this.getQuestionProgressState('p4', q.id);
               return `
-                <button id="qmat_p4_${q.id}" onclick="App.scrollToQuestion('p4', ${q.id})" 
-                  class="q-matrix-btn ${isAns ? 'answered' : 'unanswered'} ${isFlag ? 'flagged' : ''}">
-                  ${q.id}
+                <button type="button" id="qmat_p4_${q.id}" onclick="App.scrollToQuestion('p4', ${q.id})"
+                  class="q-matrix-btn !w-full !h-auto py-1.5 px-2.5 flex-col gap-0.5 ${st.status} ${st.isFlagged ? 'flagged' : ''}">
+                  <span class="text-[10px] opacity-80 font-semibold">Câu ${q.id} (TL)</span>
+                  <span class="font-bold text-xs">${st.shortVal}</span>
                 </button>
               `;
             }).join('')}
@@ -3230,6 +3425,29 @@ const App = {
         ` : ''}
       </div>
     `;
+  },
+
+  getRowVisualClasses(part, st) {
+    if (st.status === 'answered') {
+      return {
+        row: part === 'p4'
+          ? 'p-3.5 bg-indigo-50 border border-indigo-200 rounded-2xl space-y-2.5 transition'
+          : (part === 'p2' ? 'p-3 bg-indigo-50 border border-indigo-200 rounded-xl space-y-2 transition' : 'p-2.5 bg-indigo-50 rounded-xl border border-indigo-200 flex items-center justify-between gap-2 transition'),
+        badge: 'px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] whitespace-nowrap'
+      };
+    }
+    if (st.status === 'partial') {
+      return {
+        row: 'p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2 transition',
+        badge: 'px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-[10px] whitespace-nowrap'
+      };
+    }
+    return {
+      row: part === 'p4'
+        ? 'p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5 transition'
+        : (part === 'p2' ? 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 transition' : 'p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-2 transition'),
+      badge: 'px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-semibold text-[10px] whitespace-nowrap'
+    };
   },
 
   // 3. Render Phiếu làm bài bên phải (Split Mode)
@@ -3241,10 +3459,20 @@ const App = {
           <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Phần I: Chọn 1 trong 4 đáp án (${ex.part1.length} câu)</div>
           ${ex.part1.map(q => {
             const curAns = this.state.answers.part1[q.id];
+            const st = this.getQuestionProgressState('p1', q.id);
+            const vis = this.getRowVisualClasses('p1', st);
             return `
-              <div id="row_p1_${q.id}" class="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between transition">
-                <span class="font-bold text-xs text-slate-700 w-16">Câu ${q.id}:</span>
-                <div class="flex gap-2">
+              <div id="row_p1_${q.id}" class="${vis.row}">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <button type="button" id="flag_btn_p1_${q.id}" onclick="App.toggleFlag('p1', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
+                    <i class="fa-solid fa-star text-[11px]"></i>
+                  </button>
+                  <div class="flex flex-col">
+                    <span class="font-bold text-xs text-slate-800 whitespace-nowrap">Câu ${q.id}</span>
+                    <span id="row_status_p1_${q.id}" class="${vis.badge} w-fit mt-0.5">${st.label}</span>
+                  </div>
+                </div>
+                <div class="flex gap-1.5 sm:gap-2 shrink-0">
                   ${['A', 'B', 'C', 'D'].map(opt => `
                     <button type="button" id="split_btn_p1_${q.id}_${opt}" onclick="App.selectPart1Answer(${q.id}, '${opt}')" 
                       class="w-10 h-10 sm:w-9 sm:h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer ${curAns === opt ? 'bg-indigo-600 border-indigo-600 text-white shadow' : 'bg-white border-slate-300 text-slate-700 hover:bg-indigo-50'}">
@@ -3264,9 +3492,20 @@ const App = {
       return `
         <div class="space-y-4">
           <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Phần II: Chọn Đúng hoặc Sai (${ex.part2.length} câu)</div>
-          ${ex.part2.map(q => `
-            <div id="row_p2_${q.id}" class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 transition">
-              <div class="font-bold text-xs text-slate-800">Câu ${q.id} (4 ý):</div>
+          ${ex.part2.map(q => {
+            const st = this.getQuestionProgressState('p2', q.id);
+            const vis = this.getRowVisualClasses('p2', st);
+            return `
+            <div id="row_p2_${q.id}" class="${vis.row}">
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1.5">
+                  <button type="button" id="flag_btn_p2_${q.id}" onclick="App.toggleFlag('p2', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
+                    <i class="fa-solid fa-star text-[11px]"></i>
+                  </button>
+                  <span class="font-bold text-xs text-slate-800">Câu ${q.id} (4 ý):</span>
+                </div>
+                <span id="row_status_p2_${q.id}" class="${vis.badge}">${st.label}</span>
+              </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
                 ${['a', 'b', 'c', 'd'].map(sub => {
                   const val = this.state.answers.part2[q.id]?.[sub];
@@ -3282,31 +3521,48 @@ const App = {
                 }).join('')}
               </div>
             </div>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       `;
     }
 
     if (this.state.activeSectionTab === 'p3') {
       if (ex.part3.length === 0) return `<div class="p-4 text-center text-xs text-slate-400 italic">Đề thi này không có câu hỏi Phần III.</div>`;
+      const p3Boxes = this.getPart3BoxCount(ex);
+      const boxIndices = Array.from({ length: p3Boxes }, (_, idx) => idx);
       return `
-        <div class="space-y-4">
-          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Phần III: Ô vuông kết quả 4 ký tự (${ex.part3.length} câu)</div>
+        <div class="space-y-3.5">
+          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider">Phần III: Trả lời ngắn (${ex.part3.length} câu)</div>
+          <div class="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-start gap-2">
+            <i class="fa-solid fa-circle-info text-amber-600 mt-0.5 shrink-0"></i>
+            <span>Số thập phân điền dấu chấm (<strong>.</strong>) hoặc dấu phẩy (<strong>,</strong>) đều được chấp nhận như nhau (VD: <code class="font-mono font-bold">12.5</code> hoặc <code class="font-mono font-bold">12,5</code>).</span>
+          </div>
           <div class="space-y-3">
             ${ex.part3.map(q => {
-              const digits = this.state.answers.part3[q.id] || ['', '', '', ''];
+              const digits = this.state.answers.part3[q.id] || Array(p3Boxes).fill('');
+              const st = this.getQuestionProgressState('p3', q.id);
+              const vis = this.getRowVisualClasses('p3', st);
               return `
-                <div id="row_p3_${q.id}" class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between transition">
-                  <span class="font-bold text-xs text-slate-700 w-16">Câu ${q.id}:</span>
-                  <div class="flex space-x-2">
-                    ${[0, 1, 2, 3].map(boxIdx => `
-                      <input type="text" maxlength="1" 
+                <div id="row_p3_${q.id}" class="${vis.row}">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <button type="button" id="flag_btn_p3_${q.id}" onclick="App.toggleFlag('p3', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
+                      <i class="fa-solid fa-star text-[11px]"></i>
+                    </button>
+                    <div class="flex flex-col">
+                      <span class="font-bold text-xs text-slate-800 whitespace-nowrap">Câu ${q.id}</span>
+                      <span id="row_status_p3_${q.id}" class="${vis.badge} w-fit mt-0.5">${st.label}</span>
+                    </div>
+                  </div>
+                  <div class="flex ${p3Boxes > 4 ? 'gap-1' : 'gap-1.5 sm:gap-2'} shrink-0">
+                    ${boxIndices.map(boxIdx => `
+                      <input type="text" inputmode="decimal" autocomplete="off"
                         id="split_box_${q.id}_${boxIdx}"
                         value="${digits[boxIdx] || ''}"
                         onfocus="App.state.activePart3Target = { qId: ${q.id}, boxIdx: ${boxIdx} }"
                         onkeydown="App.handleBoxKeyDown(event, ${q.id}, ${boxIdx}, 'split_box_')"
                         oninput="App.handleBoxInput(event, ${q.id}, ${boxIdx}, 'split_box_')"
-                        class="box-digit ${digits[boxIdx] ? 'box-digit-filled' : ''}">
+                        class="box-digit ${p3Boxes > 4 ? '!w-8 !h-11 !text-lg sm:!w-9 sm:!h-12' : ''} ${digits[boxIdx] ? 'box-digit-filled' : ''}">
                     `).join('')}
                   </div>
                 </div>
@@ -3314,9 +3570,9 @@ const App = {
             }).join('')}
           </div>
 
-          <!-- Bàn phím số nhanh cho Phần III -->
-          <div class="mt-4 pt-4 border-t border-slate-200">
-            <div class="text-[11px] text-slate-400 font-semibold mb-2 text-center">Bàn phím số nhanh (Chạm vào ô để điền):</div>
+          <!-- Bàn phím số nhanh cho Phần III (Hỗ trợ cả dấu "." và dấu ",") -->
+          <div class="mt-4 pt-3.5 border-t border-slate-200 space-y-2">
+            <div class="text-[11px] text-slate-500 font-semibold text-center">Bàn phím số nhanh (Hỗ trợ cả <strong class="font-mono">.</strong> và <strong class="font-mono">,</strong>):</div>
             <div class="math-keypad max-w-xs mx-auto">
               ${[
                 { k: '1', l: '1' },
@@ -3330,16 +3586,22 @@ const App = {
                 { k: '7', l: '7' },
                 { k: '8', l: '8' },
                 { k: '9', l: '9' },
+                { k: ',', l: ',' },
                 { k: '.', l: '.' },
                 { k: '0', l: '0' },
                 { k: '/', l: '/' },
-                { k: 'C', l: 'C' },
-                { k: 'enter', l: '<i class="fa-solid fa-check"></i>' }
+                { k: 'C', l: 'C' }
               ].map(btn => `
-                <button onclick="App.handleKeypadPress('${btn.k}')" class="math-key ${['backspace', 'C', 'enter', '-', '/', '.'].includes(btn.k) ? 'math-key-action' : ''}">
+                <button type="button" onclick="App.handleKeypadPress('${btn.k}')" class="math-key ${['backspace', 'C', '-', '/', '.', ','].includes(btn.k) ? 'math-key-action' : ''}">
                   ${btn.l}
                 </button>
               `).join('')}
+            </div>
+            <div class="max-w-xs mx-auto">
+              <button type="button" onclick="App.handleKeypadPress('enter')" class="w-full py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5">
+                <span>Chuyển sang câu tiếp theo</span>
+                <i class="fa-solid fa-arrow-down text-[11px]"></i>
+              </button>
             </div>
           </div>
         </div>
@@ -3356,11 +3618,21 @@ const App = {
             const entry = (this.state.answers.part4 && this.state.answers.part4[q.id]) || { text: '', images: [] };
             const qMax = +GradingSystem.getQuestionMaxPoints(ex, 'part4', q).toFixed(2);
             const imgs = Array.isArray(entry.images) ? entry.images : [];
+            const st = this.getQuestionProgressState('p4', q.id);
+            const vis = this.getRowVisualClasses('p4', st);
             return `
-              <div id="row_p4_${q.id}" data-drop-target="p4ImgInput_${q.id}" class="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5 transition">
-                <div class="flex items-center justify-between">
-                  <span class="font-extrabold text-xs text-slate-800">Câu ${q.id} (Tự luận):</span>
-                  <span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-mono font-bold text-[11px]">${qMax} điểm</span>
+              <div id="row_p4_${q.id}" data-drop-target="p4ImgInput_${q.id}" class="${vis.row}">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-1.5">
+                    <button type="button" id="flag_btn_p4_${q.id}" onclick="App.toggleFlag('p4', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
+                      <i class="fa-solid fa-star text-[11px]"></i>
+                    </button>
+                    <span class="font-extrabold text-xs text-slate-800">Câu ${q.id} (Tự luận):</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span id="row_status_p4_${q.id}" class="${vis.badge}">${st.label}</span>
+                    <span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-mono font-bold text-[11px]">${qMax} điểm</span>
+                  </div>
                 </div>
                 <textarea rows="3" placeholder="Trình bày lời giải tóm tắt hoặc ghi kết quả cuối cùng của Câu ${q.id}..." oninput="App.handlePart4TextInput(${q.id}, this.value)" class="w-full p-2.5 rounded-xl border border-slate-300 bg-white text-xs text-slate-800 focus:border-indigo-500 outline-none">${String(entry.text || '').replace(/</g, '&lt;')}</textarea>
                 <div class="flex flex-wrap items-center justify-between gap-2">
@@ -3394,9 +3666,7 @@ const App = {
     if (!this.state.answers.part4) this.state.answers.part4 = {};
     if (!this.state.answers.part4[qId]) this.state.answers.part4[qId] = { text: '', images: [] };
     this.state.answers.part4[qId].text = val;
-    const entry = this.state.answers.part4[qId];
-    const isAns = String(entry.text || '').trim().length > 0 || (Array.isArray(entry.images) && entry.images.length > 0);
-    this.updatePaletteMatrixButton('p4', qId, isAns);
+    this.refreshQuestionProgressDom('p4', qId);
     this.updateProgressUi();
   },
 
@@ -3432,8 +3702,7 @@ const App = {
       const dataUrl = await this.compressImageFile(f);
       if (dataUrl) this.state.answers.part4[qId].images.push(dataUrl);
     }
-    const entry = this.state.answers.part4[qId];
-    this.updatePaletteMatrixButton('p4', qId, true);
+    this.refreshQuestionProgressDom('p4', qId);
     this.updateProgressUi();
     const pane = document.getElementById('splitAnswerInputsContainer');
     if (pane && this.state.activeExam) pane.innerHTML = this.renderAnswerSheetInputs(this.state.activeExam);
@@ -3443,8 +3712,7 @@ const App = {
     const entry = this.state.answers.part4 && this.state.answers.part4[qId];
     if (!entry || !Array.isArray(entry.images)) return;
     entry.images.splice(imgIdx, 1);
-    const isAns = String(entry.text || '').trim().length > 0 || entry.images.length > 0;
-    this.updatePaletteMatrixButton('p4', qId, isAns);
+    this.refreshQuestionProgressDom('p4', qId);
     this.updateProgressUi();
     const pane = document.getElementById('splitAnswerInputsContainer');
     if (pane && this.state.activeExam) pane.innerHTML = this.renderAnswerSheetInputs(this.state.activeExam);
@@ -3467,96 +3735,158 @@ const App = {
     document.body.appendChild(modal);
   },
 
-  handleBoxInput(event, qId, boxIdx, prefix = 'box_') {
-    const val = event.target.value.slice(-1);
-    event.target.value = val;
-
-    if (!this.state.answers.part3[qId]) {
-      this.state.answers.part3[qId] = ['', '', '', ''];
+  handleBoxInput(event, qId, boxIdx, prefix = 'split_box_') {
+    const p3Boxes = this.getPart3BoxCount(this.state.activeExam);
+    if (!Array.isArray(this.state.answers.part3[qId]) || this.state.answers.part3[qId].length < p3Boxes) {
+      const prev = Array.isArray(this.state.answers.part3[qId]) ? this.state.answers.part3[qId] : [];
+      this.state.answers.part3[qId] = Array.from({ length: p3Boxes }, (_, i) => prev[i] || '');
     }
+
+    const sanitize = (str) => String(str || '').replace(/[\u2212\u2013\u2014]/g, '-').replace(/[^0-9.,\-/]/g, '');
+    const rawTarget = String(event.target.value || '');
+    const cleanTarget = sanitize(rawTarget);
+    const prevChar = this.state.answers.part3[qId][boxIdx] || '';
+
+    // 1. Xóa ký tự trong ô hiện tại
+    if (rawTarget === '') {
+      this.state.answers.part3[qId][boxIdx] = '';
+      event.target.value = '';
+      event.target.classList.remove('box-digit-filled');
+      this.refreshQuestionProgressDom('p3', qId);
+      this.updateProgressUi();
+      return;
+    }
+
+    // 2. Dán hoặc nhập chuỗi nhiều ký tự (VD: "12,5" hoặc "-0.5") -> tự rải đều sang các ô kế tiếp
+    const insertedStr = typeof event.data === 'string' ? sanitize(event.data) : '';
+    const isMultiPaste = event.inputType === 'insertFromPaste' || insertedStr.length > 1 || (prevChar === '' && cleanTarget.length > 1);
+    if (isMultiPaste && cleanTarget.length > 1) {
+      const seq = insertedStr.length > 1 ? insertedStr : cleanTarget;
+      const startIdx = (seq.length > (p3Boxes - boxIdx) && seq.length <= p3Boxes) ? 0 : boxIdx;
+      for (let i = 0; i < seq.length && (startIdx + i) < p3Boxes; i++) {
+        const ch = seq[i];
+        this.state.answers.part3[qId][startIdx + i] = ch;
+        const inp = typeof document !== 'undefined' ? document.getElementById(`${prefix}${qId}_${startIdx + i}`) : null;
+        if (inp) {
+          inp.value = ch;
+          inp.classList.add('box-digit-filled');
+        }
+      }
+      const nextFocusIdx = Math.min(p3Boxes - 1, startIdx + seq.length);
+      const nextEl = typeof document !== 'undefined' ? document.getElementById(`${prefix}${qId}_${nextFocusIdx}`) : null;
+      if (nextEl) nextEl.focus();
+      this.refreshQuestionProgressDom('p3', qId);
+      this.updateProgressUi();
+      return;
+    }
+
+    // 3. Gõ 1 ký tự (chấp nhận cả "." và ",")
+    let val = '';
+    if (typeof event.data === 'string' && event.data.length > 0) {
+      const typed = sanitize(event.data).slice(-1);
+      if (!typed) {
+        event.target.value = prevChar;
+        return;
+      }
+      val = typed;
+    } else {
+      if (!cleanTarget) {
+        event.target.value = prevChar;
+        return;
+      }
+      val = cleanTarget.slice(-1);
+    }
+
+    event.target.value = val;
     this.state.answers.part3[qId][boxIdx] = val;
 
     if (val) {
       event.target.classList.add('box-digit-filled');
-      if (boxIdx < 3) {
-        const nextInput = document.getElementById(`${prefix}${qId}_${boxIdx + 1}`);
+      if (boxIdx < p3Boxes - 1) {
+        const nextInput = typeof document !== 'undefined' ? document.getElementById(`${prefix}${qId}_${boxIdx + 1}`) : null;
         if (nextInput) nextInput.focus();
       }
     } else {
       event.target.classList.remove('box-digit-filled');
     }
 
-    const str = (this.state.answers.part3[qId] || []).join('').trim();
-    this.updatePaletteMatrixButton('p3', qId, str.length > 0);
+    this.refreshQuestionProgressDom('p3', qId);
     this.updateProgressUi();
   },
 
-  handleBoxKeyDown(event, qId, boxIdx, prefix = 'box_') {
+  handleBoxKeyDown(event, qId, boxIdx, prefix = 'split_box_') {
+    const p3Boxes = this.getPart3BoxCount(this.state.activeExam);
     if (event.key === 'Backspace' && !event.target.value && boxIdx > 0) {
       const prevInput = document.getElementById(`${prefix}${qId}_${boxIdx - 1}`);
       if (prevInput) {
         prevInput.focus();
         prevInput.value = '';
         prevInput.classList.remove('box-digit-filled');
-        this.state.answers.part3[qId][boxIdx - 1] = '';
-        const str = (this.state.answers.part3[qId] || []).join('').trim();
-        this.updatePaletteMatrixButton('p3', qId, str.length > 0);
+        if (this.state.answers.part3[qId]) this.state.answers.part3[qId][boxIdx - 1] = '';
+        this.refreshQuestionProgressDom('p3', qId);
         this.updateProgressUi();
       }
+    } else if (event.key === 'ArrowLeft' && boxIdx > 0) {
+      event.preventDefault();
+      document.getElementById(`${prefix}${qId}_${boxIdx - 1}`)?.focus();
+    } else if (event.key === 'ArrowRight' && boxIdx < p3Boxes - 1) {
+      event.preventDefault();
+      document.getElementById(`${prefix}${qId}_${boxIdx + 1}`)?.focus();
     }
   },
 
   handleKeypadPress(key) {
+    const p3Boxes = this.getPart3BoxCount(this.state.activeExam);
     const { qId, boxIdx } = this.state.activePart3Target || { qId: 1, boxIdx: 0 };
-    if (!this.state.answers.part3[qId]) {
-      this.state.answers.part3[qId] = ['', '', '', ''];
+    if (!Array.isArray(this.state.answers.part3[qId]) || this.state.answers.part3[qId].length < p3Boxes) {
+      const prev = Array.isArray(this.state.answers.part3[qId]) ? this.state.answers.part3[qId] : [];
+      this.state.answers.part3[qId] = Array.from({ length: p3Boxes }, (_, i) => prev[i] || '');
     }
 
-    const targetInput = document.getElementById(`split_box_${qId}_${boxIdx}`);
+    const targetInput = typeof document !== 'undefined' ? document.getElementById(`split_box_${qId}_${boxIdx}`) : null;
 
     if (key === 'backspace') {
       this.state.answers.part3[qId][boxIdx] = '';
       if (targetInput) { targetInput.value = ''; targetInput.classList.remove('box-digit-filled'); }
       if (boxIdx > 0) {
         this.state.activePart3Target.boxIdx = boxIdx - 1;
-        const prev = document.getElementById(`split_box_${qId}_${boxIdx - 1}`);
+        const prev = typeof document !== 'undefined' ? document.getElementById(`split_box_${qId}_${boxIdx - 1}`) : null;
         if (prev) prev.focus();
       }
     } else if (key === 'C') {
-      this.state.answers.part3[qId] = ['', '', '', ''];
-      [0, 1, 2, 3].forEach(b => {
-        const inp = document.getElementById(`split_box_${qId}_${b}`);
+      this.state.answers.part3[qId] = Array(p3Boxes).fill('');
+      for (let b = 0; b < p3Boxes; b++) {
+        const inp = typeof document !== 'undefined' ? document.getElementById(`split_box_${qId}_${b}`) : null;
         if (inp) { inp.value = ''; inp.classList.remove('box-digit-filled'); }
-      });
+      }
       this.state.activePart3Target.boxIdx = 0;
-      const first = document.getElementById(`split_box_${qId}_0`);
+      const first = typeof document !== 'undefined' ? document.getElementById(`split_box_${qId}_0`) : null;
       if (first) first.focus();
     } else if (key === 'enter') {
       const maxP3 = this.state.activeExam?.part3?.length || 6;
       if (qId < maxP3) {
         this.state.activePart3Target = { qId: qId + 1, boxIdx: 0 };
-        const next = document.getElementById(`split_box_${qId + 1}_0`);
+        const next = typeof document !== 'undefined' ? document.getElementById(`split_box_${qId + 1}_0`) : null;
         if (next) next.focus();
       }
     } else {
       this.state.answers.part3[qId][boxIdx] = key;
       if (targetInput) { targetInput.value = key; targetInput.classList.add('box-digit-filled'); }
-      if (boxIdx < 3) {
+      if (boxIdx < p3Boxes - 1) {
         this.state.activePart3Target.boxIdx = boxIdx + 1;
-        const next = document.getElementById(`split_box_${qId}_${boxIdx + 1}`);
+        const next = typeof document !== 'undefined' ? document.getElementById(`split_box_${qId}_${boxIdx + 1}`) : null;
         if (next) next.focus();
       }
     }
 
-    const str = (this.state.answers.part3[qId] || []).join('').trim();
-    this.updatePaletteMatrixButton('p3', qId, str.length > 0);
+    this.refreshQuestionProgressDom('p3', qId);
     this.updateProgressUi();
   },
 
   selectPart1Answer(qId, choice) {
     this.state.answers.part1[qId] = choice;
     this.updatePart1AnswerUI(qId, choice);
-    this.updatePaletteMatrixButton('p1', qId, true);
+    this.refreshQuestionProgressDom('p1', qId);
     this.updateProgressUi();
   },
 
@@ -3577,8 +3907,7 @@ const App = {
     if (!this.state.answers.part2[qId]) this.state.answers.part2[qId] = {};
     this.state.answers.part2[qId][subId] = boolVal;
     this.updatePart2AnswerUI(qId, subId, boolVal);
-    const ansCount = Object.keys(this.state.answers.part2[qId]).length;
-    this.updatePaletteMatrixButton('p2', qId, ansCount === 4);
+    this.refreshQuestionProgressDom('p2', qId);
     this.updateProgressUi();
   },
 
@@ -3596,25 +3925,49 @@ const App = {
     }
   },
 
-  updatePaletteMatrixButton(part, qId, isAnswered) {
-    const btns = document.querySelectorAll(`[id="qmat_${part}_${qId}"]`);
-    btns.forEach(btn => {
-      if (isAnswered) {
-        btn.classList.add('answered');
-        btn.classList.remove('unanswered');
-      } else {
-        btn.classList.remove('answered');
-        btn.classList.add('unanswered');
-      }
-    });
+  refreshQuestionProgressDom(part, qId) {
+    if (typeof document === 'undefined') return;
+    const st = this.getQuestionProgressState(part, qId);
+    const vis = this.getRowVisualClasses(part, st);
+
+    const rowEl = document.getElementById(`row_${part}_${qId}`);
+    if (rowEl) rowEl.className = vis.row;
+
+    const statusEl = document.getElementById(`row_status_${part}_${qId}`);
+    if (statusEl) {
+      statusEl.className = part === 'p1' || part === 'p3' ? `${vis.badge} w-fit mt-0.5` : vis.badge;
+      statusEl.textContent = st.label;
+    }
+
+    const flagBtn = document.getElementById(`flag_btn_${part}_${qId}`);
+    if (flagBtn) {
+      flagBtn.className = `w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}`;
+    }
+  },
+
+  updatePaletteMatrixButton(part, qId) {
+    this.refreshQuestionProgressDom(part, qId);
   },
 
   updateProgressUi() {
+    if (typeof document === 'undefined') return;
     const p = this.calculateProgress();
+    const remainCount = p.total - p.answered;
+
     const bar = document.querySelector('.exam-progress-bar');
     if (bar) bar.style.width = `${p.percentage}%`;
-    const counterEls = document.querySelectorAll('.exam-progress-counter');
-    counterEls.forEach(el => {
+
+    document.querySelectorAll('.exam-header-progress-text').forEach(el => {
+      el.textContent = `Quá trình: ${p.answered}/${p.total}`;
+    });
+    document.querySelectorAll('.exam-sheet-done-text').forEach(el => {
+      el.textContent = `Đã làm: ${p.answered}/${p.total} câu (${p.percentage}%)`;
+    });
+    document.querySelectorAll('.exam-sheet-remain-text').forEach(el => {
+      el.textContent = `• ${remainCount > 0 ? `Chưa xong: ${remainCount}` : 'Đã chọn đủ!'}`;
+      el.className = `text-[11px] font-semibold ${remainCount > 0 ? 'text-amber-700' : 'text-emerald-700'} ml-1 exam-sheet-remain-text`;
+    });
+    document.querySelectorAll('.exam-progress-counter').forEach(el => {
       el.textContent = `Đã làm: ${p.answered}/${p.total} câu (${p.percentage}%)`;
     });
     document.querySelectorAll('.exam-mobile-ans-short').forEach(el => {
@@ -3623,16 +3976,38 @@ const App = {
     document.querySelectorAll('.exam-mobile-drawer-count').forEach(el => {
       el.textContent = `${p.answered}/${p.total} câu`;
     });
+
+    // Cập nhật tiến độ ngay trên nhãn các tab P.I / P.II / P.III / P.IV
+    const tabMap = {
+      p1: `P.I (${p.parts.p1.answered}/${p.parts.p1.total})`,
+      p2: `P.II (${p.parts.p2.answered}/${p.parts.p2.total})`,
+      p3: `P.III (${p.parts.p3.answered}/${p.parts.p3.total})`,
+      p4: `P.IV (${p.parts.p4.answered}/${p.parts.p4.total})`
+    };
+    Object.keys(tabMap).forEach(k => {
+      const btn = document.getElementById(`sectionTabBtn_${k}`);
+      if (btn) btn.textContent = tabMap[k];
+    });
+
+    // Nếu bảng Quá trình làm bài đang mở thì cập nhật luôn nội dung
+    const drawer = document.getElementById('mobileDrawer');
+    const drawerBody = document.getElementById('examProgressDrawerBody');
+    if (drawer && !drawer.classList.contains('hidden') && drawerBody && this.state.activeExam) {
+      drawerBody.innerHTML = this.renderPaletteMatrix(this.state.activeExam);
+    }
   },
 
   confirmSubmitExam() {
     const p = this.calculateProgress();
-    const unanswered = p.total - p.answered;
+    const remain = p.total - p.answered;
+    const detailWarn = [];
+    if (p.unanswered > 0) detailWarn.push(`${p.unanswered} câu chưa tích chọn`);
+    if (p.partial > 0) detailWarn.push(`${p.partial} câu Phần II mới chọn dở`);
     this.confirmDialog(
-      `Bạn đã hoàn thành ${p.answered}/${p.total} câu hỏi${unanswered > 0 ? ` (còn ${unanswered} câu chưa chọn)` : ''}.\nBạn có chắc chắn muốn nộp bài ngay bây giờ?`,
+      `Bạn đã hoàn thành đủ ${p.answered}/${p.total} câu hỏi${detailWarn.length ? ` (còn ${detailWarn.join(', ')})` : ''}.\nBạn có chắc chắn muốn nộp bài ngay bây giờ?`,
       () => this.submitExam(),
       {
-        type: unanswered > 0 ? 'warning' : 'success',
+        type: remain > 0 ? 'warning' : 'success',
         title: 'Xác nhận nộp bài thi?',
         icon: 'fa-paper-plane',
         confirmText: 'Nộp bài ngay',
@@ -3758,116 +4133,189 @@ const App = {
     document.body.appendChild(modal);
   },
 
-  async viewSubmissionDetail(subId) {
-    const sub = this.state.submissions.find(s => s.id === subId);
-    if (!sub) return;
+  toggleSubmissionAnswerCollapse() {
+    this.state.collapseAnswerSheetInDetail = !this.state.collapseAnswerSheetInDetail;
+    const isCollapsed = Boolean(this.state.collapseAnswerSheetInDetail);
+    const body = typeof document !== 'undefined' ? document.getElementById('submissionAnswerBody') : null;
+    const hint = typeof document !== 'undefined' ? document.getElementById('collapsedAnswerHintBar') : null;
+    if (body) body.classList.toggle('hidden', isCollapsed);
+    if (hint) hint.classList.toggle('hidden', !isCollapsed);
+    if (typeof document !== 'undefined') {
+      document.querySelectorAll('.toggle-sub-answer-btn').forEach(btn => {
+        btn.innerHTML = isCollapsed
+          ? '<i class="fa-solid fa-chevron-down"></i><span>Mở rộng bảng đáp án</span>'
+          : '<i class="fa-solid fa-chevron-up"></i><span>Thu gọn bảng đáp án</span>';
+      });
+    }
+  },
 
-    // Khôi phục cuộn trang
-    document.body.classList.remove('in-exam');
-    document.documentElement.style.overflow = '';
-    document.body.style.overflow = '';
-
-    const exam = this.state.exams.find(e => e.id === sub.examId) || SAMPLE_EXAM_2027;
-    const res = GradingSystem.grade(sub.answers || {}, exam);
-    sub.scoreResult = res;
-    const isStudent = this.state.currentUser && this.state.currentUser.role === 'student';
-    const canViewAnswers = !isStudent || (exam.allow_view_answers !== false && (this.state.settings && this.state.settings.allowStudentViewAnswers !== false));
-
-    let solPdfUrl = exam.solution_pdf_url || '';
-    if (typeof PDFStorage !== 'undefined' && solPdfUrl) {
-      const idbSol = await PDFStorage.getPdfBlobUrl(exam.id + '_sol');
-      if (idbSol) solPdfUrl = idbSol;
-      else if (solPdfUrl.startsWith('idb:')) {
-        const key = solPdfUrl.replace('idb:', '');
-        const b = await PDFStorage.getPdfBlobUrl(key);
-        if (b) solPdfUrl = b;
+  setDetailAnswerFilter(filter) {
+    this.state.detailAnswerFilter = filter || 'all';
+    if (this.state.collapseAnswerSheetInDetail) {
+      this.state.collapseAnswerSheetInDetail = false;
+      const body = typeof document !== 'undefined' ? document.getElementById('submissionAnswerBody') : null;
+      const hint = typeof document !== 'undefined' ? document.getElementById('collapsedAnswerHintBar') : null;
+      if (body) body.classList.remove('hidden');
+      if (hint) hint.classList.add('hidden');
+      if (typeof document !== 'undefined') {
+        document.querySelectorAll('.toggle-sub-answer-btn').forEach(btn => {
+          btn.innerHTML = '<i class="fa-solid fa-chevron-up"></i><span>Thu gọn bảng đáp án</span>';
+        });
       }
     }
 
-    const showPdf = canViewAnswers && solPdfUrl && !this.state.hideSolutionPdfInDetail;
+    const sub = this.state.submissions.find(s => s.id === this.state.currentDetailSubId);
+    if (!sub) return;
+    const exam = this.state.exams.find(e => e.id === sub.examId) || SAMPLE_EXAM_2027;
+    const res = sub.scoreResult || GradingSystem.grade(sub.answers || {}, exam);
+    const isStudent = this.state.currentUser && this.state.currentUser.role === 'student';
+    const canViewAnswers = !isStudent || (exam.allow_view_answers !== false && (this.state.settings && this.state.settings.allowStudentViewAnswers !== false));
+
+    const inner = typeof document !== 'undefined' ? document.getElementById('submissionAnswerBodyInner') : null;
+    if (inner) {
+      inner.innerHTML = this.renderSubmissionAnswerSheetBody(exam, sub, res, canViewAnswers, isStudent);
+    }
+    ['all', 'wrong', 'correct'].forEach(f => {
+      const btn = typeof document !== 'undefined' ? document.getElementById(`detailFilterBtn_${f}`) : null;
+      if (btn) {
+        btn.className = `px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${f === this.state.detailAnswerFilter ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'}`;
+      }
+    });
+  },
+
+  scrollToSolutionPdf() {
+    const pdfSec = typeof document !== 'undefined' ? document.getElementById('submissionSolutionPdfSection') : null;
+    if (pdfSec) {
+      pdfSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  },
+
+  renderSubmissionAnswerSheetBody(exam, sub, res, canViewAnswers, isStudent) {
+    const filter = canViewAnswers ? (this.state.detailAnswerFilter || 'all') : 'all';
     const p4List = Array.isArray(exam.part4) ? exam.part4 : [];
 
-    // Tạo bảng tóm tắt phiếu trả lời & kết quả chấm 3–4 phần
-    const answerSheetSummaryHtml = `
-      <div class="space-y-5">
-        ${exam.part1.length > 0 ? `
-        <!-- Phần I: Trắc nghiệm 4 lựa chọn -->
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
-          <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
-            <h4 class="font-bold text-sm text-indigo-900 flex items-center">
-              <span class="w-6 h-6 rounded-md bg-indigo-100 text-indigo-700 inline-flex items-center justify-center mr-2 text-xs font-bold">I</span>
+    const p1Items = exam.part1.filter(q => {
+      if (filter === 'all') return true;
+      const isOk = Boolean((res.part1.details[q.id] || {}).isCorrect);
+      return filter === 'correct' ? isOk : !isOk;
+    });
+
+    const p2Items = exam.part2.filter(q => {
+      if (filter === 'all') return true;
+      const det = res.part2.details[q.id] || { correctStatementsCount: 0 };
+      const isFullOk = det.correctStatementsCount === 4;
+      return filter === 'correct' ? isFullOk : !isFullOk;
+    });
+
+    const p3Items = exam.part3.filter(q => {
+      if (filter === 'all') return true;
+      const isOk = Boolean((res.part3.details[q.id] || {}).isCorrect);
+      return filter === 'correct' ? isOk : !isOk;
+    });
+
+    const p4Items = p4List.filter(q => {
+      if (filter === 'all') return true;
+      const qMax = +GradingSystem.getQuestionMaxPoints(exam, 'part4', q).toFixed(2);
+      const curManual = sub.answers && sub.answers.part4Scores && sub.answers.part4Scores[q.id];
+      const isFullOk = GradingSystem.hasNum(curManual) && Number(curManual) >= qMax;
+      return filter === 'correct' ? isFullOk : !isFullOk;
+    });
+
+    const totalVisible = p1Items.length + p2Items.length + p3Items.length + p4Items.length;
+    if (totalVisible === 0) {
+      return `
+        <div class="p-6 text-center rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500 font-semibold">
+          ${filter === 'wrong' ? 'Xuất sắc! Không có câu sai hoặc bỏ trống nào.' : 'Không có câu hỏi nào khớp với bộ lọc đã chọn.'}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="space-y-4">
+        ${p1Items.length > 0 ? `
+        <!-- Phần I: Dạng lưới ngang gọn gàng -->
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h4 class="font-bold text-xs sm:text-sm text-indigo-900 flex items-center">
+              <span class="w-5 h-5 rounded-md bg-indigo-100 text-indigo-700 inline-flex items-center justify-center mr-1.5 text-[11px] font-extrabold">I</span>
               Phần I: Trắc nghiệm 4 lựa chọn
             </h4>
-            <span class="text-xs bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-full">
+            <span class="text-[11px] bg-indigo-50 text-indigo-700 font-bold px-2.5 py-0.5 rounded-full border border-indigo-100">
               ${res.part1.score}/${res.part1.maxScore}đ (${res.part1.correctCount}/${exam.part1.length} câu đúng)
             </span>
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-xs text-center border-collapse">
-              <thead>
-                <tr class="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
-                  <th class="py-2 px-2">Câu</th>
-                  <th class="py-2 px-2">Bạn chọn</th>
-                  ${canViewAnswers ? '<th class="py-2 px-2 text-emerald-700">Đáp án</th>' : ''}
-                  <th class="py-2 px-2">Kết quả</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100 font-mono">
-                ${exam.part1.map(q => {
-                  const det = res.part1.details[q.id] || {};
-                  const userChoice = det.userAnswer || '';
-                  const isCorrect = Boolean(det.isCorrect);
-                  const pts = +(det.scoreEarned || 0).toFixed(2);
-                  return `
-                    <tr class="${isCorrect ? 'bg-emerald-50/30' : 'bg-rose-50/30'}">
-                      <td class="py-2 px-2 font-bold text-slate-700">Câu ${q.id}</td>
-                      <td class="py-2 px-2 font-bold ${userChoice ? 'text-indigo-800' : 'text-slate-400 italic'}">${userChoice || 'Bỏ trống'}</td>
-                      ${canViewAnswers ? `<td class="py-2 px-2 font-bold text-emerald-700">${q.correct_answer}</td>` : ''}
-                      <td class="py-2 px-2 font-bold ${isCorrect ? 'text-emerald-600' : 'text-rose-600'}">
-                        ${isCorrect ? `<span class="inline-flex items-center gap-1 text-emerald-600 font-bold"><i class="fa-solid fa-check"></i>(+${pts}đ)</span>` : '<span class="inline-flex items-center gap-1 text-rose-500 font-bold"><i class="fa-solid fa-xmark"></i>(0đ)</span>'}
-                      </td>
-                    </tr>
-                  `;
-                }).join('')}
-              </tbody>
-            </table>
+          <div class="grid grid-cols-3 sm:grid-cols-6 md:grid-cols-9 lg:grid-cols-12 gap-1.5 font-mono">
+            ${p1Items.map(q => {
+              const det = res.part1.details[q.id] || {};
+              const userChoice = det.userAnswer || '';
+              const isCorrect = Boolean(det.isCorrect);
+              const pts = +(det.scoreEarned || 0).toFixed(2);
+              const cardCls = canViewAnswers
+                ? (isCorrect ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200')
+                : 'bg-slate-50 border-slate-200';
+              return `
+                <div class="p-2 rounded-xl border ${cardCls} flex flex-col justify-between">
+                  <div class="flex items-center justify-between text-[10px]">
+                    <span class="font-extrabold text-slate-600">C${q.id}</span>
+                    ${canViewAnswers ? `
+                      <span class="font-bold ${isCorrect ? 'text-emerald-700' : 'text-rose-600'}">
+                        <i class="fa-solid ${isCorrect ? 'fa-check' : 'fa-xmark'}"></i>${isCorrect ? `+${pts}` : '0'}
+                      </span>
+                    ` : ''}
+                  </div>
+                  ${canViewAnswers ? (
+                    isCorrect ? `
+                      <div class="mt-1 text-center font-extrabold text-sm text-emerald-700">${userChoice}</div>
+                    ` : `
+                      <div class="mt-1 flex items-center justify-center gap-1 font-extrabold text-xs">
+                        <span class="${userChoice ? 'text-rose-600 line-through' : 'text-slate-400 italic font-sans text-[10px]'}">${userChoice || 'Trống'}</span>
+                        <i class="fa-solid fa-arrow-right text-[9px] text-slate-400"></i>
+                        <span class="text-emerald-700 text-sm">${q.correct_answer}</span>
+                      </div>
+                    `
+                  ) : `
+                    <div class="mt-1 text-center font-extrabold ${userChoice ? 'text-indigo-700 text-sm' : 'text-slate-400 italic font-sans text-[10px]'}">${userChoice || 'Trống'}</div>
+                  `}
+                </div>
+              `;
+            }).join('')}
           </div>
         </div>
         ` : ''}
 
-        ${exam.part2.length > 0 ? `
-        <!-- Phần II: Trắc nghiệm Đúng/Sai -->
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
-          <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
-            <h4 class="font-bold text-sm text-indigo-900 flex items-center">
-              <span class="w-6 h-6 rounded-md bg-emerald-100 text-emerald-700 inline-flex items-center justify-center mr-2 text-xs font-bold">II</span>
-              Phần II: Trắc nghiệm Đúng/Sai
+        ${p2Items.length > 0 ? `
+        <!-- Phần II: Trắc nghiệm Đúng/Sai dạng thẻ ngang -->
+        <div class="space-y-2 pt-2 border-t border-slate-100">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h4 class="font-bold text-xs sm:text-sm text-indigo-900 flex items-center">
+              <span class="w-5 h-5 rounded-md bg-emerald-100 text-emerald-700 inline-flex items-center justify-center mr-1.5 text-[11px] font-extrabold">II</span>
+              Phần II: Trắc nghiệm Đúng / Sai
             </h4>
-            <span class="text-xs bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full">
+            <span class="text-[11px] bg-emerald-50 text-emerald-700 font-bold px-2.5 py-0.5 rounded-full border border-emerald-100">
               ${res.part2.score}/${res.part2.maxScore}đ
             </span>
           </div>
-          <div class="space-y-2.5">
-            ${exam.part2.map(q => {
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
+            ${p2Items.map(q => {
               const qAns = (sub.answers && sub.answers.part2 && sub.answers.part2[q.id]) || {};
               const stList = q.statements || q.items || [];
               const det = res.part2.details[q.id] || { correctStatementsCount: 0, scoreEarned: 0 };
               const earned = +(det.scoreEarned || 0).toFixed(2);
               return `
-                <div class="p-3 bg-slate-50/60 rounded-xl border border-slate-200 space-y-2 text-xs">
+                <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-xs">
                   <div class="flex items-center justify-between font-bold text-slate-800">
-                    <span>Câu ${q.id}:</span>
-                    <span class="text-indigo-700">Đúng ${det.correctStatementsCount}/4 ý (+${earned}đ)</span>
+                    <span>Câu ${q.id}</span>
+                    <span class="text-[11px] text-indigo-700 font-mono">Đúng ${det.correctStatementsCount}/4 ý (+${earned}đ)</span>
                   </div>
-                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 font-mono">
+                  <div class="grid grid-cols-4 gap-1 font-mono">
                     ${stList.map(st => {
                       const subId = st.sub_id || st.key;
                       const userVal = qAns[subId];
                       const isMatch = userVal === st.correct;
                       return `
-                        <div class="p-2 rounded-lg border text-center ${canViewAnswers ? (isMatch ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900') : 'bg-white border-slate-200 text-slate-800'}">
-                          <div class="font-bold">${subId}) ${userVal === true ? 'Đ' : (userVal === false ? 'S' : '-')}</div>
-                          ${canViewAnswers ? `<div class="text-[10px] text-slate-500 font-sans mt-0.5">ĐA: <strong>${st.correct ? 'Đ' : 'S'}</strong></div>` : ''}
+                        <div class="py-1.5 px-1 rounded-lg border text-center ${canViewAnswers ? (isMatch ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900') : 'bg-white border-slate-200 text-slate-800'}">
+                          <div class="font-bold text-[11px]">${subId}) ${userVal === true ? 'Đ' : (userVal === false ? 'S' : '-')}</div>
+                          ${canViewAnswers ? `<div class="text-[9px] text-slate-500 font-sans mt-0.5">ĐA: <strong>${st.correct ? 'Đ' : 'S'}</strong></div>` : ''}
                         </div>
                       `;
                     }).join('')}
@@ -3879,65 +4327,68 @@ const App = {
         </div>
         ` : ''}
 
-        ${exam.part3.length > 0 ? `
-        <!-- Phần III: Trả lời ngắn -->
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
-          <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
-            <h4 class="font-bold text-sm text-indigo-900 flex items-center">
-              <span class="w-6 h-6 rounded-md bg-amber-100 text-amber-700 inline-flex items-center justify-center mr-2 text-xs font-bold">III</span>
+        ${p3Items.length > 0 ? `
+        <!-- Phần III: Trả lời ngắn dạng ngang -->
+        <div class="space-y-2 pt-2 border-t border-slate-100">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h4 class="font-bold text-xs sm:text-sm text-indigo-900 flex items-center">
+              <span class="w-5 h-5 rounded-md bg-amber-100 text-amber-700 inline-flex items-center justify-center mr-1.5 text-[11px] font-extrabold">III</span>
               Phần III: Trả lời ngắn
             </h4>
-            <span class="text-xs bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full">
+            <span class="text-[11px] bg-amber-50 text-amber-700 font-bold px-2.5 py-0.5 rounded-full border border-amber-100">
               ${res.part3.score}/${res.part3.maxScore}đ (${res.part3.correctCount}/${exam.part3.length} câu đúng)
             </span>
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-xs text-center border-collapse">
-              <thead>
-                <tr class="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
-                  <th class="py-2 px-2">Câu</th>
-                  <th class="py-2 px-2">Kết quả bạn điền</th>
-                  ${canViewAnswers ? '<th class="py-2 px-2 text-emerald-700">Đáp án chuẩn</th>' : ''}
-                  <th class="py-2 px-2">Kết quả</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100 font-mono">
-                ${exam.part3.map(q => {
-                  const det = res.part3.details[q.id] || {};
-                  const userVal = det.userAnswer || '';
-                  const isMatch = Boolean(det.isCorrect);
-                  const pts = +(det.scoreEarned || 0).toFixed(2);
-                  return `
-                    <tr class="${isMatch ? 'bg-emerald-50/30' : 'bg-rose-50/30'}">
-                      <td class="py-2 px-2 font-bold text-slate-700">Câu ${q.id}</td>
-                      <td class="py-2 px-2 font-bold ${userVal ? 'text-indigo-800' : 'text-slate-400 italic'}">${userVal || 'Bỏ trống'}</td>
-                      ${canViewAnswers ? `<td class="py-2 px-2 font-bold text-emerald-700">${q.correct_answer}</td>` : ''}
-                      <td class="py-2 px-2 font-bold ${isMatch ? 'text-emerald-600' : 'text-rose-600'}">
-                        ${isMatch ? `<span class="inline-flex items-center gap-1 text-emerald-600 font-bold"><i class="fa-solid fa-check"></i>(+${pts}đ)</span>` : '<span class="inline-flex items-center gap-1 text-rose-500 font-bold"><i class="fa-solid fa-xmark"></i>(0đ)</span>'}
-                      </td>
-                    </tr>
-                  `;
-                }).join('')}
-              </tbody>
-            </table>
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 font-mono">
+            ${p3Items.map(q => {
+              const det = res.part3.details[q.id] || {};
+              const userVal = det.userAnswer || '';
+              const isMatch = Boolean(det.isCorrect);
+              const pts = +(det.scoreEarned || 0).toFixed(2);
+              const cardCls = canViewAnswers
+                ? (isMatch ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200')
+                : 'bg-slate-50 border-slate-200';
+              return `
+                <div class="p-2.5 rounded-xl border ${cardCls} text-xs space-y-1">
+                  <div class="flex items-center justify-between">
+                    <span class="font-extrabold text-slate-700">Câu ${q.id}</span>
+                    ${canViewAnswers ? `
+                      <span class="text-[11px] font-bold ${isMatch ? 'text-emerald-700' : 'text-rose-600'}">
+                        <i class="fa-solid ${isMatch ? 'fa-check' : 'fa-xmark'}"></i> ${isMatch ? `+${pts}đ` : '0đ'}
+                      </span>
+                    ` : ''}
+                  </div>
+                  <div class="text-[11px] font-sans text-slate-600 flex items-center justify-between gap-1">
+                    <span>Bạn điền:</span>
+                    <strong class="font-mono ${userVal ? (canViewAnswers ? (isMatch ? 'text-emerald-700' : 'text-rose-600') : 'text-indigo-700') : 'text-slate-400 italic font-sans'}">${userVal || 'Trống'}</strong>
+                  </div>
+                  ${canViewAnswers ? `
+                    <div class="text-[11px] font-sans text-slate-600 flex items-center justify-between gap-1 border-t border-slate-200/60 pt-1">
+                      <span>Đáp án:</span>
+                      <strong class="font-mono text-emerald-700">${q.correct_answer}</strong>
+                    </div>
+                  ` : ''}
+                </div>
+              `;
+            }).join('')}
           </div>
         </div>
         ` : ''}
 
-        ${p4List.length > 0 ? `
-        <!-- Phần IV: Tự luận -->
-        <div class="bg-white rounded-2xl p-5 border border-purple-200 shadow-sm space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-            <h4 class="font-bold text-sm text-purple-900 flex items-center">
-              <span class="w-6 h-6 rounded-md bg-purple-100 text-purple-700 inline-flex items-center justify-center mr-2 text-xs font-bold">IV</span>
+        ${p4Items.length > 0 ? `
+        <!-- Phần IV: Tự luận dạng ngang 2 cột -->
+        <div class="space-y-2.5 pt-2 border-t border-slate-100">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h4 class="font-bold text-xs sm:text-sm text-purple-900 flex items-center">
+              <span class="w-5 h-5 rounded-md bg-purple-100 text-purple-700 inline-flex items-center justify-center mr-1.5 text-[11px] font-extrabold">IV</span>
               Phần IV: Tự luận (${p4List.length} câu)
             </h4>
-            <span class="text-xs ${res.part4.pendingManual ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-purple-50 text-purple-700'} font-bold px-2.5 py-0.5 rounded-full">
+            <span class="text-[11px] ${res.part4.pendingManual ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-purple-50 text-purple-700 border border-purple-100'} font-bold px-2.5 py-0.5 rounded-full">
               ${res.part4.pendingManual ? `Chờ chấm (${res.part4.gradedCount}/${p4List.length} câu) • Tối đa ${res.part4.maxScore}đ` : `${res.part4.score}/${res.part4.maxScore}đ`}
             </span>
           </div>
-          <div class="space-y-3">
-            ${p4List.map(q => {
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            ${p4Items.map(q => {
               const rawEntry = (sub.answers && sub.answers.part4 && sub.answers.part4[q.id]) || {};
               const userTxt = typeof rawEntry === 'object' ? (rawEntry.text || '') : String(rawEntry || '');
               const imgs = typeof rawEntry === 'object' && Array.isArray(rawEntry.images) ? rawEntry.images : [];
@@ -3945,7 +4396,7 @@ const App = {
               const curManual = sub.answers && sub.answers.part4Scores && sub.answers.part4Scores[q.id];
               const hasGraded = GradingSystem.hasNum(curManual);
               return `
-                <div class="p-3.5 bg-purple-50/30 rounded-xl border border-purple-100 space-y-2.5 text-xs">
+                <div class="p-3.5 bg-purple-50 rounded-xl border border-purple-100 space-y-2.5 text-xs">
                   <div class="flex items-center justify-between font-bold text-slate-800">
                     <span>Câu ${q.id} (Tối đa ${qMax}đ):</span>
                     <span class="font-mono ${hasGraded ? 'text-purple-700' : 'text-amber-600'}">${hasGraded ? `+${+Number(curManual).toFixed(2)} / ${qMax}đ` : 'Chờ Giáo viên chấm'}</span>
@@ -3982,7 +4433,7 @@ const App = {
             }).join('')}
           </div>
           ${!isStudent ? `
-            <div class="pt-2 flex justify-end">
+            <div class="pt-1 flex justify-end">
               <button type="button" onclick="App.saveManualPart4Grades('${sub.id}')" class="ui-btn bg-purple-600 hover:bg-purple-700 text-white px-4 shadow-sm">
                 <i class="fa-solid fa-floppy-disk"></i><span>Lưu Điểm Tự Luận &amp; Cập Nhật Tổng Điểm</span>
               </button>
@@ -3992,6 +4443,39 @@ const App = {
         ` : ''}
       </div>
     `;
+  },
+
+  async viewSubmissionDetail(subId) {
+    const sub = this.state.submissions.find(s => s.id === subId);
+    if (!sub) return;
+    this.state.currentDetailSubId = subId;
+
+    // Khôi phục cuộn trang
+    document.body.classList.remove('in-exam');
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
+
+    const exam = this.state.exams.find(e => e.id === sub.examId) || SAMPLE_EXAM_2027;
+    const res = GradingSystem.grade(sub.answers || {}, exam);
+    sub.scoreResult = res;
+    const isStudent = this.state.currentUser && this.state.currentUser.role === 'student';
+    const canViewAnswers = !isStudent || (exam.allow_view_answers !== false && (this.state.settings && this.state.settings.allowStudentViewAnswers !== false));
+
+    let solPdfUrl = exam.solution_pdf_url || '';
+    if (typeof PDFStorage !== 'undefined' && solPdfUrl) {
+      const idbSol = await PDFStorage.getPdfBlobUrl(exam.id + '_sol');
+      if (idbSol) solPdfUrl = idbSol;
+      else if (solPdfUrl.startsWith('idb:')) {
+        const key = solPdfUrl.replace('idb:', '');
+        const b = await PDFStorage.getPdfBlobUrl(key);
+        if (b) solPdfUrl = b;
+      }
+    }
+
+    const showPdf = canViewAnswers && solPdfUrl && !this.state.hideSolutionPdfInDetail;
+    const p4List = Array.isArray(exam.part4) ? exam.part4 : [];
+    const isCollapsed = Boolean(this.state.collapseAnswerSheetInDetail);
+    const curFilter = canViewAnswers ? (this.state.detailAnswerFilter || 'all') : 'all';
 
     const container = document.getElementById('app');
     container.innerHTML = `
@@ -4000,7 +4484,7 @@ const App = {
         <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 shadow-xs">
           <div class="w-full max-w-[98%] mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2">
             <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
-              <button onclick="App.goHome()" class="px-2.5 sm:px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer shrink-0 whitespace-nowrap" title="Quay về trang chủ">
+              <button type="button" onclick="App.goHome()" class="px-2.5 sm:px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer shrink-0 whitespace-nowrap" title="Quay về trang chủ">
                 <i class="fa-solid fa-house"></i>
                 <span class="hidden sm:inline">Trang chủ</span>
               </button>
@@ -4009,8 +4493,13 @@ const App = {
             </div>
 
             <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+              <button type="button" onclick="App.toggleSubmissionAnswerCollapse()" class="toggle-sub-answer-btn hidden md:inline-flex px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition items-center gap-1.5 cursor-pointer whitespace-nowrap" title="Thu gọn hoặc mở rộng bảng đáp án ngang">
+                <i class="fa-solid ${isCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}"></i>
+                <span>${isCollapsed ? 'Mở rộng bảng đáp án' : 'Thu gọn bảng đáp án'}</span>
+              </button>
+
               ${solPdfUrl ? `
-                <button onclick="App.toggleSolutionPdfInDetail('${subId}')" class="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer shadow-xs whitespace-nowrap ${this.state.hideSolutionPdfInDetail ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}" title="Ẩn hoặc hiện file PDF lời giải chi tiết">
+                <button type="button" onclick="App.toggleSolutionPdfInDetail('${subId}')" class="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer shadow-xs whitespace-nowrap ${this.state.hideSolutionPdfInDetail ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}" title="Ẩn hoặc hiện file PDF lời giải chi tiết">
                   <i class="fa-solid ${this.state.hideSolutionPdfInDetail ? 'fa-file-pdf' : 'fa-eye-slash'} mr-1"></i>
                   <span class="sm:hidden">${this.state.hideSolutionPdfInDetail ? 'Hiện PDF' : 'Ẩn PDF'}</span>
                   <span class="hidden sm:inline">${this.state.hideSolutionPdfInDetail ? 'Hiện PDF Lời Giải' : 'Ẩn PDF Lời Giải'}</span>
@@ -4018,25 +4507,25 @@ const App = {
               ` : ''}
 
               ${!isStudent ? `
-                <button onclick="App.toggleExamViewAnswers('${exam.id}'); setTimeout(() => App.viewSubmissionDetail('${subId}'), 100);" class="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer whitespace-nowrap ${exam.allow_view_answers !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100' : 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'}" title="Bật/Tắt quyền cho học sinh xem đáp án và file lời giải của đề này">
+                <button type="button" onclick="App.toggleExamViewAnswers('${exam.id}'); setTimeout(() => App.viewSubmissionDetail('${subId}'), 100);" class="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer whitespace-nowrap ${exam.allow_view_answers !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100' : 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'}" title="Bật/Tắt quyền cho học sinh xem đáp án và file lời giải của đề này">
                   <i class="fa-solid ${exam.allow_view_answers !== false ? 'fa-eye' : 'fa-eye-slash'} sm:mr-1.5"></i>
                   <span class="hidden sm:inline">${exam.allow_view_answers !== false ? 'Học sinh: Mở xem đáp án' : 'Học sinh: Khóa xem đáp án'}</span>
                 </button>
               ` : ''}
 
-              <button onclick="window.print()" class="text-xs bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-lg shadow-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center cursor-pointer whitespace-nowrap" title="In kết quả">
+              <button type="button" onclick="window.print()" class="text-xs bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-lg shadow-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center cursor-pointer whitespace-nowrap" title="In kết quả">
                 <i class="fa-solid fa-print sm:mr-1.5"></i><span class="hidden sm:inline">In kết quả</span>
               </button>
             </div>
           </div>
         </header>
 
-        <div class="py-6 px-3 sm:px-6 flex-1 w-full max-w-[98%] mx-auto space-y-6">
+        <div class="py-5 px-3 sm:px-6 flex-1 w-full max-w-[98%] mx-auto space-y-5">
           <!-- Banner tóm tắt điểm số & Học sinh -->
-          <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Chi Tiết Bài Làm &amp; Đáp Án</span>
-              <h2 class="text-xl font-extrabold text-slate-900">${sub.examTitle}</h2>
+              <h2 class="text-lg sm:text-xl font-extrabold text-slate-900">${sub.examTitle}</h2>
               <div class="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span>Học sinh: <strong>${sub.studentName}</strong> (${sub.studentId})</span>
                 <span>• <strong class="text-indigo-600">Lần thi: ${sub.attemptNumber || 1}</strong></span>
@@ -4044,59 +4533,103 @@ const App = {
                 <span>• Giám sát rời tab: <strong class="${(sub.tabSwitches || 0) > 0 ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold'}">${sub.tabSwitches || 0} lần</strong></span>
               </div>
             </div>
-            <div class="text-right bg-indigo-50 border border-indigo-100 p-4 rounded-xl shrink-0">
-              <div class="text-3xl font-extrabold text-indigo-700 font-mono">${res.totalScore} <span class="text-sm font-normal text-slate-400">/ ${res.maxTotal || 10}</span></div>
+            <div class="text-right bg-indigo-50 border border-indigo-100 px-4 py-3 rounded-xl shrink-0">
+              <div class="text-2xl sm:text-3xl font-extrabold text-indigo-700 font-mono">${res.totalScore} <span class="text-sm font-normal text-slate-400">/ ${res.maxTotal || 10}</span></div>
               <div class="text-xs font-bold text-indigo-600 mt-0.5">Xếp loại: ${res.rank}</div>
             </div>
           </div>
 
           ${!canViewAnswers ? `
             <!-- Cảnh báo khóa đáp án -->
-            <div class="p-5 bg-amber-50 border border-amber-200 rounded-2xl flex items-center space-x-3 text-amber-900 shadow-xs">
+            <div class="p-4 sm:p-5 bg-amber-50 border border-amber-200 rounded-2xl flex items-center space-x-3 text-amber-900 shadow-xs">
               <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center shrink-0 font-bold text-lg">
                 <i class="fa-solid fa-lock"></i>
               </div>
               <div>
-                <div class="font-bold text-xs sm:text-sm">Chế độ bảo mật: Đáp án & Lời giải chi tiết đang tạm khóa</div>
+                <div class="font-bold text-xs sm:text-sm">Chế độ bảo mật: Đáp án &amp; Lời giải chi tiết đang tạm khóa</div>
                 <p class="text-[11px] sm:text-xs text-amber-700 mt-0.5">Giáo viên hiện đang tạm khóa quyền xem đáp án đúng và file PDF lời giải chi tiết cho đề này. Bạn chỉ có thể xem điểm và phiếu trả lời của mình.</p>
               </div>
             </div>
           ` : ''}
 
-          <!-- VÙNG HIỂN THỊ MỞ RỘNG: PHIẾU ĐIỂM + TRÌNH XEM PDF ĐÁP ÁN GỐC -->
-          <div class="flex flex-col ${showPdf ? 'lg:flex-row items-start' : 'items-center'} gap-6">
-            <!-- Phiếu chấm điểm và đối chiếu đáp án -->
-            <div class="${showPdf ? 'w-full lg:w-[420px] shrink-0' : 'w-full max-w-4xl mx-auto'}">
-              ${answerSheetSummaryHtml}
+          <!-- PHẦN TRÊN: BẢNG ĐỐI CHIẾU ĐÁP ÁN DẠNG NGANG (CÓ THỂ THU GỌN / MỞ RỘNG) -->
+          <div id="submissionAnswerCard" class="w-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="px-4 sm:px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                  <i class="fa-solid fa-table-cells text-indigo-600"></i>
+                  <span>Bảng Đáp Án &amp; Kết Quả</span>
+                </span>
+                ${exam.part1.length > 0 ? `<span class="px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-[11px] font-bold font-mono">P.I: ${res.part1.score}/${res.part1.maxScore}đ</span>` : ''}
+                ${exam.part2.length > 0 ? `<span class="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-bold font-mono">P.II: ${res.part2.score}/${res.part2.maxScore}đ</span>` : ''}
+                ${exam.part3.length > 0 ? `<span class="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-100 text-amber-700 text-[11px] font-bold font-mono">P.III: ${res.part3.score}/${res.part3.maxScore}đ</span>` : ''}
+                ${p4List.length > 0 ? `<span class="px-2 py-0.5 rounded-full bg-purple-50 border border-purple-100 text-purple-700 text-[11px] font-bold font-mono">P.IV: ${res.part4.pendingManual ? 'Chờ chấm' : `${res.part4.score}/${res.part4.maxScore}đ`}</span>` : ''}
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                ${canViewAnswers ? `
+                  <div class="inline-flex items-center rounded-xl bg-white border border-slate-200 p-0.5">
+                    <button type="button" id="detailFilterBtn_all" onclick="App.setDetailAnswerFilter('all')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${curFilter === 'all' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'}">Tất cả</button>
+                    <button type="button" id="detailFilterBtn_wrong" onclick="App.setDetailAnswerFilter('wrong')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${curFilter === 'wrong' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'}">Sai / Trống</button>
+                    <button type="button" id="detailFilterBtn_correct" onclick="App.setDetailAnswerFilter('correct')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${curFilter === 'correct' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'}">Câu đúng</button>
+                  </div>
+                ` : ''}
+
+                ${showPdf ? `
+                  <button type="button" onclick="App.scrollToSolutionPdf()" class="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold transition cursor-pointer flex items-center gap-1.5">
+                    <i class="fa-solid fa-angles-down"></i>
+                    <span>Kéo xuống PDF Lời Giải</span>
+                  </button>
+                ` : ''}
+
+                <button type="button" id="toggleSubmissionAnswerBtn" onclick="App.toggleSubmissionAnswerCollapse()" class="toggle-sub-answer-btn px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs">
+                  <i class="fa-solid ${isCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}"></i>
+                  <span>${isCollapsed ? 'Mở rộng bảng đáp án' : 'Thu gọn bảng đáp án'}</span>
+                </button>
+              </div>
             </div>
 
-            ${showPdf ? `
-              <!-- Trình xem PDF đáp án & lời giải chi tiết gốc (Hiển thị trực tiếp đa trang trên Web & App iOS) -->
-              <div class="w-full flex-1 min-w-[300px] h-[75dvh] lg:h-[calc(100vh-170px)] min-h-[560px] lg:min-h-[750px] bg-slate-900 rounded-2xl border border-slate-700 shadow-xl overflow-hidden flex flex-col">
-                <div class="px-4 py-2.5 bg-slate-800 text-white flex items-center justify-between text-xs font-bold shrink-0 border-b border-slate-700">
-                  <span class="flex items-center truncate text-white"><i class="fa-solid fa-file-pdf text-red-400 mr-2 text-sm"></i>File PDF Đáp Án &amp; Lời Giải Chi Tiết</span>
-                  <div class="flex items-center space-x-2 shrink-0">
-                    <button onclick="App.openPdfModal('${(exam.title || '').replace(/'/g, "\\'")} - Lời Giải PDF', '${solPdfUrl}', '${exam.id}_sol')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
-                      <i class="fa-solid fa-expand mr-1"></i>Toàn màn hình
-                    </button>
-                    ${!this.isStandaloneApp() ? `
-                      <a href="${solPdfUrl}" target="_blank" class="hidden sm:flex px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-indigo-300 hover:text-white rounded text-[11px] font-semibold transition items-center">
-                        <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Tab mới
-                      </a>
-                    ` : ''}
-                    <a href="${solPdfUrl}" download="${exam.id}_Dap_An.pdf" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white rounded text-[11px] font-semibold transition flex items-center">
-                      <i class="fa-solid fa-download mr-1"></i>Tải về
-                    </a>
-                  </div>
-                </div>
-                <div id="submissionSolPdfViewer" class="flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950"></div>
+            <div id="collapsedAnswerHintBar" class="${isCollapsed ? '' : 'hidden'} px-4 sm:px-5 py-2.5 bg-indigo-50 text-indigo-800 text-xs flex items-center justify-between gap-2">
+              <span><i class="fa-solid fa-circle-info mr-1.5"></i>Bảng đáp án đang được thu gọn để ưu tiên không gian xem PDF lời giải bên dưới.</span>
+              <button type="button" onclick="App.toggleSubmissionAnswerCollapse()" class="font-extrabold underline cursor-pointer shrink-0">Mở lại ngay</button>
+            </div>
+
+            <div id="submissionAnswerBody" class="${isCollapsed ? 'hidden' : ''} p-4 sm:p-5">
+              <div id="submissionAnswerBodyInner">
+                ${this.renderSubmissionAnswerSheetBody(exam, sub, res, canViewAnswers, isStudent)}
               </div>
-            ` : ''}
+            </div>
           </div>
+
+          ${showPdf ? `
+            <!-- PHẦN DƯỚI (TOÀN CHIỀU RỘNG): KÉO XUỐNG XEM TRỰC TIẾP PDF ĐÁP ÁN & LỜI GIẢI CHI TIẾT -->
+            <div id="submissionSolutionPdfSection" class="w-full h-[85dvh] lg:h-[calc(100vh-76px)] min-h-[600px] bg-slate-900 rounded-2xl border border-slate-700 shadow-xl overflow-hidden flex flex-col">
+              <div class="px-4 py-2.5 bg-slate-800 text-white flex flex-wrap items-center justify-between gap-2 text-xs font-bold shrink-0 border-b border-slate-700">
+                <span class="flex items-center truncate text-white"><i class="fa-solid fa-file-pdf text-red-400 mr-2 text-sm"></i>File PDF Đáp Án &amp; Lời Giải Chi Tiết</span>
+                <div class="flex items-center space-x-2 shrink-0">
+                  <button type="button" onclick="document.getElementById('submissionAnswerCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' })" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-amber-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
+                    <i class="fa-solid fa-angles-up mr-1"></i>Bảng đáp án
+                  </button>
+                  <button type="button" onclick="App.openPdfModal('${(exam.title || '').replace(/'/g, "\\'")} - Lời Giải PDF', '${solPdfUrl}', '${exam.id}_sol')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
+                    <i class="fa-solid fa-expand mr-1"></i>Toàn màn hình
+                  </button>
+                  ${!this.isStandaloneApp() ? `
+                    <a href="${solPdfUrl}" target="_blank" class="hidden sm:flex px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-indigo-300 hover:text-white rounded text-[11px] font-semibold transition items-center">
+                      <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Tab mới
+                    </a>
+                  ` : ''}
+                  <a href="${solPdfUrl}" download="${exam.id}_Dap_An.pdf" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white rounded text-[11px] font-semibold transition flex items-center">
+                    <i class="fa-solid fa-download mr-1"></i>Tải về
+                  </a>
+                </div>
+              </div>
+              <div id="submissionSolPdfViewer" class="flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950"></div>
+            </div>
+          ` : ''}
         </div>
 
-        <!-- Floating Scroll-To-Top Button (Hình tròn có mũi tên ở góc phải màn hình) -->
-        <button onclick="App.scrollToTop()" class="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xl flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer border-2 border-white" title="Lên đầu trang">
+        <!-- Floating Scroll-To-Top Button -->
+        <button type="button" onclick="App.scrollToTop()" class="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xl flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer border-2 border-white" title="Lên đầu trang">
           <i class="fa-solid fa-arrow-up text-lg"></i>
         </button>
       </div>
@@ -7619,12 +8152,12 @@ const App = {
 
           ${d.p3.length > 0 ? `
             <div class="space-y-1.5">
-              <div class="text-[11px] font-bold text-amber-800 uppercase">Phần III — Trả lời ngắn (${d.p3.length} câu • Tổng ${maxSum.p3Max}đ)</div>
+              <div class="text-[11px] font-bold text-amber-800 uppercase">Phần III — Trả lời ngắn (${d.p3.length} câu • Tổng ${maxSum.p3Max}đ • Chấp nhận cả dấu . và ,)</div>
               <div class="grid grid-cols-2 sm:grid-cols-3 ${isCustomPts ? 'md:grid-cols-4' : 'md:grid-cols-6'} gap-1.5">
                 ${d.p3.map((val, idx) => `
                   <div class="bg-white px-2 py-1.5 rounded-lg border border-slate-200 flex items-center gap-1.5">
                     <span class="font-mono font-bold text-slate-600 text-[11px] shrink-0">C${idx + 1}</span>
-                    <input type="text" maxlength="12" value="${String(val ?? '').replace(/"/g, '&quot;')}" oninput="App.setDraftP3(${idx}, this.value)" placeholder="VD: 1.5" class="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded font-mono font-bold text-center text-xs text-slate-800">
+                    <input type="text" inputmode="decimal" maxlength="12" value="${String(val ?? '').replace(/"/g, '&quot;')}" oninput="App.setDraftP3(${idx}, this.value)" placeholder="1.5 / 1,5" class="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded font-mono font-bold text-center text-xs text-slate-800">
                     ${isCustomPts ? `
                       <input type="text" inputmode="decimal" value="${(d.qPoints.p3 && d.qPoints.p3[idx]) ?? ''}" oninput="App.setDraftQuestionPoints('p3', ${idx}, this.value)" placeholder="0.5" title="Điểm Câu ${idx + 1}" class="w-12 shrink-0 px-1 py-0.5 border border-amber-200 bg-amber-50/40 rounded font-mono text-[10px] font-bold text-center text-amber-800">
                     ` : ''}
