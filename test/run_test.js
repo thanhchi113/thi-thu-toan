@@ -142,4 +142,136 @@ console.assert(vDisabled === false && App.state.tabSwitchesCount === 1, 'Disable
 App.state.activeExam = null;
 App.state.settings.warnOnExitExam = true;
 
-console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM, ĐỀ PDF, IN HOA TK & GIÁM SÁT THOÁT MÀN HÌNH ĐÃ ĐẠT 100%!');
+// Test 7: Đề 4 phần (có Tự luận), chia đều tổng điểm từng phần & nhập điểm riêng từng câu
+const examEqual4Parts = App.buildPartsFromDraft({
+  p1: ['A', 'B', 'C', 'D', 'A', 'B', 'C', 'D', 'A', 'B', 'C', 'D'], // 12 câu -> chia đều 3.0đ = 0.25đ/câu
+  p2: [
+    { a: true, b: false, c: true, d: false },
+    { a: false, b: true, c: false, d: true }
+  ], // 2 câu -> chia đều 2.0đ = 1.0đ/câu
+  p3: ['12.5', '-0.5', '4', '0.75'], // 4 câu -> chia đều 2.0đ = 0.5đ/câu
+  p4: ['m = 2', 'V = 16'], // 2 câu TL -> chia đều 3.0đ = 1.5đ/câu
+  scoring: { mode: 'equal', p1Total: '3', p2Total: '2', p3Total: '2', p4Total: '3' },
+  qPoints: { p1: [], p2: [], p3: [], p4: [] }
+});
+
+const pendingRes = GradingSystem.grade({
+  part1: { 1: 'A', 2: 'B', 3: 'C', 4: 'D' }, // 4 * 0.25 = 1.0đ
+  part2: { 1: { a: true, b: false, c: true, d: true } }, // đúng 3/4 ý của câu 1.0đ -> 0.5đ
+  part3: { 1: '12,5', 4: '3/4' }, // 2 * 0.5 = 1.0đ
+  part4: { 1: { text: 'Ta có đạo hàm...', images: [] } } // chưa chấm tay
+}, examEqual4Parts);
+
+console.assert(pendingRes.maxTotal === 10.0, '4-part equal maxTotal fail');
+console.assert(pendingRes.part4.pendingManual === true && pendingRes.totalScore === 2.5, '4-part pending manual score fail');
+
+const gradedRes = GradingSystem.grade({
+  part1: { 1: 'A', 2: 'B', 3: 'C', 4: 'D' },
+  part2: { 1: { a: true, b: false, c: true, d: true } },
+  part3: { 1: '12,5', 4: '3/4' },
+  part4: { 1: { text: 'Lời giải câu 1', images: [] }, 2: { text: 'Lời giải câu 2', images: [] } },
+  part4Scores: { 1: 1.5, 2: 1.25 }
+}, examEqual4Parts);
+
+console.assert(gradedRes.part4.pendingManual === false && gradedRes.part4.score === 2.75 && gradedRes.totalScore === 5.25, '4-part manual graded score fail');
+
+// Test chế độ nhập điểm riêng từng câu (mode = 'custom')
+const examCustomPerQ = App.buildPartsFromDraft({
+  p1: ['A', 'C'],
+  p2: [{ a: true, b: true, c: false, d: false }],
+  p3: ['-12.5'],
+  p4: ['x = 3'],
+  scoring: { mode: 'custom', p1Total: '', p2Total: '', p3Total: '', p4Total: '' },
+  qPoints: { p1: ['0.5', '1.0'], p2: ['2.0'], p3: ['1.5'], p4: ['5.0'] }
+});
+const customRes = GradingSystem.grade({
+  part1: { 1: 'A', 2: 'B' }, // chỉ đúng câu 1 -> 0.5đ
+  part2: { 1: { a: true, b: true, c: false, d: true } }, // đúng 3/4 ý trên câu 2.0đ -> 50% * 2.0 = 1.0đ
+  part3: { 1: '−12,5' }, // dấu trừ Unicode -> 1.5đ
+  part4Scores: { 1: 4.5 }
+}, examCustomPerQ);
+console.assert(customRes.maxTotal === 10.0 && customRes.totalScore === 7.5, 'Custom per-question points fail');
+
+// Test 8: Parser file .TEX (ex_test chuẩn Toán Việt Nam: \choice, \choiceTF, \shortans, \bt + \dapso, comment %, ngoặc nhọn \{ \})
+const sampleTex = `
+% Đề kiểm tra 4 phần
+\\section*{PHẦN I. Trắc nghiệm nhiều phương án (3,0 điểm)}
+\\begin{ex}
+  Tập nghiệm $S = \\{1; 2\\}$ ứng với đáp án nào? % comment bẫy \\True
+  \\choice
+  {$S = \\{0\\}$}
+  {\\True $S = \\{1; 2\\}$}
+  {$S = \\emptyset$}
+  {$S = \\{3\\}$}
+  \\loigiai{Vì \\True trong lời giải không được làm nhiễu đáp án.}
+\\end{ex}
+\\begin{ex}
+  Câu 2 chọn D:
+  \\motcot{A}{B}{C}{\\True D}
+\\end{ex}
+
+\\section*{PHẦN II. Trắc nghiệm đúng sai (2,0 điểm)}
+\\begin{ex}
+  Xét tính đúng sai:
+  \\choiceTF
+  {\\True Mệnh đề a đúng}
+  {Mệnh đề b sai}
+  {\\True Mệnh đề c đúng}
+  {Mệnh đề d sai}
+  \\loigiai{Chi tiết.}
+\\end{ex}
+
+\\section*{PHẦN III. Trả lời ngắn (2,0 điểm)}
+\\begin{ex}
+  Tính giá trị biểu thức.
+  \\shortans[oly]{$-12{,}5$}
+  \\loigiai{Kết quả là $-12{,}5$.}
+\\end{ex}
+\\begin{ex}
+  Tính xác suất.
+  \\shortans{$\\dfrac{3}{4}$}
+\\end{ex}
+
+\\section*{PHẦN IV. TỰ LUẬN (3,0 điểm)}
+\\begin{bt}
+  (1,5 điểm) Giải phương trình tham số $m$.
+  \\loigiai{Ta tìm được \\dapso{$m = 2$}}
+\\end{bt}
+\\begin{bt}
+  (1,5 điểm) Tính thể tích khối chóp.
+  \\dapso{$16$}
+\\end{bt}
+`;
+
+const parsedTex = App.parseTexAnswerKey(sampleTex);
+console.assert(parsedTex.p1.join('') === 'BD', 'TEX P1 parse fail');
+console.assert(parsedTex.p2.length === 1 && parsedTex.p2[0].a === true && parsedTex.p2[0].b === false && parsedTex.p2[0].c === true && parsedTex.p2[0].d === false, 'TEX P2 parse fail');
+console.assert(parsedTex.p3.length === 2 && parsedTex.p3[0] === '-12.5' && parsedTex.p3[1] === '3/4', 'TEX P3 parse fail');
+console.assert(parsedTex.p4.length === 2 && parsedTex.p4[0] === 'm = 2' && parsedTex.p4[1] === '16', 'TEX P4 parse fail');
+console.assert(parsedTex.sectionTotals.p1Total === 3 && parsedTex.sectionTotals.p4Total === 3, 'TEX section totals parse fail');
+console.assert(parsedTex.hasCustomQuestionPoints === true && parsedTex.qPoints.p4[0] === '1.5', 'TEX per-question points parse fail');
+
+// Test 9: Parser file .TXT & văn bản OCR từ ảnh dán Ctrl+V (bảng ngang 2 dòng, bảng P.II nhiều cột, đánh số nối tiếp 17..20, kí tự Ð)
+const sampleOcrText = `
+PHẦN I (3,0 điểm)
+Câu | 1 | 2 | 3 | 4
+Đáp án | C | A | D | B
+PHẦN II (4,0 điểm)
+Câu 1   Câu 2
+a) Ð    a) S
+b) S    b) Đ
+c) Đ    c) S
+d) S    d) Đ
+PHẦN III (2,0 điểm)
+17. 12,5   18. -0,5   19. 4   20. 8
+PHẦN IV. TỰ LUẬN (1,0 điểm)
+Câu 21 (1,0 điểm): x = 5
+`;
+
+const parsedOcr = App.parseTextAnswerKey(sampleOcrText);
+console.assert(parsedOcr.p1.join('') === 'CADB', 'OCR 2-row P1 table parse fail');
+console.assert(parsedOcr.p2.length === 2 && parsedOcr.p2[0].a === true && parsedOcr.p2[0].b === false && parsedOcr.p2[1].a === false && parsedOcr.p2[1].b === true, 'OCR multi-col P2 parse fail');
+console.assert(parsedOcr.p3.length === 4 && parsedOcr.p3[0] === '12.5' && parsedOcr.p3[1] === '-0.5' && parsedOcr.p3[3] === '8', 'OCR continuous P3 parse fail');
+console.assert(parsedOcr.p4.length === 1 && parsedOcr.p4[0] === 'x = 5' && parsedOcr.qPoints.p4[0] === '1', 'OCR P4 parse fail');
+
+console.log('[OK] TẤT CẢ TEST CHẤM ĐIỂM 3-4 PHẦN, PARSER .TEX/.TXT/OCR, THANG ĐIỂM & GIÁM SÁT ĐÃ ĐẠT 100%!');
