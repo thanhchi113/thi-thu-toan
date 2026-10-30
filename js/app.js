@@ -2395,8 +2395,14 @@ const App = {
   },
 
   pickPreviewSampleAns(qId, opt) {
-    if (!this.state.layoutPreviewSampleAns) this.state.layoutPreviewSampleAns = {};
-    this.state.layoutPreviewSampleAns[qId] = opt;
+    if (!this.state.layoutPreviewSampleAns) {
+      this.state.layoutPreviewSampleAns = { 1: 'B', 2: 'D', 3: 'A' };
+    }
+    if (this.state.layoutPreviewSampleAns[qId] === opt) {
+      delete this.state.layoutPreviewSampleAns[qId];
+    } else {
+      this.state.layoutPreviewSampleAns[qId] = opt;
+    }
     this.refreshExamLayoutModalDom();
   },
 
@@ -2450,7 +2456,7 @@ const App = {
     const wideSheetInPreview = pdfCollapsed || pMode !== 'split';
     const sampleColsCls = isMobPreview
       ? 'grid-cols-1'
-      : (wideSheetInPreview ? 'grid-cols-3' : 'grid-cols-1');
+      : (wideSheetInPreview ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1');
 
     const sheetPreviewHtml = `
       <div class="bg-white border border-indigo-200 rounded-xl p-2.5 space-y-2 shadow-2xs">
@@ -2519,7 +2525,7 @@ const App = {
     } else {
       stageLayoutHtml = isMobPreview
         ? `<div class="space-y-2">${pdfPreviewHtml}${sheetPreviewHtml}</div>`
-        : `<div class="grid grid-cols-12 gap-2.5 items-start"><div class="col-span-7">${pdfPreviewHtml}</div><div class="col-span-5">${sheetPreviewHtml}</div></div>`;
+        : `<div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-start"><div class="sm:col-span-7">${pdfPreviewHtml}</div><div class="sm:col-span-5">${sheetPreviewHtml}</div></div>`;
     }
 
     return `
@@ -2576,7 +2582,7 @@ const App = {
                 </span>
                 <span class="font-extrabold text-slate-800">${pMeta.name}</span>
               </div>
-              <div class="flex items-center gap-1.5">
+              <div class="flex flex-wrap items-center gap-1.5">
                 <button type="button" id="previewToggleCollapseBtn" onclick="App.togglePreviewPdfCollapse()"
                   class="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer flex items-center gap-1 ${pdfCollapsed ? 'bg-amber-500 text-white border-amber-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}">
                   <i class="fa-solid ${pdfCollapsed ? 'fa-expand' : 'fa-compress'}"></i>
@@ -2604,16 +2610,16 @@ const App = {
           <div class="text-xs text-slate-500">
             Đang chọn: <strong class="text-indigo-700">${pMeta.name}</strong>
           </div>
-          <div class="flex flex-wrap items-center justify-end gap-2">
+          <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
             <button type="button" onclick="App.closeExamLayoutModal()" class="ui-btn bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-4">
               Đóng
             </button>
-            <button type="button" id="applyExamLayoutBtn" onclick="App.applySelectedExamLayout()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm px-4">
+            <button type="button" id="applyExamLayoutBtn" onclick="App.applySelectedExamLayout()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm px-3 sm:px-4">
               <i class="fa-solid fa-check"></i>
-              <span>Áp dụng cách hiển thị này</span>
+              <span>Áp dụng bố cục</span>
             </button>
             ${canQuickStart ? `
-              <button type="button" id="applyAndStartExamLayoutBtn" onclick="App.applySelectedExamLayout('${targetExam.id}')" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-4">
+              <button type="button" id="applyAndStartExamLayoutBtn" onclick="App.applySelectedExamLayout('${targetExam.id}')" class="col-span-2 sm:col-span-1 ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-4">
                 <i class="fa-solid fa-play text-[10px]"></i>
                 <span>Áp dụng &amp; Vào làm bài ngay</span>
               </button>
@@ -2660,13 +2666,13 @@ const App = {
     container.innerHTML = `
       <div class="min-h-screen bg-slate-50 flex flex-col justify-center py-6 sm:py-12 sm:px-6 lg:px-8 relative text-slate-900">
         <!-- Thanh công cụ đồng bộ: gọn gàng trên điện thoại, ghim góc phải trên máy tính -->
-        <div class="w-full max-w-md mx-auto px-4 mb-5 sm:mb-0 sm:w-auto sm:px-0 sm:fixed sm:top-4 sm:right-4 z-30 flex items-center justify-between sm:justify-end gap-2">
-          <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex-1 sm:flex-initial" title="Quét mã QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
-            <i class="fa-solid fa-qrcode"></i>
+        <div class="w-full max-w-md mx-auto px-4 mb-5 sm:mb-0 sm:w-auto sm:px-0 sm:fixed sm:top-4 sm:right-4 z-30 flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2">
+          <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex-1 sm:flex-initial min-w-0" title="Quét mã QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
+            <i class="fa-solid fa-qrcode shrink-0"></i>
             <span>Tạo App ĐT / QR</span>
           </button>
-          <button type="button" id="loginLayoutBtn" onclick="App.showExamLayoutModal()" class="ui-btn bg-white border border-slate-200 shadow-xs hover:bg-indigo-50 text-indigo-700 px-3" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
-            <i class="fa-solid fa-table-columns text-indigo-600"></i>
+          <button type="button" id="loginLayoutBtn" onclick="App.showExamLayoutModal()" class="ui-btn bg-white border border-slate-200 shadow-xs hover:bg-indigo-50 text-indigo-700 shrink-0" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
+            <i class="fa-solid fa-table-columns text-indigo-600 shrink-0"></i>
             <span>Bố cục thi</span>
           </button>
           <button type="button" id="loginQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn-icon sm:w-auto sm:px-3 bg-white border border-slate-200 shadow-xs hover:bg-slate-100 text-xs font-bold text-slate-700 sm:gap-1.5" title="Chuyển nhanh chế độ Sáng / Dịu mắt / Tối">
@@ -2957,7 +2963,7 @@ const App = {
                 <i class="fa-solid fa-graduation-cap text-sm sm:text-base"></i>
               </div>
               <div class="min-w-0">
-                <span class="block text-[10px] sm:text-xs font-bold text-indigo-600 uppercase tracking-wider leading-tight">Cổng Học Sinh</span>
+                <span class="block text-[10px] sm:text-xs font-bold text-indigo-600 uppercase tracking-wider leading-tight truncate">Cổng Học Sinh</span>
                 <h1 class="text-sm sm:text-lg font-extrabold text-slate-800 leading-tight truncate">Toán 6 – 12</h1>
               </div>
             </div>
@@ -2981,8 +2987,8 @@ const App = {
                 <span class="hidden md:inline">Bố cục: ${this.getExamLayoutMeta().shortLabel}</span>
               </button>
 
-              <!-- Nút Quét QR / Tạo App Điện thoại (Android & iOS) -->
-              <button type="button" id="studentIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs md:gap-1.5" title="Quét QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
+              <!-- Nút Quét QR / Tạo App Điện thoại (trên điện thoại đã có nút lớn ở Banner ngay bên dưới) -->
+              <button type="button" id="studentIosAppBtn" onclick="App.showIosAppModal()" class="hidden sm:inline-flex ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs md:gap-1.5" title="Quét QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
                 <i class="fa-solid fa-qrcode"></i>
                 <span class="hidden md:inline">App ĐT / QR</span>
               </button>
@@ -3030,15 +3036,15 @@ const App = {
                   Mã học sinh: <strong class="font-mono tracking-wider">${u.studentId}</strong> • Khối: <strong>Khối ${this.getStudentGrade(u)}</strong> • Lớp: <strong>${u.className || '12'}</strong>
                   ${u.phone ? ` • SĐT: <strong>${u.phone}</strong>` : ''}
                 </p>
-                <div class="mt-3.5 grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2">
-                  <button type="button" onclick="App.showStudentSelfEditModal()" class="ui-btn bg-white/20 hover:bg-white/30 text-white backdrop-blur-md border border-white/25 shadow-xs">
-                    <i class="fa-solid fa-user-pen"></i><span>Hồ sơ cá nhân &amp; Đổi mật khẩu</span>
+                <div class="mt-3.5 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+                  <button type="button" onclick="App.showStudentSelfEditModal()" class="col-span-2 sm:col-span-1 ui-btn bg-white/20 hover:bg-white/30 text-white backdrop-blur-md border border-white/25 shadow-xs">
+                    <i class="fa-solid fa-user-pen shrink-0"></i><span>Hồ sơ cá nhân &amp; Đổi mật khẩu</span>
                   </button>
                   <button type="button" id="studentBannerAndroidBtn" onclick="App.showIosAppModal(false, 'android')" class="ui-btn bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold shadow-sm">
-                    <i class="fa-brands fa-android text-sm"></i><span>Cài App Android</span>
+                    <i class="fa-brands fa-android text-sm shrink-0"></i><span>Cài App Android</span>
                   </button>
                   <button type="button" id="studentBannerIosBtn" onclick="App.showIosAppModal(false, 'ios')" class="ui-btn bg-white text-indigo-700 hover:bg-indigo-50 font-extrabold shadow-sm">
-                    <i class="fa-brands fa-apple text-sm"></i><span>Cài App iOS</span>
+                    <i class="fa-brands fa-apple text-sm shrink-0"></i><span>Cài App iOS</span>
                   </button>
                 </div>
               </div>
@@ -3056,19 +3062,20 @@ const App = {
           </div>
 
           <!-- Thanh Điều Hướng Cổng Học Sinh -->
-          <div class="bg-white rounded-2xl p-2.5 border border-slate-200 shadow-sm">
+          <div class="bg-white rounded-2xl p-2 sm:p-2.5 border border-slate-200 shadow-sm">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <nav class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap pb-0.5 sm:pb-0">
+              <nav class="grid grid-cols-3 sm:flex sm:flex-wrap items-stretch sm:items-center gap-1 sm:gap-2 w-full">
                 <button
                   type="button"
                   id="studentTabExamsBtn"
                   onclick="App.setStudentMainTab('exams')"
-                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.studentMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 !px-1.5 sm:!px-3.5 !gap-1 sm:!gap-1.5 min-w-0 ${this.state.studentMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-file-pen"></i>
-                  <span>Đề Thi &amp; Kiểm Tra</span>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-mono ${this.state.studentMainTab === 'exams' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
-                    ${allowedExams.length} đề
+                  <i class="fa-solid fa-file-pen shrink-0"></i>
+                  <span class="sm:hidden">Đề Thi</span>
+                  <span class="hidden sm:inline">Đề Thi &amp; Kiểm Tra</span>
+                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.studentMainTab === 'exams' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                    ${allowedExams.length}<span class="hidden sm:inline"> đề</span>
                   </span>
                 </button>
 
@@ -3076,11 +3083,12 @@ const App = {
                   type="button"
                   id="studentTabHomeworksBtn"
                   onclick="App.setStudentMainTab('homeworks')"
-                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 !px-1.5 sm:!px-3.5 !gap-1 sm:!gap-1.5 min-w-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-book-open"></i>
-                  <span>Tài Liệu &amp; Chuyên Đề</span>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-mono ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                  <i class="fa-solid fa-book-open shrink-0"></i>
+                  <span class="sm:hidden">Tài Liệu</span>
+                  <span class="hidden sm:inline">Tài Liệu &amp; Chuyên Đề</span>
+                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
                     ${allowedHomeworks.length}
                   </span>
                 </button>
@@ -3089,12 +3097,13 @@ const App = {
                   type="button"
                   id="studentTabGradesBtn"
                   onclick="App.setStudentMainTab('grades')"
-                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.studentMainTab === 'grades' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 !px-1.5 sm:!px-3.5 !gap-1 sm:!gap-1.5 min-w-0 ${this.state.studentMainTab === 'grades' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-chart-simple"></i>
-                  <span>Kết Quả &amp; Xếp Hạng</span>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-mono ${this.state.studentMainTab === 'grades' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
-                    ${mySubmissions.length} lượt
+                  <i class="fa-solid fa-chart-simple shrink-0"></i>
+                  <span class="sm:hidden">Kết Quả</span>
+                  <span class="hidden sm:inline">Kết Quả &amp; Xếp Hạng</span>
+                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.studentMainTab === 'grades' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                    ${mySubmissions.length}<span class="hidden sm:inline"> lượt</span>
                   </span>
                 </button>
               </nav>
@@ -3217,14 +3226,14 @@ const App = {
                 </div>
 
                 ${(this.state.settings && this.state.settings.allowStudentViewOwnScore) ? `
-                  <div class="bg-slate-100 p-1 rounded-xl border border-slate-200 flex text-xs font-semibold self-start sm:self-auto">
-                    <button id="studentTabMineBtn" onclick="App.setStudentScoreTab('mine')" class="px-3 py-1.5 rounded-lg transition cursor-pointer ${this.state.studentScoreTab === 'mine' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
-                      <i class="fa-solid fa-user mr-1.5"></i>Kết Quả Cá Nhân
+                  <div class="bg-slate-100 p-1 rounded-xl border border-slate-200 grid grid-cols-2 sm:flex text-xs font-semibold w-full sm:w-auto">
+                    <button id="studentTabMineBtn" onclick="App.setStudentScoreTab('mine')" class="px-2.5 sm:px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1 min-w-0 ${this.state.studentScoreTab === 'mine' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
+                      <i class="fa-solid fa-user shrink-0"></i><span class="truncate">Kết Quả Cá Nhân</span>
                     </button>
-                    <button id="studentTabClassBoardBtn" onclick="App.setStudentScoreTab('classBoard')" class="px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center ${this.state.studentScoreTab === 'classBoard' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
-                      <i class="fa-solid fa-ranking-star mr-1.5"></i>
-                      <span>So Sánh Lớp / Khối</span>
-                      ${!this.isStudentCompareAllowed() ? '<i class="fa-solid fa-lock text-[10px] ml-1.5 text-slate-400" title="Đang khóa bởi Giáo viên"></i>' : ''}
+                    <button id="studentTabClassBoardBtn" onclick="App.setStudentScoreTab('classBoard')" class="px-2.5 sm:px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1 min-w-0 ${this.state.studentScoreTab === 'classBoard' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
+                      <i class="fa-solid fa-ranking-star shrink-0"></i>
+                      <span class="truncate">So Sánh Lớp / Khối</span>
+                      ${!this.isStudentCompareAllowed() ? '<i class="fa-solid fa-lock text-[10px] text-slate-400 shrink-0" title="Đang khóa bởi Giáo viên"></i>' : ''}
                     </button>
                   </div>
                 ` : ''}
@@ -3276,14 +3285,14 @@ const App = {
                             <span>Phạm vi so sánh:</span>
                           </span>
                           ${cmp.allowedScopes.length > 1 ? `
-                            <div class="bg-white p-1 rounded-xl border border-slate-200 inline-flex text-xs font-semibold shadow-2xs">
-                              <button type="button" id="studentCompareScopeBtn_class" onclick="App.setStudentCompareMode('class')" class="px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${cmp.scope === 'class' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
-                                <i class="fa-solid fa-chalkboard-user"></i>
-                                <span>Lớp của bạn (${cmp.myClass || ('K' + cmp.myGrade)})</span>
+                            <div class="bg-white p-1 rounded-xl border border-slate-200 grid grid-cols-2 sm:inline-flex text-xs font-semibold shadow-2xs w-full sm:w-auto">
+                              <button type="button" id="studentCompareScopeBtn_class" onclick="App.setStudentCompareMode('class')" class="px-2.5 sm:px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 min-w-0 ${cmp.scope === 'class' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
+                                <i class="fa-solid fa-chalkboard-user shrink-0"></i>
+                                <span class="truncate">Lớp (${cmp.myClass || ('K' + cmp.myGrade)})</span>
                               </button>
-                              <button type="button" id="studentCompareScopeBtn_grade" onclick="App.setStudentCompareMode('grade')" class="px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${cmp.scope === 'grade' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
-                                <i class="fa-solid fa-layer-group"></i>
-                                <span>Toàn Khối ${cmp.myGrade}</span>
+                              <button type="button" id="studentCompareScopeBtn_grade" onclick="App.setStudentCompareMode('grade')" class="px-2.5 sm:px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 min-w-0 ${cmp.scope === 'grade' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
+                                <i class="fa-solid fa-layer-group shrink-0"></i>
+                                <span class="truncate">Toàn Khối ${cmp.myGrade}</span>
                               </button>
                             </div>
                           ` : `
@@ -3294,9 +3303,9 @@ const App = {
                           `}
                         </div>
 
-                        <div class="flex items-center gap-2">
+                        <div class="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 w-full md:w-auto">
                           <span class="text-xs font-semibold text-slate-500 shrink-0">Đề đối chiếu:</span>
-                          <select id="studentCompareExamSelect" onchange="App.setStudentCompareExamFilter(this.value)" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 min-w-[200px]">
+                          <select id="studentCompareExamSelect" onchange="App.setStudentCompareExamFilter(this.value)" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 w-full sm:w-auto sm:min-w-[200px] min-w-0">
                             <option value="ALL" ${cmp.examFilter === 'ALL' ? 'selected' : ''}>Tổng hợp các đề (${cmp.allCohortExams.length} đề)</option>
                             ${cmp.allCohortExams.map((ex, idx) => `
                               <option value="${ex.id}" ${cmp.examFilter === ex.id ? 'selected' : ''}>${ex.roundLabel || ('Đợt ' + (idx + 1))} — ${ex.title}</option>
@@ -3706,7 +3715,7 @@ const App = {
           return `
             <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:shadow-md hover:border-indigo-200 transition flex flex-col justify-between space-y-3">
               <div>
-                <div class="flex items-center justify-between gap-2 mb-2">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                   <div class="flex items-center flex-wrap gap-1.5">
                     <span class="px-2.5 py-0.5 rounded-lg text-xs font-extrabold font-mono bg-indigo-50 text-indigo-700 border border-indigo-100">
                       Khối ${ex.grade || 12}
@@ -3718,9 +3727,9 @@ const App = {
                       ${ex.roundLabel || 'Đợt 1'}
                     </span>
                   </div>
-                  <div class="flex items-center space-x-2 text-xs text-slate-500">
+                  <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                     ${attemptsCount > 0 ? `<span class="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]"><i class="fa-solid fa-rotate-right mr-1"></i>Đã thi ${attemptsCount} lần</span>` : ''}
-                    <span class="inline-flex items-center font-semibold"><i class="fa-regular fa-clock mr-1 text-slate-400"></i>${ex.time_minutes || 90} phút</span>
+                    <span class="inline-flex items-center font-semibold whitespace-nowrap"><i class="fa-regular fa-clock mr-1 text-slate-400"></i>${ex.time_minutes || 90} phút</span>
                   </div>
                 </div>
                 <h4 class="text-sm sm:text-base font-bold text-slate-900 mb-1.5 leading-snug line-clamp-2" title="${ex.title}">${ex.title}</h4>
@@ -3734,27 +3743,28 @@ const App = {
 
               <div class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 ${attemptsCount > 0 ? `
-                  <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
                     <button type="button" onclick="App.viewSubmissionDetail('${latestSub.id}')" class="ui-btn bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
-                      <i class="fa-solid fa-eye"></i><span>Xem lại (${latestSub.scoreResult.totalScore}đ)</span>
+                      <i class="fa-solid fa-eye shrink-0"></i><span>Xem lại (${latestSub.scoreResult.totalScore}đ)</span>
                     </button>
                     <button type="button" onclick="App.confirmRetakeExam('${ex.id}')" class="ui-btn text-white bg-amber-600 hover:bg-amber-700 shadow-xs">
-                      <i class="fa-solid fa-rotate-right"></i><span>Thi Lại (Lần ${attemptsCount + 1})</span>
+                      <i class="fa-solid fa-rotate-right shrink-0"></i><span>Thi Lại (Lần ${attemptsCount + 1})</span>
                     </button>
-                    <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="ui-btn bg-slate-50 hover:bg-indigo-50 text-indigo-700 border border-slate-200" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
-                      <i class="fa-solid fa-table-columns"></i><span>Bố cục thi</span>
+                    <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="col-span-2 sm:col-span-1 ui-btn bg-slate-50 hover:bg-indigo-50 text-indigo-700 border border-slate-200" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
+                      <i class="fa-solid fa-table-columns shrink-0"></i><span>Bố cục thi</span>
                     </button>
                   </div>
-                  <span class="text-[11px] text-slate-400">Gần nhất: ${new Date(latestSub.submittedAt).toLocaleDateString('vi-VN')}</span>
+                  <span class="text-[11px] text-slate-400 text-center sm:text-right">Gần nhất: ${new Date(latestSub.submittedAt).toLocaleDateString('vi-VN')}</span>
                 ` : `
-                  <div class="flex items-center gap-2 w-full sm:w-auto">
-                    <button type="button" onclick="App.startExam('${ex.id}')" class="ui-btn flex-1 sm:flex-initial px-4 text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs">
-                      <i class="fa-solid fa-play text-[10px]"></i>
+                  <div class="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
+                    <button type="button" onclick="App.startExam('${ex.id}')" class="ui-btn px-3 sm:px-4 text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs">
+                      <i class="fa-solid fa-play text-[10px] shrink-0"></i>
                       <span>Vào Làm Bài</span>
                     </button>
                     <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3" title="Xem trước & chọn bố cục Đề PDF và Ô đáp án trước khi thi">
-                      <i class="fa-solid fa-table-columns"></i>
-                      <span>Xem trước bố cục</span>
+                      <i class="fa-solid fa-table-columns shrink-0"></i>
+                      <span class="sm:hidden">Bố cục thi</span>
+                      <span class="hidden sm:inline">Xem trước bố cục</span>
                     </button>
                   </div>
                   <span class="text-[11px] text-slate-400 text-center sm:text-right">Chưa làm bài</span>
@@ -3958,21 +3968,26 @@ const App = {
     }
   },
 
+  getSectionTabBtnClass(isActive, spanTwo = false) {
+    return `${spanTwo ? 'col-span-2 sm:col-span-1 ' : ''}sm:flex-1 h-9 px-1 sm:px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap min-w-0 truncate ${isActive ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}`;
+  },
+
+  getMobilePaneBtnClass(isActive) {
+    return `min-w-0 h-11 sm:h-9 px-1 sm:px-2 rounded-xl text-[10px] sm:text-[11px] leading-tight font-bold transition flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 cursor-pointer whitespace-nowrap ${isActive ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`;
+  },
+
   setSectionTab(tab) {
     this.state.activeSectionTab = tab;
     if (this.state.examSheetCollapsed) {
       this.state.examSheetCollapsed = false;
       this.applyExamLayoutDom();
     }
+    const hasP4 = Boolean(this.state.activeExam && Array.isArray(this.state.activeExam.part4) && this.state.activeExam.part4.length > 0);
     // Cập nhật tab active mà KHÔNG tải lại PDF
     ['all', 'p1', 'p2', 'p3', 'p4'].forEach(t => {
       const btn = document.getElementById(`sectionTabBtn_${t}`);
       if (btn) {
-        if (t === tab) {
-          btn.className = 'flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap bg-indigo-600 text-white shadow font-bold';
-        } else {
-          btn.className = 'flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap text-slate-600 hover:bg-slate-50 font-semibold';
-        }
+        btn.className = this.getSectionTabBtnClass(t === tab, hasP4 && t === 'all');
       }
     });
     const pane = document.getElementById('splitAnswerInputsContainer');
@@ -3989,10 +4004,22 @@ const App = {
     }
   },
 
+  formatShortAnsDisplay(val) {
+    return String(val ?? '').replace(/\./g, ',');
+  },
+
+  getFlagButtonClasses(isFlagged) {
+    return `flag-star-btn w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 cursor-pointer transition ${isFlagged ? 'is-flagged text-amber-500 bg-amber-50 border-amber-300 shadow-2xs' : 'text-slate-400 bg-white border-slate-200'}`;
+  },
+
   toggleFlag(qType, qId) {
     if (!this.state.answers.flagged) this.state.answers.flagged = {};
     const key = `${qType}_${qId}`;
-    this.state.answers.flagged[key] = !this.state.answers.flagged[key];
+    if (this.state.answers.flagged[key]) {
+      delete this.state.answers.flagged[key];
+    } else {
+      this.state.answers.flagged[key] = true;
+    }
     this.refreshQuestionProgressDom(qType, qId);
     this.updateProgressUi();
   },
@@ -4058,7 +4085,7 @@ const App = {
 
     if (part === 'p3') {
       const arr = (this.state.answers && this.state.answers.part3 && this.state.answers.part3[qId]) || [];
-      const raw = (Array.isArray(arr) ? arr.join('') : String(arr || '')).trim();
+      const raw = this.formatShortAnsDisplay(Array.isArray(arr) ? arr.join('') : String(arr || '')).trim();
       return {
         status: raw.length > 0 ? 'answered' : 'unanswered',
         label: raw.length > 0 ? `Đã điền: ${raw}` : 'Chưa điền',
@@ -4233,14 +4260,14 @@ const App = {
             </button>
 
             <!-- Timer Badge -->
-            <div class="inline-flex items-center gap-1 h-[38px] bg-amber-50 border border-amber-200 px-2.5 sm:px-3 rounded-xl text-amber-900 font-mono font-bold text-xs sm:text-sm whitespace-nowrap">
+            <div class="inline-flex items-center gap-1 h-[38px] bg-amber-50 border border-amber-200 px-2 sm:px-3 rounded-xl text-amber-900 font-mono font-bold text-xs sm:text-sm whitespace-nowrap">
               <i class="fa-regular fa-clock text-amber-600"></i>
               <span id="examTimer">--:--</span>
             </div>
 
             <!-- Nộp bài Button -->
-            <button type="button" id="examTopSubmitBtn" onclick="App.confirmSubmitExam()" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-3 sm:px-4">
-              <i class="fa-solid fa-paper-plane"></i>
+            <button type="button" id="examTopSubmitBtn" onclick="App.confirmSubmitExam()" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-2.5 sm:px-4 shrink-0">
+              <i class="fa-solid fa-paper-plane shrink-0"></i>
               <span>Nộp Bài</span>
             </button>
           </div>
@@ -4251,22 +4278,22 @@ const App = {
           <div class="exam-progress-bar" style="width: ${progress.percentage}%;"></div>
         </div>
 
-        <!-- Thanh chuyển chế độ Đề PDF / Phiếu trả lời / Thu gọn đề / Bố cục cho Điện thoại -->
-        <div class="lg:hidden bg-slate-900 border-b border-slate-800 px-2 py-1.5 flex items-center gap-1 shrink-0 z-20 overflow-x-auto no-scrollbar">
-          <button type="button" id="mobPaneBtn_pdf" onclick="App.setMobileExamPane('pdf')" class="flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'pdf' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
-            <i class="fa-solid fa-file-pdf text-red-400"></i><span>Đề PDF</span>
+        <!-- Thanh chuyển chế độ Đề PDF / Phiếu trả lời / Bố cục / Quá trình gọn gàng 5 cột không tràn trên Điện thoại -->
+        <div class="lg:hidden bg-slate-900 border-b border-slate-800 px-1.5 py-1.5 grid grid-cols-5 gap-1 shrink-0 z-20">
+          <button type="button" id="mobPaneBtn_pdf" onclick="App.setMobileExamPane('pdf')" class="${this.getMobilePaneBtnClass((this.state.mobileExamPane || 'both') === 'pdf')}">
+            <i class="fa-solid fa-file-pdf text-red-400 text-xs"></i><span class="truncate max-w-full">Đề PDF</span>
           </button>
-          <button type="button" id="mobPaneBtn_both" onclick="App.setMobileExamPane('both')" class="flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'both' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
-            <i class="fa-solid fa-table-columns text-indigo-300"></i><span>Đề + Phiếu</span>
+          <button type="button" id="mobPaneBtn_both" onclick="App.setMobileExamPane('both')" class="${this.getMobilePaneBtnClass((this.state.mobileExamPane || 'both') === 'both')}">
+            <i class="fa-solid fa-table-columns text-indigo-300 text-xs"></i><span class="truncate max-w-full">Đề+Phiếu</span>
           </button>
-          <button type="button" id="mobPaneBtn_sheet" onclick="App.setMobileExamPane('sheet')" class="flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${(this.state.mobileExamPane || 'both') === 'sheet' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
-            <i class="fa-solid fa-pen-to-square text-emerald-300"></i><span>Phiếu (<span class="exam-mobile-ans-short">${progress.answered}/${progress.total}</span>)</span>
+          <button type="button" id="mobPaneBtn_sheet" onclick="App.setMobileExamPane('sheet')" class="${this.getMobilePaneBtnClass((this.state.mobileExamPane || 'both') === 'sheet')}">
+            <i class="fa-solid fa-pen-to-square text-emerald-300 text-xs"></i><span class="truncate max-w-full">Phiếu <span class="exam-mobile-ans-short">${progress.answered}/${progress.total}</span></span>
           </button>
-          <button type="button" id="mobLayoutSwitchBtn" onclick="App.showExamLayoutModal()" class="h-9 px-2 rounded-xl text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap" title="Đổi bố cục Đề & Đáp án">
-            <i class="fa-solid fa-table-list"></i><span>Bố cục</span>
+          <button type="button" id="mobLayoutSwitchBtn" onclick="App.showExamLayoutModal()" class="min-w-0 h-11 sm:h-9 px-1 sm:px-2 rounded-xl text-[10px] sm:text-[11px] leading-tight font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 cursor-pointer whitespace-nowrap" title="Đổi bố cục Đề & Đáp án">
+            <i class="fa-solid fa-table-list text-xs"></i><span class="truncate max-w-full">Bố cục</span>
           </button>
-          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="h-9 px-2 rounded-xl text-[11px] font-bold bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700 transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap" title="Xem quá trình đã làm & câu đã tích chọn">
-            <i class="fa-solid fa-list-check"></i><span id="mobilePaletteBtnText">Quá trình</span>
+          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="min-w-0 h-11 sm:h-9 px-1 sm:px-2 rounded-xl text-[10px] sm:text-[11px] leading-tight font-bold bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700 transition flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 cursor-pointer whitespace-nowrap" title="Xem quá trình đã làm & câu đã tích chọn">
+            <i class="fa-solid fa-list-check text-xs"></i><span id="mobilePaletteBtnText" class="truncate max-w-full">Quá trình</span>
           </button>
         </div>
 
@@ -4330,8 +4357,8 @@ const App = {
         right: 'flex h-full order-2 flex-1 min-h-0 w-full bg-white flex-col overflow-y-auto',
         sheetBody: 'flex-1 flex flex-col',
         pdfViewer: 'hidden',
-        pdfBanner: 'flex items-center justify-between gap-2 px-3 sm:px-4 py-2 bg-indigo-950 border-t border-indigo-800/80 text-indigo-100 text-xs',
-        pdfHeader: 'bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between shrink-0'
+        pdfBanner: 'flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2 bg-indigo-950 border-t border-indigo-800/80 text-indigo-100 text-xs',
+        pdfHeader: 'bg-slate-950 text-slate-300 text-xs px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-1.5 shrink-0'
       };
     }
 
@@ -4343,7 +4370,7 @@ const App = {
         sheetBody: 'hidden',
         pdfViewer: 'flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950',
         pdfBanner: 'hidden',
-        pdfHeader: 'bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0'
+        pdfHeader: 'bg-slate-950 text-slate-300 text-xs px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-800 shrink-0'
       };
     }
 
@@ -4358,7 +4385,7 @@ const App = {
         sheetBody: `${onlySheetMob ? 'flex-1 lg:flex-initial' : ''} flex flex-col`,
         pdfViewer: `${onlyPdfMob ? 'flex-1 lg:flex-initial w-full h-full lg:h-auto min-h-0' : 'w-full h-auto'} flex flex-col bg-slate-950`,
         pdfBanner: 'hidden',
-        pdfHeader: `bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0 ${isUnifiedFlow ? 'sticky top-0 z-20' : ''}`
+        pdfHeader: `bg-slate-950 text-slate-300 text-xs px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-800 shrink-0 ${isUnifiedFlow ? 'sticky top-0 z-20' : ''}`
       };
     }
 
@@ -4373,7 +4400,7 @@ const App = {
         sheetBody: `${onlySheetMob ? 'flex-1 lg:flex-initial' : ''} flex flex-col`,
         pdfViewer: `${onlyPdfMob ? 'flex-1 lg:flex-initial w-full h-full lg:h-auto min-h-0' : 'w-full h-auto'} flex flex-col bg-slate-950`,
         pdfBanner: 'hidden',
-        pdfHeader: `bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0 ${isUnifiedFlow ? 'sticky top-0 z-20' : ''}`
+        pdfHeader: `bg-slate-950 text-slate-300 text-xs px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-800 shrink-0 ${isUnifiedFlow ? 'sticky top-0 z-20' : ''}`
       };
     }
 
@@ -4386,7 +4413,7 @@ const App = {
       sheetBody: 'flex-1 flex flex-col',
       pdfViewer: 'flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950',
       pdfBanner: 'hidden',
-      pdfHeader: 'bg-slate-950 text-slate-300 text-xs px-3 sm:px-4 py-1.5 flex items-center justify-between border-b border-slate-800 shrink-0'
+      pdfHeader: 'bg-slate-950 text-slate-300 text-xs px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-800 shrink-0'
     };
   },
 
@@ -4399,7 +4426,7 @@ const App = {
     ['pdf', 'both', 'sheet'].forEach(k => {
       const btn = document.getElementById(`mobPaneBtn_${k}`);
       if (btn) {
-        btn.className = `flex-1 h-9 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${k === m ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`;
+        btn.className = this.getMobilePaneBtnClass(k === m);
       }
     });
   },
@@ -4526,35 +4553,37 @@ const App = {
     const isStacked = normLayout !== 'split' && !pdfCollapsed && !sheetCollapsed;
     const isTopSheet = normLayout === 'top-sheet' || normLayout === 'fast-entry';
 
+    const hasP4 = Array.isArray(ex.part4) && ex.part4.length > 0;
+
     return `
       <!-- Khung Xem Đề PDF Gốc -->
       <div id="examLeftPdfPane" class="${paneCls.left}">
         <div id="examLeftPdfHeader" class="${paneCls.pdfHeader}">
-          <span class="flex items-center font-bold text-white truncate"><i class="fa-solid fa-file-pdf text-red-400 mr-2"></i><span class="truncate">Đề thi PDF gốc</span></span>
-          <div class="flex items-center gap-2 sm:gap-2.5 shrink-0">
-            <button type="button" id="pdfJumpToSheetBtn" onclick="App.scrollExamWorkspaceTo('sheet')" class="${isStacked ? 'inline-flex' : 'hidden'} px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] items-center cursor-pointer transition">
+          <span class="flex items-center font-bold text-white min-w-0 truncate"><i class="fa-solid fa-file-pdf text-red-400 mr-1.5 shrink-0"></i><span class="truncate">Đề thi PDF gốc</span></span>
+          <div class="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
+            <button type="button" id="pdfJumpToSheetBtn" onclick="App.scrollExamWorkspaceTo('sheet')" class="${isStacked ? 'inline-flex' : 'hidden'} px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] items-center cursor-pointer transition whitespace-nowrap">
               <i class="fa-solid ${isTopSheet ? 'fa-angles-up' : 'fa-angles-down'} mr-1"></i><span>${isTopSheet ? 'Lên Ô đáp án' : 'Xuống Ô đáp án'}</span>
             </button>
-            <button type="button" onclick="App.toggleExamPdfCollapse()" class="toggle-exam-pdf-btn px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer transition" title="Thu gọn hoặc mở lại khung đề PDF">
+            <button type="button" onclick="App.toggleExamPdfCollapse()" class="toggle-exam-pdf-btn px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer transition whitespace-nowrap" title="Thu gọn hoặc mở lại khung đề PDF">
               <i class="fa-solid ${pdfCollapsed ? 'fa-expand' : 'fa-compress'}"></i><span>${pdfCollapsed ? 'Mở lại đề' : 'Thu gọn đề'}</span>
             </button>
-            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" onclick="App.suppressAntiCheatTemporarily(2000)" class="text-xs text-indigo-300 hover:text-white flex items-center">
-              <i class="fa-solid fa-download mr-1"></i><span class="hidden sm:inline">Tải về</span>
+            <a href="${pdfSrc}" download="De_Thi_${ex.id}.pdf" onclick="App.suppressAntiCheatTemporarily(2000)" class="px-1.5 py-0.5 rounded bg-slate-800/80 sm:bg-transparent text-xs text-indigo-300 hover:text-white inline-flex items-center whitespace-nowrap" title="Tải đề PDF">
+              <i class="fa-solid fa-download sm:mr-1"></i><span class="hidden sm:inline">Tải về</span>
             </a>
-            <button type="button" onclick="App.openPdfModal('${safeTitle}', '${pdfSrc}', '${ex.id}')" class="text-xs text-emerald-400 hover:text-emerald-300 flex items-center cursor-pointer">
+            <button type="button" onclick="App.openPdfModal('${safeTitle}', '${pdfSrc}', '${ex.id}')" class="px-1.5 py-0.5 rounded bg-slate-800/80 sm:bg-transparent text-[11px] sm:text-xs text-emerald-400 hover:text-emerald-300 inline-flex items-center cursor-pointer whitespace-nowrap">
               <i class="fa-solid fa-expand mr-1"></i><span>Phóng to</span>
             </button>
             ${!inStandalone ? `
-              <a href="${pdfSrc}" target="_blank" class="hidden sm:flex text-xs hover:text-white items-center">
+              <a href="${pdfSrc}" target="_blank" class="hidden sm:flex text-xs hover:text-white items-center whitespace-nowrap">
                 <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Tab mới
               </a>
             ` : ''}
           </div>
         </div>
         <div id="examPdfCollapsedBanner" class="${paneCls.pdfBanner}">
-          <span class="truncate flex items-center gap-1.5">
-            <i class="fa-solid fa-bolt text-amber-400"></i>
-            <span>Đề thi PDF đang thu gọn để ưu tiên điền đáp án nhanh toàn màn hình</span>
+          <span class="min-w-0 truncate flex items-center gap-1.5">
+            <i class="fa-solid fa-bolt text-amber-400 shrink-0"></i>
+            <span class="truncate">Đề thi PDF đang thu gọn để ưu tiên điền đáp án nhanh</span>
           </span>
           <button type="button" onclick="App.toggleExamPdfCollapse()" class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold shrink-0 cursor-pointer flex items-center gap-1 shadow-xs">
             <i class="fa-solid fa-expand text-[10px]"></i><span>Mở lại đề PDF</span>
@@ -4565,54 +4594,54 @@ const App = {
 
       <!-- Khung Ô Điền Đáp Án Trực Tuyến + Theo Dõi Quá Trình -->
       <div id="examRightSheetPane" class="${paneCls.right}">
-        <div class="p-2.5 sm:p-3 border-b border-slate-200 bg-slate-50 sticky top-0 z-10 space-y-2">
+        <div class="p-2 sm:p-3 border-b border-slate-200 bg-slate-50 sticky top-0 z-10 space-y-2">
           <!-- Thanh tóm tắt quá trình & công cụ thu gọn đề / đổi bố cục ngay trên ô đáp án -->
           <div class="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2 shadow-2xs">
             <div class="min-w-0 flex items-center gap-2 text-xs">
               <span class="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
                 <i class="fa-solid fa-chart-pie text-[11px]"></i>
               </span>
-              <div class="truncate">
+              <div class="min-w-0 truncate">
                 <span class="font-extrabold text-slate-800 exam-sheet-done-text">Đã làm: ${progress.answered}/${progress.total} câu (${progress.percentage}%)</span>
                 <span class="text-[11px] font-semibold ${remainCount > 0 ? 'text-amber-700' : 'text-emerald-700'} ml-1 exam-sheet-remain-text">• ${remainCount > 0 ? `Chưa xong: ${remainCount}` : 'Đã chọn đủ!'}</span>
               </div>
             </div>
-            <div class="flex flex-wrap items-center gap-1.5 shrink-0">
-              <button type="button" id="sheetJumpToPdfBtn" onclick="App.scrollExamWorkspaceTo('pdf')" class="${isStacked && isTopSheet ? 'inline-flex' : 'hidden'} px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold cursor-pointer items-center gap-1" title="Kéo xuống mục xem Đề PDF bên dưới">
-                <i class="fa-solid fa-angles-down"></i><span>Xem Đề PDF dưới</span>
+            <div class="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+              <button type="button" id="sheetJumpToPdfBtn" onclick="App.scrollExamWorkspaceTo('pdf')" class="${isStacked && isTopSheet ? 'inline-flex' : 'hidden'} flex-1 sm:flex-initial justify-center px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold cursor-pointer items-center gap-1 whitespace-nowrap" title="Kéo xuống mục xem Đề PDF bên dưới">
+                <i class="fa-solid fa-angles-down"></i><span>Xem Đề PDF</span>
               </button>
-              <button type="button" id="sheetCollapsePdfQuickBtn" onclick="App.toggleExamPdfCollapse()" class="toggle-exam-pdf-btn px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Thu gọn đề để điền đáp án nhanh">
+              <button type="button" id="sheetCollapsePdfQuickBtn" onclick="App.toggleExamPdfCollapse()" class="toggle-exam-pdf-btn flex-1 sm:flex-initial justify-center px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1 whitespace-nowrap" title="Thu gọn đề để điền đáp án nhanh">
                 <i class="fa-solid ${pdfCollapsed ? 'fa-expand' : 'fa-compress'}"></i><span>${pdfCollapsed ? 'Mở lại đề' : 'Thu gọn đề'}</span>
               </button>
-              <button type="button" id="sheetToggleSelfCollapseBtn" onclick="App.toggleExamSheetCollapse()" class="toggle-exam-sheet-btn px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Thu gọn hoặc mở rộng ô điền đáp án">
+              <button type="button" id="sheetToggleSelfCollapseBtn" onclick="App.toggleExamSheetCollapse()" class="toggle-exam-sheet-btn flex-1 sm:flex-initial justify-center px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1 whitespace-nowrap" title="Thu gọn hoặc mở rộng ô điền đáp án">
                 <i class="fa-solid ${sheetCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}"></i><span>${sheetCollapsed ? 'Mở ô đáp án' : 'Thu gọn đáp án'}</span>
               </button>
-              <button type="button" id="sheetProgressDetailBtn" onclick="App.toggleMobileDrawer()" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold shrink-0 cursor-pointer flex items-center gap-1 shadow-xs" title="Mở bảng chi tiết câu nào đã tích chọn hay chưa">
+              <button type="button" id="sheetProgressDetailBtn" onclick="App.toggleMobileDrawer()" class="flex-1 sm:flex-initial justify-center px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold cursor-pointer inline-flex items-center gap-1 shadow-xs whitespace-nowrap" title="Mở bảng chi tiết câu nào đã tích chọn hay chưa">
                 <i class="fa-solid fa-list-check"></i><span>Quá trình</span>
               </button>
             </div>
           </div>
 
-          <div id="examSheetCollapsedHint" class="${sheetCollapsed ? '' : 'hidden'} px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs flex items-center justify-between gap-2">
+          <div id="examSheetCollapsedHint" class="${sheetCollapsed ? '' : 'hidden'} px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs flex flex-wrap items-center justify-between gap-2">
             <span><i class="fa-solid fa-circle-info mr-1"></i>Ô điền đáp án đang thu gọn để xem Đề PDF rộng tối đa.</span>
             <button type="button" onclick="App.toggleExamSheetCollapse()" class="font-extrabold underline cursor-pointer shrink-0">Mở lại điền đáp án</button>
           </div>
 
-          <div class="flex border border-slate-200 rounded-xl p-1 bg-white text-[11px] sm:text-xs font-bold gap-1 overflow-x-auto no-scrollbar">
-            <button type="button" id="sectionTabBtn_all" onclick="App.setSectionTab('all')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'all' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}" title="Hiển thị liên thông tất cả các phần để điền đáp án nhanh">
+          <div class="grid ${hasP4 ? 'grid-cols-3 sm:flex' : 'grid-cols-4 sm:flex'} border border-slate-200 rounded-xl p-1 bg-white text-[10.5px] sm:text-xs font-bold gap-1">
+            <button type="button" id="sectionTabBtn_all" onclick="App.setSectionTab('all')" class="${this.getSectionTabBtnClass(this.state.activeSectionTab === 'all', hasP4)}" title="Hiển thị liên thông tất cả các phần để điền đáp án nhanh">
               Tất cả (${progress.answered}/${progress.total})
             </button>
-            <button type="button" id="sectionTabBtn_p1" onclick="App.setSectionTab('p1')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'p1' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
+            <button type="button" id="sectionTabBtn_p1" onclick="App.setSectionTab('p1')" class="${this.getSectionTabBtnClass(this.state.activeSectionTab === 'p1')}">
               P.I (${progress.parts.p1.answered}/${ex.part1.length})
             </button>
-            <button type="button" id="sectionTabBtn_p2" onclick="App.setSectionTab('p2')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'p2' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
+            <button type="button" id="sectionTabBtn_p2" onclick="App.setSectionTab('p2')" class="${this.getSectionTabBtnClass(this.state.activeSectionTab === 'p2')}">
               P.II (${progress.parts.p2.answered}/${ex.part2.length})
             </button>
-            <button type="button" id="sectionTabBtn_p3" onclick="App.setSectionTab('p3')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'p3' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
+            <button type="button" id="sectionTabBtn_p3" onclick="App.setSectionTab('p3')" class="${this.getSectionTabBtnClass(this.state.activeSectionTab === 'p3')}">
               P.III (${progress.parts.p3.answered}/${ex.part3.length})
             </button>
-            ${Array.isArray(ex.part4) && ex.part4.length > 0 ? `
-              <button type="button" id="sectionTabBtn_p4" onclick="App.setSectionTab('p4')" class="flex-1 h-9 px-1.5 rounded-lg text-center transition cursor-pointer whitespace-nowrap ${this.state.activeSectionTab === 'p4' ? 'bg-indigo-600 text-white shadow font-bold' : 'text-slate-600 hover:bg-slate-50 font-semibold'}">
+            ${hasP4 ? `
+              <button type="button" id="sectionTabBtn_p4" onclick="App.setSectionTab('p4')" class="${this.getSectionTabBtnClass(this.state.activeSectionTab === 'p4')}">
                 P.IV (${progress.parts.p4.answered}/${ex.part4.length})
               </button>
             ` : ''}
@@ -4790,7 +4819,7 @@ const App = {
       return {
         row: part === 'p4'
           ? 'p-3.5 bg-indigo-50 border border-indigo-200 rounded-2xl space-y-2.5 transition'
-          : (part === 'p2' ? 'p-3 bg-indigo-50 border border-indigo-200 rounded-xl space-y-2 transition' : 'p-2.5 bg-indigo-50 rounded-xl border border-indigo-200 flex items-center justify-between gap-2 transition'),
+          : (part === 'p2' ? 'p-3 bg-indigo-50 border border-indigo-200 rounded-xl space-y-2 transition' : 'p-2.5 bg-indigo-50 rounded-xl border border-indigo-200 flex flex-wrap items-center justify-between gap-2 transition'),
         badge: 'px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] whitespace-nowrap'
       };
     }
@@ -4803,7 +4832,7 @@ const App = {
     return {
       row: part === 'p4'
         ? 'p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5 transition'
-        : (part === 'p2' ? 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 transition' : 'p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-2 transition'),
+        : (part === 'p2' ? 'p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 transition' : 'p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2 transition'),
       badge: 'px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-semibold text-[10px] whitespace-nowrap'
     };
   },
@@ -4840,18 +4869,18 @@ const App = {
               return `
                 <div id="row_p1_${q.id}" class="${vis.row}">
                   <div class="flex items-center gap-1.5 min-w-0">
-                    <button type="button" id="flag_btn_p1_${q.id}" onclick="App.toggleFlag('p1', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
-                      <i class="fa-solid fa-star text-[11px]"></i>
+                    <button type="button" id="flag_btn_p1_${q.id}" aria-pressed="${st.isFlagged ? 'true' : 'false'}" onclick="App.toggleFlag('p1', ${q.id})" class="${this.getFlagButtonClasses(st.isFlagged)}" title="${st.isFlagged ? 'Bỏ đánh dấu Câu ' + q.id : 'Đánh dấu xem lại Câu ' + q.id}">
+                      <i class="${st.isFlagged ? 'fa-solid' : 'fa-regular'} fa-star text-xs"></i>
                     </button>
-                    <div class="flex flex-col">
+                    <div class="flex flex-col min-w-0">
                       <span class="font-bold text-xs text-slate-800 whitespace-nowrap">Câu ${q.id}</span>
                       <span id="row_status_p1_${q.id}" class="${vis.badge} w-fit mt-0.5">${st.label}</span>
                     </div>
                   </div>
-                  <div class="flex gap-1.5 shrink-0">
+                  <div class="flex gap-1 sm:gap-1.5 shrink-0">
                     ${['A', 'B', 'C', 'D'].map(opt => `
                       <button type="button" id="split_btn_p1_${q.id}_${opt}" onclick="App.selectPart1Answer(${q.id}, '${opt}')" 
-                        class="w-10 h-10 sm:w-9 sm:h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer ${curAns === opt ? 'bg-indigo-600 border-indigo-600 text-white shadow' : 'bg-white border-slate-300 text-slate-700 hover:bg-indigo-50'}">
+                        class="w-9 h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer ${curAns === opt ? 'bg-indigo-600 border-indigo-600 text-white shadow' : 'bg-white border-slate-300 text-slate-700 hover:bg-indigo-50'}">
                         ${opt}
                       </button>
                     `).join('')}
@@ -4877,8 +4906,8 @@ const App = {
               <div id="row_p2_${q.id}" class="${vis.row}">
                 <div class="flex items-center justify-between gap-2">
                   <div class="flex items-center gap-1.5">
-                    <button type="button" id="flag_btn_p2_${q.id}" onclick="App.toggleFlag('p2', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
-                      <i class="fa-solid fa-star text-[11px]"></i>
+                    <button type="button" id="flag_btn_p2_${q.id}" aria-pressed="${st.isFlagged ? 'true' : 'false'}" onclick="App.toggleFlag('p2', ${q.id})" class="${this.getFlagButtonClasses(st.isFlagged)}" title="${st.isFlagged ? 'Bỏ đánh dấu Câu ' + q.id : 'Đánh dấu xem lại Câu ' + q.id}">
+                      <i class="${st.isFlagged ? 'fa-solid' : 'fa-regular'} fa-star text-xs"></i>
                     </button>
                     <span class="font-bold text-xs text-slate-800">Câu ${q.id} (4 ý):</span>
                   </div>
@@ -4912,7 +4941,7 @@ const App = {
       const boxIndices = Array.from({ length: p3Boxes }, (_, idx) => idx);
       const keypadHtml = `
         <div class="${wide ? 'bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-2' : 'mt-4 pt-3.5 border-t border-slate-200 space-y-2'}">
-          <div class="text-[11px] text-slate-500 font-semibold text-center">Bàn phím số nhanh (Hỗ trợ cả <strong class="font-mono">.</strong> và <strong class="font-mono">,</strong>):</div>
+          <div class="text-[11px] text-slate-500 font-semibold text-center">Bàn phím số nhanh (Nhập <strong class="font-mono">,</strong> hoặc <strong class="font-mono">.</strong> đều hiển thị <strong class="font-mono">,</strong>):</div>
           <div class="math-keypad max-w-xs mx-auto">
             ${[
               { k: '1', l: '1' },
@@ -4955,24 +4984,27 @@ const App = {
             return `
               <div id="row_p3_${q.id}" class="${vis.row}">
                 <div class="flex items-center gap-1.5 min-w-0">
-                  <button type="button" id="flag_btn_p3_${q.id}" onclick="App.toggleFlag('p3', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
-                    <i class="fa-solid fa-star text-[11px]"></i>
+                  <button type="button" id="flag_btn_p3_${q.id}" aria-pressed="${st.isFlagged ? 'true' : 'false'}" onclick="App.toggleFlag('p3', ${q.id})" class="${this.getFlagButtonClasses(st.isFlagged)}" title="${st.isFlagged ? 'Bỏ đánh dấu Câu ' + q.id : 'Đánh dấu xem lại Câu ' + q.id}">
+                    <i class="${st.isFlagged ? 'fa-solid' : 'fa-regular'} fa-star text-xs"></i>
                   </button>
-                  <div class="flex flex-col">
+                  <div class="flex flex-col min-w-0">
                     <span class="font-bold text-xs text-slate-800 whitespace-nowrap">Câu ${q.id}</span>
                     <span id="row_status_p3_${q.id}" class="${vis.badge} w-fit mt-0.5">${st.label}</span>
                   </div>
                 </div>
-                <div class="flex ${p3Boxes > 4 ? 'gap-1' : 'gap-1.5 sm:gap-2'} shrink-0">
-                  ${boxIndices.map(boxIdx => `
-                    <input type="text" inputmode="decimal" autocomplete="off"
-                      id="split_box_${q.id}_${boxIdx}"
-                      value="${digits[boxIdx] || ''}"
-                      onfocus="App.state.activePart3Target = { qId: ${q.id}, boxIdx: ${boxIdx} }"
-                      onkeydown="App.handleBoxKeyDown(event, ${q.id}, ${boxIdx}, 'split_box_')"
-                      oninput="App.handleBoxInput(event, ${q.id}, ${boxIdx}, 'split_box_')"
-                      class="box-digit ${p3Boxes > 4 ? '!w-8 !h-11 !text-lg sm:!w-9 sm:!h-12' : ''} ${digits[boxIdx] ? 'box-digit-filled' : ''}">
-                  `).join('')}
+                <div class="flex ${p3Boxes > 4 ? 'gap-1' : 'gap-1.5 sm:gap-2'} ml-auto sm:ml-0 shrink-0">
+                  ${boxIndices.map(boxIdx => {
+                    const dispDigit = this.formatShortAnsDisplay(digits[boxIdx] || '');
+                    return `
+                      <input type="text" inputmode="decimal" autocomplete="off"
+                        id="split_box_${q.id}_${boxIdx}"
+                        value="${dispDigit}"
+                        onfocus="App.state.activePart3Target = { qId: ${q.id}, boxIdx: ${boxIdx} }"
+                        onkeydown="App.handleBoxKeyDown(event, ${q.id}, ${boxIdx}, 'split_box_')"
+                        oninput="App.handleBoxInput(event, ${q.id}, ${boxIdx}, 'split_box_')"
+                        class="box-digit ${p3Boxes > 4 ? '!w-8 !h-11 !text-lg sm:!w-9 sm:!h-12' : ''} ${dispDigit ? 'box-digit-filled' : ''}">
+                    `;
+                  }).join('')}
                 </div>
               </div>
             `;
@@ -4986,7 +5018,7 @@ const App = {
             <div class="text-xs font-bold text-slate-500 uppercase tracking-wider">Phần III: Trả lời ngắn (${ex.part3.length} câu)</div>
             <div class="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1 flex items-center gap-1.5">
               <i class="fa-solid fa-circle-info text-amber-600 shrink-0"></i>
-              <span>Điền dấu <strong>.</strong> hoặc <strong>,</strong> đều được chấp nhận (VD: <code class="font-mono font-bold">12.5</code> = <code class="font-mono font-bold">12,5</code>).</span>
+              <span>Nhập dấu <strong>,</strong> hay dấu <strong>.</strong> đều tự hiển thị dấu <strong>,</strong> (VD: <code class="font-mono font-bold">12,5</code>).</span>
             </div>
           </div>
           ${wide ? `
@@ -5017,10 +5049,10 @@ const App = {
               const vis = this.getRowVisualClasses('p4', st);
               return `
                 <div id="row_p4_${q.id}" data-drop-target="p4ImgInput_${q.id}" class="${vis.row}">
-                  <div class="flex items-center justify-between gap-2">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
                     <div class="flex items-center gap-1.5">
-                      <button type="button" id="flag_btn_p4_${q.id}" onclick="App.toggleFlag('p4', ${q.id})" class="w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}" title="Đánh dấu xem lại Câu ${q.id}">
-                        <i class="fa-solid fa-star text-[11px]"></i>
+                      <button type="button" id="flag_btn_p4_${q.id}" aria-pressed="${st.isFlagged ? 'true' : 'false'}" onclick="App.toggleFlag('p4', ${q.id})" class="${this.getFlagButtonClasses(st.isFlagged)}" title="${st.isFlagged ? 'Bỏ đánh dấu Câu ' + q.id : 'Đánh dấu xem lại Câu ' + q.id}">
+                        <i class="${st.isFlagged ? 'fa-solid' : 'fa-regular'} fa-star text-xs"></i>
                       </button>
                       <span class="font-extrabold text-xs text-slate-800">Câu ${q.id} (Tự luận):</span>
                     </div>
@@ -5136,13 +5168,14 @@ const App = {
     const p3Boxes = this.getPart3BoxCount(this.state.activeExam);
     if (!Array.isArray(this.state.answers.part3[qId]) || this.state.answers.part3[qId].length < p3Boxes) {
       const prev = Array.isArray(this.state.answers.part3[qId]) ? this.state.answers.part3[qId] : [];
-      this.state.answers.part3[qId] = Array.from({ length: p3Boxes }, (_, i) => prev[i] || '');
+      this.state.answers.part3[qId] = Array.from({ length: p3Boxes }, (_, i) => this.formatShortAnsDisplay(prev[i] || ''));
     }
 
-    const sanitize = (str) => String(str || '').replace(/[\u2212\u2013\u2014]/g, '-').replace(/[^0-9.,\-/]/g, '');
+    // Mọi dấu "." khi gõ hoặc dán đều tự chuyển sang hiển thị dấu ","
+    const sanitize = (str) => String(str || '').replace(/[\u2212\u2013\u2014]/g, '-').replace(/\./g, ',').replace(/[^0-9,\-/]/g, '');
     const rawTarget = String(event.target.value || '');
     const cleanTarget = sanitize(rawTarget);
-    const prevChar = this.state.answers.part3[qId][boxIdx] || '';
+    const prevChar = this.formatShortAnsDisplay(this.state.answers.part3[qId][boxIdx] || '');
 
     // 1. Xóa ký tự trong ô hiện tại
     if (rawTarget === '') {
@@ -5154,7 +5187,7 @@ const App = {
       return;
     }
 
-    // 2. Dán hoặc nhập chuỗi nhiều ký tự (VD: "12,5" hoặc "-0.5") -> tự rải đều sang các ô kế tiếp
+    // 2. Dán hoặc nhập chuỗi nhiều ký tự (VD: "12,5" hoặc "-0.5") -> tự đổi "." thành "," và rải sang các ô kế tiếp
     const insertedStr = typeof event.data === 'string' ? sanitize(event.data) : '';
     const isMultiPaste = event.inputType === 'insertFromPaste' || insertedStr.length > 1 || (prevChar === '' && cleanTarget.length > 1);
     if (isMultiPaste && cleanTarget.length > 1) {
@@ -5177,7 +5210,7 @@ const App = {
       return;
     }
 
-    // 3. Gõ 1 ký tự (chấp nhận cả "." và ",")
+    // 3. Gõ 1 ký tự (gõ "." hoặc "," đều hiển thị ",")
     let val = '';
     if (typeof event.data === 'string' && event.data.length > 0) {
       const typed = sanitize(event.data).slice(-1);
@@ -5267,8 +5300,9 @@ const App = {
         if (next) next.focus();
       }
     } else {
-      this.state.answers.part3[qId][boxIdx] = key;
-      if (targetInput) { targetInput.value = key; targetInput.classList.add('box-digit-filled'); }
+      const normKey = key === '.' ? ',' : key;
+      this.state.answers.part3[qId][boxIdx] = normKey;
+      if (targetInput) { targetInput.value = normKey; targetInput.classList.add('box-digit-filled'); }
       if (boxIdx < p3Boxes - 1) {
         this.state.activePart3Target.boxIdx = boxIdx + 1;
         const next = typeof document !== 'undefined' ? document.getElementById(`split_box_${qId}_${boxIdx + 1}`) : null;
@@ -5281,20 +5315,25 @@ const App = {
   },
 
   selectPart1Answer(qId, choice) {
-    this.state.answers.part1[qId] = choice;
-    this.updatePart1AnswerUI(qId, choice);
+    const nextChoice = this.state.answers.part1[qId] === choice ? '' : choice;
+    if (nextChoice) {
+      this.state.answers.part1[qId] = nextChoice;
+    } else {
+      delete this.state.answers.part1[qId];
+    }
+    this.updatePart1AnswerUI(qId, nextChoice);
     this.refreshQuestionProgressDom('p1', qId);
     this.updateProgressUi();
   },
 
   updatePart1AnswerUI(qId, choice) {
     ['A', 'B', 'C', 'D'].forEach(opt => {
-      const btn = document.getElementById(`split_btn_p1_${qId}_${opt}`);
+      const btn = typeof document !== 'undefined' ? document.getElementById(`split_btn_p1_${qId}_${opt}`) : null;
       if (btn) {
         if (opt === choice) {
-          btn.className = 'w-10 h-10 sm:w-9 sm:h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer bg-indigo-600 border-indigo-600 text-white shadow';
+          btn.className = 'w-9 h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer bg-indigo-600 border-indigo-600 text-white shadow';
         } else {
-          btn.className = 'w-10 h-10 sm:w-9 sm:h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer bg-white border-slate-300 text-slate-700 hover:bg-indigo-50';
+          btn.className = 'w-9 h-9 rounded-xl font-extrabold text-xs border transition cursor-pointer bg-white border-slate-300 text-slate-700 hover:bg-indigo-50';
         }
       }
     });
@@ -5302,22 +5341,35 @@ const App = {
 
   selectPart2Answer(qId, subId, boolVal) {
     if (!this.state.answers.part2[qId]) this.state.answers.part2[qId] = {};
-    this.state.answers.part2[qId][subId] = boolVal;
-    this.updatePart2AnswerUI(qId, subId, boolVal);
+    const cur = this.state.answers.part2[qId][subId];
+    const nextVal = cur === boolVal ? undefined : boolVal;
+    if (nextVal === undefined) {
+      delete this.state.answers.part2[qId][subId];
+      if (Object.keys(this.state.answers.part2[qId]).length === 0) {
+        delete this.state.answers.part2[qId];
+      }
+    } else {
+      this.state.answers.part2[qId][subId] = nextVal;
+    }
+    this.updatePart2AnswerUI(qId, subId, nextVal);
     this.refreshQuestionProgressDom('p2', qId);
     this.updateProgressUi();
   },
 
   updatePart2AnswerUI(qId, subId, boolVal) {
+    if (typeof document === 'undefined') return;
     const sTrue = document.getElementById(`split_tf_${qId}_${subId}_true`);
     const sFalse = document.getElementById(`split_tf_${qId}_${subId}_false`);
     if (sTrue && sFalse) {
       if (boolVal === true) {
-        sTrue.className = 'tf-btn px-3 text-xs font-bold border cursor-pointer selected-true';
-        sFalse.className = 'tf-btn px-3 text-xs font-bold border cursor-pointer bg-slate-50 text-slate-600 border-slate-200';
+        sTrue.className = 'tf-btn px-2.5 text-xs font-bold border cursor-pointer selected-true';
+        sFalse.className = 'tf-btn px-2.5 text-xs font-bold border cursor-pointer bg-slate-50 text-slate-600 border-slate-200';
       } else if (boolVal === false) {
-        sFalse.className = 'tf-btn px-3 text-xs font-bold border cursor-pointer selected-false';
-        sTrue.className = 'tf-btn px-3 text-xs font-bold border cursor-pointer bg-slate-50 text-slate-600 border-slate-200';
+        sFalse.className = 'tf-btn px-2.5 text-xs font-bold border cursor-pointer selected-false';
+        sTrue.className = 'tf-btn px-2.5 text-xs font-bold border cursor-pointer bg-slate-50 text-slate-600 border-slate-200';
+      } else {
+        sTrue.className = 'tf-btn px-2.5 text-xs font-bold border cursor-pointer bg-slate-50 text-slate-600 border-slate-200';
+        sFalse.className = 'tf-btn px-2.5 text-xs font-bold border cursor-pointer bg-slate-50 text-slate-600 border-slate-200';
       }
     }
   },
@@ -5338,7 +5390,17 @@ const App = {
 
     const flagBtn = document.getElementById(`flag_btn_${part}_${qId}`);
     if (flagBtn) {
-      flagBtn.className = `w-6 h-6 rounded-lg flex items-center justify-center cursor-pointer transition ${st.isFlagged ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500'}`;
+      flagBtn.className = this.getFlagButtonClasses(st.isFlagged);
+      flagBtn.setAttribute('aria-pressed', st.isFlagged ? 'true' : 'false');
+      flagBtn.title = st.isFlagged ? `Bỏ đánh dấu Câu ${qId}` : `Đánh dấu xem lại Câu ${qId}`;
+      flagBtn.innerHTML = `<i class="${st.isFlagged ? 'fa-solid' : 'fa-regular'} fa-star text-xs"></i>`;
+    }
+
+    const qmatEl = document.getElementById(`qmat_${part}_${qId}`);
+    if (qmatEl) {
+      qmatEl.classList.remove('answered', 'unanswered', 'partial', 'flagged');
+      qmatEl.classList.add(st.status);
+      if (st.isFlagged) qmatEl.classList.add('flagged');
     }
   },
 
@@ -5427,7 +5489,7 @@ const App = {
     const formattedP3Answers = {};
     Object.keys(this.state.answers.part3).forEach(k => {
       const arr = this.state.answers.part3[k];
-      formattedP3Answers[k] = Array.isArray(arr) ? arr.join('').trim() : String(arr).trim();
+      formattedP3Answers[k] = this.formatShortAnsDisplay(Array.isArray(arr) ? arr.join('').trim() : String(arr).trim());
     });
 
     const evaluatedAnswers = {
@@ -5744,7 +5806,8 @@ const App = {
           <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 font-mono">
             ${p3Items.map(q => {
               const det = res.part3.details[q.id] || {};
-              const userVal = det.userAnswer || '';
+              const userVal = this.formatShortAnsDisplay(det.userAnswer || '');
+              const corrVal = this.formatShortAnsDisplay(q.correct_answer || '');
               const isMatch = Boolean(det.isCorrect);
               const pts = +(det.scoreEarned || 0).toFixed(2);
               const cardCls = canViewAnswers
@@ -5767,7 +5830,7 @@ const App = {
                   ${canViewAnswers ? `
                     <div class="text-[11px] font-sans text-slate-600 flex items-center justify-between gap-1 border-t border-slate-200/60 pt-1">
                       <span>Đáp án:</span>
-                      <strong class="font-mono text-emerald-700">${q.correct_answer}</strong>
+                      <strong class="font-mono text-emerald-700">${corrVal}</strong>
                     </div>
                   ` : ''}
                 </div>
@@ -5928,9 +5991,9 @@ const App = {
                 <span>• Giám sát rời tab: <strong class="${(sub.tabSwitches || 0) > 0 ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold'}">${sub.tabSwitches || 0} lần</strong></span>
               </div>
             </div>
-            <div class="text-right bg-indigo-50 border border-indigo-100 px-4 py-3 rounded-xl shrink-0">
+            <div class="text-left sm:text-right bg-indigo-50 border border-indigo-100 px-4 py-3 rounded-xl shrink-0 w-full sm:w-auto flex sm:block items-center justify-between gap-2">
               <div class="text-2xl sm:text-3xl font-extrabold text-indigo-700 font-mono">${res.totalScore} <span class="text-sm font-normal text-slate-400">/ ${res.maxTotal || 10}</span></div>
-              <div class="text-xs font-bold text-indigo-600 mt-0.5">Xếp loại: ${res.rank}</div>
+              <div class="text-xs font-bold text-indigo-600 sm:mt-0.5">Xếp loại: ${res.rank}</div>
             </div>
           </div>
 
@@ -5949,7 +6012,7 @@ const App = {
 
           <!-- PHẦN TRÊN: BẢNG ĐỐI CHIẾU ĐÁP ÁN DẠNG NGANG (CÓ THỂ THU GỌN / MỞ RỘNG) -->
           <div id="submissionAnswerCard" class="w-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div class="px-4 sm:px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div class="px-3.5 sm:px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-extrabold text-sm text-slate-900 flex items-center gap-2">
                   <i class="fa-solid fa-table-cells text-indigo-600"></i>
@@ -5961,9 +6024,9 @@ const App = {
                 ${p4List.length > 0 ? `<span class="px-2 py-0.5 rounded-full bg-purple-50 border border-purple-100 text-purple-700 text-[11px] font-bold font-mono">P.IV: ${res.part4.pendingManual ? 'Chờ chấm' : `${res.part4.score}/${res.part4.maxScore}đ`}</span>` : ''}
               </div>
 
-              <div class="flex flex-wrap items-center gap-2">
+              <div class="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
                 ${canViewAnswers ? `
-                  <div class="inline-flex items-center rounded-xl bg-white border border-slate-200 p-0.5">
+                  <div class="grid grid-cols-3 sm:inline-flex items-center rounded-xl bg-white border border-slate-200 p-0.5 w-full sm:w-auto">
                     <button type="button" id="detailFilterBtn_all" onclick="App.setDetailAnswerFilter('all')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${curFilter === 'all' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'}">Tất cả</button>
                     <button type="button" id="detailFilterBtn_wrong" onclick="App.setDetailAnswerFilter('wrong')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${curFilter === 'wrong' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'}">Sai / Trống</button>
                     <button type="button" id="detailFilterBtn_correct" onclick="App.setDetailAnswerFilter('correct')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${curFilter === 'correct' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'}">Câu đúng</button>
@@ -5971,20 +6034,20 @@ const App = {
                 ` : ''}
 
                 ${showPdf ? `
-                  <button type="button" onclick="App.scrollToSolutionPdf()" class="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold transition cursor-pointer flex items-center gap-1.5">
+                  <button type="button" onclick="App.scrollToSolutionPdf()" class="flex-1 sm:flex-initial justify-center px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap">
                     <i class="fa-solid fa-angles-down"></i>
-                    <span>Kéo xuống PDF Lời Giải</span>
+                    <span>PDF Lời Giải</span>
                   </button>
                 ` : ''}
 
-                <button type="button" id="toggleSubmissionAnswerBtn" onclick="App.toggleSubmissionAnswerCollapse()" class="toggle-sub-answer-btn px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs">
+                <button type="button" id="toggleSubmissionAnswerBtn" onclick="App.toggleSubmissionAnswerCollapse()" class="toggle-sub-answer-btn flex-1 sm:flex-initial justify-center px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs whitespace-nowrap">
                   <i class="fa-solid ${isCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}"></i>
-                  <span>${isCollapsed ? 'Mở rộng bảng đáp án' : 'Thu gọn bảng đáp án'}</span>
+                  <span>${isCollapsed ? 'Mở bảng đáp án' : 'Thu gọn đáp án'}</span>
                 </button>
               </div>
             </div>
 
-            <div id="collapsedAnswerHintBar" class="${isCollapsed ? '' : 'hidden'} px-4 sm:px-5 py-2.5 bg-indigo-50 text-indigo-800 text-xs flex items-center justify-between gap-2">
+            <div id="collapsedAnswerHintBar" class="${isCollapsed ? '' : 'hidden'} px-4 sm:px-5 py-2.5 bg-indigo-50 text-indigo-800 text-xs flex flex-wrap items-center justify-between gap-2">
               <span><i class="fa-solid fa-circle-info mr-1.5"></i>Bảng đáp án đang được thu gọn để ưu tiên không gian xem PDF lời giải bên dưới.</span>
               <button type="button" onclick="App.toggleSubmissionAnswerCollapse()" class="font-extrabold underline cursor-pointer shrink-0">Mở lại ngay</button>
             </div>
@@ -5999,21 +6062,21 @@ const App = {
           ${showPdf ? `
             <!-- PHẦN DƯỚI (TOÀN CHIỀU RỘNG): ĐỒNG BỘ 1 THANH CUỘN CHUNG VỚI TRANG XEM PDF LỜI GIẢI CHI TIẾT -->
             <div id="submissionSolutionPdfSection" class="w-full min-h-[520px] bg-slate-900 rounded-2xl border border-slate-700 shadow-xl flex flex-col">
-              <div class="px-4 py-2.5 bg-slate-800 rounded-t-2xl text-white flex flex-wrap items-center justify-between gap-2 text-xs font-bold shrink-0 border-b border-slate-700 sticky top-14 z-20">
-                <span class="flex items-center truncate text-white"><i class="fa-solid fa-file-pdf text-red-400 mr-2 text-sm"></i>File PDF Đáp Án &amp; Lời Giải Chi Tiết</span>
-                <div class="flex items-center space-x-2 shrink-0">
-                  <button type="button" onclick="document.getElementById('submissionAnswerCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' })" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-amber-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
+              <div class="px-3 sm:px-4 py-2.5 bg-slate-800 rounded-t-2xl text-white flex flex-wrap items-center justify-between gap-2 text-xs font-bold shrink-0 border-b border-slate-700 sticky top-14 z-20">
+                <span class="flex items-center min-w-0 truncate text-white"><i class="fa-solid fa-file-pdf text-red-400 mr-2 text-sm shrink-0"></i><span class="truncate">File PDF Đáp Án &amp; Lời Giải Chi Tiết</span></span>
+                <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <button type="button" onclick="document.getElementById('submissionAnswerCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' })" class="px-2 sm:px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-amber-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center whitespace-nowrap">
                     <i class="fa-solid fa-angles-up mr-1"></i>Bảng đáp án
                   </button>
-                  <button type="button" onclick="App.openPdfModal('${(exam.title || '').replace(/'/g, "\\'")} - Lời Giải PDF', '${solPdfUrl}', '${exam.id}_sol')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center">
+                  <button type="button" onclick="App.openPdfModal('${(exam.title || '').replace(/'/g, "\\'")} - Lời Giải PDF', '${solPdfUrl}', '${exam.id}_sol')" class="px-2 sm:px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-emerald-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center whitespace-nowrap">
                     <i class="fa-solid fa-expand mr-1"></i>Toàn màn hình
                   </button>
                   ${!this.isStandaloneApp() ? `
-                    <a href="${solPdfUrl}" target="_blank" class="hidden sm:flex px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-indigo-300 hover:text-white rounded text-[11px] font-semibold transition items-center">
+                    <a href="${solPdfUrl}" target="_blank" class="hidden sm:flex px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-indigo-300 hover:text-white rounded text-[11px] font-semibold transition items-center whitespace-nowrap">
                       <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Tab mới
                     </a>
                   ` : ''}
-                  <a href="${solPdfUrl}" download="${exam.id}_Dap_An.pdf" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white rounded text-[11px] font-semibold transition flex items-center">
+                  <a href="${solPdfUrl}" download="${exam.id}_Dap_An.pdf" class="px-2 sm:px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white rounded text-[11px] font-semibold transition flex items-center whitespace-nowrap">
                     <i class="fa-solid fa-download mr-1"></i>Tải về
                   </a>
                 </div>
@@ -6144,19 +6207,20 @@ const App = {
         <!-- Main Body -->
         <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 py-5 sm:py-8 flex-1 space-y-5 sm:space-y-6">
           <!-- Thanh Điều Hướng Cổng Giáo Viên -->
-          <div class="bg-white rounded-2xl p-2.5 border border-slate-200 shadow-sm">
+          <div class="bg-white rounded-2xl p-2 sm:p-2.5 border border-slate-200 shadow-sm">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <nav class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap pb-0.5 sm:pb-0">
+              <nav class="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-1.5 sm:gap-2 w-full">
                 <button
                   type="button"
                   id="adminTabMainBtn"
                   onclick="App.setAdminMainTab('main')"
-                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.adminMainTab === 'main' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'main' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-chart-pie"></i>
-                  <span>Tổng Quan &amp; Sổ Điểm</span>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-mono ${this.state.adminMainTab === 'main' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
-                    ${examsList.length} đề
+                  <i class="fa-solid fa-chart-pie shrink-0"></i>
+                  <span class="sm:hidden">Sổ Điểm</span>
+                  <span class="hidden sm:inline">Tổng Quan &amp; Sổ Điểm</span>
+                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'main' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                    ${examsList.length}<span class="hidden sm:inline"> đề</span>
                   </span>
                 </button>
 
@@ -6164,11 +6228,12 @@ const App = {
                   type="button"
                   id="adminTabStudentsBtn"
                   onclick="App.setAdminMainTab('students')"
-                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.adminMainTab === 'students' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'students' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-users"></i>
-                  <span>Quản Lý Học Sinh</span>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-mono ${this.state.adminMainTab === 'students' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                  <i class="fa-solid fa-users shrink-0"></i>
+                  <span class="sm:hidden">Học Sinh</span>
+                  <span class="hidden sm:inline">Quản Lý Học Sinh</span>
+                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'students' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
                     ${this.state.students.length}
                   </span>
                 </button>
@@ -6177,11 +6242,12 @@ const App = {
                   type="button"
                   id="adminTabExamsBtn"
                   onclick="App.setAdminMainTab('exams')"
-                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.adminMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-file-lines"></i>
-                  <span>Quản Lý Đề Thi</span>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-mono ${this.state.adminMainTab === 'exams' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                  <i class="fa-solid fa-file-lines shrink-0"></i>
+                  <span class="sm:hidden">Đề Thi</span>
+                  <span class="hidden sm:inline">Quản Lý Đề Thi</span>
+                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'exams' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
                     ${this.state.exams.length}
                   </span>
                 </button>
@@ -6190,11 +6256,12 @@ const App = {
                   type="button"
                   id="adminTabHomeworksBtn"
                   onclick="App.setAdminMainTab('homeworks')"
-                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-book-open"></i>
-                  <span>Tài Liệu &amp; Chuyên Đề</span>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-mono ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                  <i class="fa-solid fa-book-open shrink-0"></i>
+                  <span class="sm:hidden">Tài Liệu</span>
+                  <span class="hidden sm:inline">Tài Liệu &amp; Chuyên Đề</span>
+                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
                     ${this.state.homeworks.length}
                   </span>
                 </button>
@@ -6203,9 +6270,9 @@ const App = {
                   type="button"
                   id="adminTabSettingsBtn"
                   onclick="App.setAdminMainTab('settings')"
-                  class="ui-btn h-10 px-3.5 shrink-0 ${this.state.adminMainTab === 'settings' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="col-span-2 sm:col-span-1 ui-btn h-10 px-3 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'settings' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-sliders"></i>
+                  <i class="fa-solid fa-sliders shrink-0"></i>
                   <span>Cài Đặt &amp; Bảo Mật</span>
                 </button>
               </nav>
@@ -6545,12 +6612,12 @@ const App = {
                   </div>
                 </div>
 
-                <div class="pt-1 flex flex-wrap items-center justify-between gap-2">
-                  <button type="button" onclick="App.requestAdminPasswordReset()" class="px-3.5 py-2 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer">
-                    <i class="fa-solid fa-paper-plane"></i><span>Gửi link đặt lại về ${this.ADMIN_RECOVERY_EMAIL}</span>
+                <div class="pt-1 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2">
+                  <button type="button" onclick="App.requestAdminPasswordReset()" class="w-full sm:w-auto px-3.5 py-2 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition inline-flex items-center justify-center gap-1.5 cursor-pointer text-center">
+                    <i class="fa-solid fa-paper-plane shrink-0"></i><span class="truncate">Gửi link đặt lại về ${this.ADMIN_RECOVERY_EMAIL}</span>
                   </button>
-                  <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition inline-flex items-center gap-1.5 cursor-pointer">
-                    <i class="fa-solid fa-shield-halved"></i><span>Cập Nhật Mật Khẩu</span>
+                  <button type="submit" class="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                    <i class="fa-solid fa-shield-halved shrink-0"></i><span>Cập Nhật Mật Khẩu</span>
                   </button>
                 </div>
               </form>
@@ -6586,10 +6653,10 @@ const App = {
                     Khi bật: Nếu học sinh thi trên điện thoại (App iOS / Safari / Chrome) hoặc máy tính mà vuốt ra màn hình chính, chuyển sang ứng dụng khác (Zalo, Camera, trình duyệt...), mở đa nhiệm hoặc rời tab khi đang làm bài, hệ thống sẽ lập tức <strong>rung cảnh báo, hiện bảng nhắc vi phạm quy chế</strong> và <strong>cộng số lần vi phạm vào sổ điểm gửi Giáo viên</strong>.
                   </p>
                 </div>
-                <div class="flex items-center gap-3 shrink-0">
-                  <input type="checkbox" class="ui-switch switch-rose" ${this.isExamExitWarningEnabled() ? 'checked' : ''} onchange="App.toggleSetting('warnOnExitExam')" aria-label="Bật tắt cảnh báo thoát màn hình">
-                  <button type="button" id="toggleWarnOnExitExamBtn" onclick="App.toggleSetting('warnOnExitExam')" class="ui-btn px-4 shrink-0 ${this.isExamExitWarningEnabled() ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm' : 'bg-slate-800 hover:bg-slate-900 text-white shadow-sm'}">
-                    <i class="fa-solid ${this.isExamExitWarningEnabled() ? 'fa-shield-halved' : 'fa-power-off'}"></i>
+                <div class="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
+                  <input type="checkbox" class="ui-switch switch-rose shrink-0" ${this.isExamExitWarningEnabled() ? 'checked' : ''} onchange="App.toggleSetting('warnOnExitExam')" aria-label="Bật tắt cảnh báo thoát màn hình">
+                  <button type="button" id="toggleWarnOnExitExamBtn" onclick="App.toggleSetting('warnOnExitExam')" class="ui-btn px-3 sm:px-4 flex-1 sm:flex-initial min-w-0 ${this.isExamExitWarningEnabled() ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm' : 'bg-slate-800 hover:bg-slate-900 text-white shadow-sm'}">
+                    <i class="fa-solid ${this.isExamExitWarningEnabled() ? 'fa-shield-halved' : 'fa-power-off'} shrink-0"></i>
                     <span>${this.isExamExitWarningEnabled() ? 'Tắt Cảnh Báo Thoát Màn Hình' : 'Bật Cảnh Báo Thoát Màn Hình'}</span>
                   </button>
                 </div>
@@ -6767,10 +6834,10 @@ const App = {
                 <p class="text-xs text-slate-500 mt-1">Theo dõi điểm số các đề thi, điểm trung bình và phân loại học lực của học sinh</p>
               </div>
 
-              <div class="flex flex-wrap items-center gap-2.5">
-                <div class="flex items-center bg-white rounded-xl pl-3 pr-1.5 py-1 border border-slate-200 text-xs">
-                  <span class="text-slate-500 mr-1.5 font-medium">Khối:</span>
-                  <select id="adminGradeFilterSelect" onchange="App.filterAdminGrade(this.value)" class="bg-transparent font-bold text-indigo-700 outline-none cursor-pointer py-0.5 pl-1">
+              <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                <div class="flex-1 sm:flex-initial flex items-center bg-white rounded-xl pl-3 pr-1.5 py-1 border border-slate-200 text-xs min-w-0">
+                  <span class="text-slate-500 mr-1.5 font-medium shrink-0">Khối:</span>
+                  <select id="adminGradeFilterSelect" onchange="App.filterAdminGrade(this.value)" class="bg-transparent font-bold text-indigo-700 outline-none cursor-pointer py-0.5 pl-1 w-full min-w-0">
                     <option value="ALL" ${(!this.state.adminGradeFilter || this.state.adminGradeFilter === 'ALL') ? 'selected' : ''}>Tất cả khối</option>
                     ${[6, 7, 8, 9, 10, 11, 12].map(g => `
                       <option value="${g}" ${String(this.state.adminGradeFilter) === String(g) ? 'selected' : ''}>Khối ${g}</option>
@@ -6778,9 +6845,9 @@ const App = {
                   </select>
                 </div>
 
-                <div class="flex items-center bg-white rounded-xl pl-3 pr-1.5 py-1 border border-slate-200 text-xs">
-                  <span class="text-slate-500 mr-1.5 font-medium">Lớp:</span>
-                  <select id="adminClassFilterSelect" onchange="App.filterAdminGradebook(this.value)" class="bg-transparent font-bold text-slate-700 outline-none cursor-pointer py-0.5 pl-1">
+                <div class="flex-1 sm:flex-initial flex items-center bg-white rounded-xl pl-3 pr-1.5 py-1 border border-slate-200 text-xs min-w-0">
+                  <span class="text-slate-500 mr-1.5 font-medium shrink-0">Lớp:</span>
+                  <select id="adminClassFilterSelect" onchange="App.filterAdminGradebook(this.value)" class="bg-transparent font-bold text-slate-700 outline-none cursor-pointer py-0.5 pl-1 w-full min-w-0">
                     <option value="ALL" ${this.state.adminClassFilter === 'ALL' ? 'selected' : ''}>Tất cả các lớp</option>
                     ${allClasses.map(c => `
                       <option value="${c}" ${this.state.adminClassFilter === c ? 'selected' : ''}>Lớp ${c}</option>
@@ -6788,21 +6855,21 @@ const App = {
                   </select>
                 </div>
 
-                <button type="button" id="quickTogglePeerCompareBtn" onclick="App.toggleSetting('allowStudentViewClassBoard')" class="px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-xs' : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}" title="Bật/tắt cho phép học sinh so sánh điểm trong Lớp hoặc Khối của mình">
+                <button type="button" id="quickTogglePeerCompareBtn" onclick="App.toggleSetting('allowStudentViewClassBoard')" class="w-full sm:w-auto justify-center px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${this.state.settings.allowStudentViewClassBoard ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-xs' : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'}" title="Bật/tắt cho phép học sinh so sánh điểm trong Lớp hoặc Khối của mình">
                   <i class="fa-solid ${this.state.settings.allowStudentViewClassBoard ? 'fa-ranking-star' : 'fa-lock'}"></i>
                   <span>${this.state.settings.allowStudentViewClassBoard ? 'So sánh HS: Đang Mở' : 'So sánh HS: Đang Khóa'}</span>
                 </button>
 
-                <div class="bg-slate-100 p-1 rounded-xl border border-slate-200 flex text-xs font-semibold">
-                  <button onclick="App.setAdminViewTab('matrix')" class="px-3 py-1.5 rounded-lg transition cursor-pointer ${this.state.adminViewTab === 'matrix' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
-                    <i class="fa-solid fa-table-list mr-1"></i>Sổ Điểm Tổng Hợp
+                <div class="bg-slate-100 p-1 rounded-xl border border-slate-200 grid grid-cols-2 sm:flex text-xs font-semibold w-full sm:w-auto">
+                  <button onclick="App.setAdminViewTab('matrix')" class="px-2.5 sm:px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1 min-w-0 ${this.state.adminViewTab === 'matrix' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
+                    <i class="fa-solid fa-table-list shrink-0"></i><span class="truncate">Sổ Điểm Tổng Hợp</span>
                   </button>
-                  <button onclick="App.setAdminViewTab('log')" class="px-3 py-1.5 rounded-lg transition cursor-pointer ${this.state.adminViewTab === 'log' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
-                    <i class="fa-solid fa-clock-rotate-left mr-1"></i>Nhật Ký Nộp Bài
+                  <button onclick="App.setAdminViewTab('log')" class="px-2.5 sm:px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1 min-w-0 ${this.state.adminViewTab === 'log' ? 'bg-white shadow-xs text-indigo-600 font-bold' : 'text-slate-600 hover:text-slate-900'}">
+                    <i class="fa-solid fa-clock-rotate-left shrink-0"></i><span class="truncate">Nhật Ký Nộp Bài</span>
                   </button>
                 </div>
 
-                <button onclick="App.exportMatrixCSV()" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center cursor-pointer">
+                <button onclick="App.exportMatrixCSV()" class="w-full sm:w-auto justify-center px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center cursor-pointer">
                   <i class="fa-solid fa-file-excel mr-1.5"></i>Xuất Bảng Điểm (.CSV)
                 </button>
               </div>
@@ -7261,37 +7328,37 @@ const App = {
                 </div>
               </div>
 
-              <!-- Các nút thao tác sắp xếp gọn gàng theo lưới 2 hàng cân đối -->
+              <!-- Các nút thao tác sắp xếp gọn gàng theo lưới cân đối không tràn trên điện thoại -->
               <div class="pt-3 border-t border-slate-100 space-y-2">
-                <div class="grid grid-cols-3 gap-2">
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   <button type="button" onclick="App.previewAdminPdf('${ex.id}')" class="ui-btn bg-red-50 hover:bg-red-100 border border-red-200 text-red-700" title="Xem trực tiếp file PDF đề thi">
-                    <i class="fa-solid fa-file-pdf"></i><span>Xem PDF Đề</span>
+                    <i class="fa-solid fa-file-pdf shrink-0"></i><span>Xem PDF Đề</span>
                   </button>
                   <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="ui-btn bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
-                    <i class="fa-solid fa-table-columns"></i><span>Xem trước bố cục</span>
+                    <i class="fa-solid fa-table-columns shrink-0"></i><span class="sm:hidden">Bố cục thi</span><span class="hidden sm:inline">Xem trước bố cục</span>
                   </button>
                   ${ex.solution_pdf_url ? `
-                    <button type="button" onclick="App.previewAdminSolutionPdf('${ex.id}')" class="ui-btn bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700" title="Xem trực tiếp file PDF đáp án và lời giải">
-                      <i class="fa-solid fa-file-shield"></i><span>PDF Đáp Án</span>
+                    <button type="button" onclick="App.previewAdminSolutionPdf('${ex.id}')" class="col-span-2 sm:col-span-1 ui-btn bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700" title="Xem trực tiếp file PDF đáp án và lời giải">
+                      <i class="fa-solid fa-file-shield shrink-0"></i><span>PDF Đáp Án</span>
                     </button>
                   ` : `
-                    <button type="button" onclick="App.showUpdatePdfModal('${ex.id}')" class="ui-btn bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 text-slate-600">
-                      <i class="fa-solid fa-cloud-arrow-up"></i><span>Up PDF ĐA</span>
+                    <button type="button" onclick="App.showUpdatePdfModal('${ex.id}')" class="col-span-2 sm:col-span-1 ui-btn bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 text-slate-600">
+                      <i class="fa-solid fa-cloud-arrow-up shrink-0"></i><span>Up PDF ĐA</span>
                     </button>
                   `}
                 </div>
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button type="button" onclick="App.showExamAccessModal('${ex.id}')" class="ui-btn bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700" title="Chọn ai được phép thi đề này">
-                    <i class="fa-solid fa-user-check"></i><span>Phân quyền</span>
+                    <i class="fa-solid fa-user-check shrink-0"></i><span>Phân quyền</span>
                   </button>
                   <button type="button" onclick="App.toggleExamViewAnswers('${ex.id}')" class="ui-btn ${ex.allow_view_answers !== false ? 'bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700' : 'bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700'}" title="Bật/Tắt cho phép học sinh xem đáp án & lời giải PDF">
-                    <i class="fa-solid ${ex.allow_view_answers !== false ? 'fa-eye' : 'fa-eye-slash'}"></i><span>${ex.allow_view_answers !== false ? 'Mở ĐA' : 'Khóa ĐA'}</span>
+                    <i class="fa-solid ${ex.allow_view_answers !== false ? 'fa-eye' : 'fa-eye-slash'} shrink-0"></i><span>${ex.allow_view_answers !== false ? 'Mở ĐA' : 'Khóa ĐA'}</span>
                   </button>
                   <button type="button" onclick="App.showUpdatePdfModal('${ex.id}')" class="ui-btn bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700" title="Cập nhật file PDF đề thi, lời giải và bảng đáp án chấm điểm">
-                    <i class="fa-solid fa-file-arrow-up"></i><span>PDF &amp; ĐA</span>
+                    <i class="fa-solid fa-file-arrow-up shrink-0"></i><span>PDF &amp; ĐA</span>
                   </button>
                   <button type="button" onclick="App.deleteExam('${ex.id}')" class="ui-btn bg-red-50 hover:bg-red-100 border border-red-100 text-red-600" title="Xóa đề thi này">
-                    <i class="fa-solid fa-trash-can"></i><span>Xóa</span>
+                    <i class="fa-solid fa-trash-can shrink-0"></i><span>Xóa</span>
                   </button>
                 </div>
               </div>
@@ -8631,11 +8698,15 @@ const App = {
     this.refreshAnswerKeyEditor();
   },
 
-  setDraftP3(idx, val) {
+  setDraftP3(idx, val, inputEl = null) {
     const d = this.state.answerKeyDraft;
     if (!d) return;
-    d.p3[idx] = String(val ?? '').trim();
-    const badge = document.getElementById('answerKeyProgressBadge');
+    const normalized = this.formatShortAnsDisplay(val);
+    if (inputEl && inputEl.value !== normalized) {
+      inputEl.value = normalized;
+    }
+    d.p3[idx] = normalized.trim();
+    const badge = typeof document !== 'undefined' ? document.getElementById('answerKeyProgressBadge') : null;
     if (badge) {
       const c = this.countAnswerKeyCompletion(d);
       badge.textContent = `Đã nhập ${c.filled}/${c.total} câu TN${c.p4Count > 0 ? ` • ${c.p4Count} TL` : ''}`;
@@ -9592,12 +9663,12 @@ const App = {
 
           ${d.p3.length > 0 ? `
             <div class="space-y-1.5">
-              <div class="text-[11px] font-bold text-amber-800 uppercase">Phần III — Trả lời ngắn (${d.p3.length} câu • Tổng ${maxSum.p3Max}đ • Chấp nhận cả dấu . và ,)</div>
+              <div class="text-[11px] font-bold text-amber-800 uppercase">Phần III — Trả lời ngắn (${d.p3.length} câu • Tổng ${maxSum.p3Max}đ • Gõ dấu , hoặc . đều hiển thị dấu ,)</div>
               <div class="grid grid-cols-2 sm:grid-cols-3 ${isCustomPts ? 'md:grid-cols-4' : 'md:grid-cols-6'} gap-1.5">
                 ${d.p3.map((val, idx) => `
                   <div class="bg-white px-2 py-1.5 rounded-lg border border-slate-200 flex items-center gap-1.5">
                     <span class="font-mono font-bold text-slate-600 text-[11px] shrink-0">C${idx + 1}</span>
-                    <input type="text" inputmode="decimal" maxlength="12" value="${String(val ?? '').replace(/"/g, '&quot;')}" oninput="App.setDraftP3(${idx}, this.value)" placeholder="1.5 / 1,5" class="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded font-mono font-bold text-center text-xs text-slate-800">
+                    <input type="text" inputmode="decimal" maxlength="12" value="${this.formatShortAnsDisplay(val ?? '').replace(/"/g, '&quot;')}" oninput="App.setDraftP3(${idx}, this.value, this)" placeholder="VD: 1,5" class="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded font-mono font-bold text-center text-xs text-slate-800">
                     ${isCustomPts ? `
                       <input type="text" inputmode="decimal" value="${(d.qPoints.p3 && d.qPoints.p3[idx]) ?? ''}" oninput="App.setDraftQuestionPoints('p3', ${idx}, this.value)" placeholder="0.5" title="Điểm Câu ${idx + 1}" class="w-12 shrink-0 px-1 py-0.5 border border-amber-200 bg-amber-50/40 rounded font-mono text-[10px] font-bold text-center text-amber-800">
                     ` : ''}
@@ -10346,31 +10417,31 @@ const App = {
     modal.innerHTML = `
       <div class="bg-slate-900 rounded-2xl shadow-2xl flex-1 flex flex-col overflow-hidden border border-slate-700 max-w-6xl w-full mx-auto">
         <!-- Header -->
-        <div class="px-5 py-3.5 bg-slate-800 border-b border-slate-700 flex items-center justify-between text-white shrink-0">
-          <div class="flex items-center space-x-3 truncate">
+        <div class="px-3 sm:px-5 py-2.5 sm:py-3.5 bg-slate-800 border-b border-slate-700 flex items-center justify-between gap-2 text-white shrink-0">
+          <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
             <span class="w-8 h-8 rounded-lg bg-red-600 flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
               <i class="fa-solid fa-file-pdf"></i>
             </span>
-            <div class="truncate">
-              <h3 class="text-sm font-bold text-white truncate">${title}</h3>
-              <p class="text-[11px] text-slate-400 truncate">Tệp nguồn: <span class="font-mono text-indigo-300">${pdfUrl || 'IndexedDB'}</span></p>
+            <div class="min-w-0 truncate">
+              <h3 class="text-xs sm:text-sm font-bold text-white truncate">${title}</h3>
+              <p class="text-[11px] text-slate-400 truncate hidden sm:block">Tệp nguồn: <span class="font-mono text-indigo-300">${pdfUrl || 'IndexedDB'}</span></p>
             </div>
           </div>
-          <div class="flex items-center space-x-2 shrink-0">
-            <button type="button" id="pdfModalLayoutBtn" onclick="App.showExamLayoutModal('${String(storageId || '').replace(/_sol$/, '')}')" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1.5 transition cursor-pointer shadow-xs" title="Xem trước & đổi cách hiển thị Đề PDF và Ô điền đáp án">
+          <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <button type="button" id="pdfModalLayoutBtn" onclick="App.showExamLayoutModal('${String(storageId || '').replace(/_sol$/, '')}')" class="px-2.5 sm:px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1.5 transition cursor-pointer shadow-xs whitespace-nowrap" title="Xem trước & đổi cách hiển thị Đề PDF và Ô điền đáp án">
               <i class="fa-solid fa-table-columns"></i>
               <span class="hidden sm:inline">Bố cục Đề &amp; Đáp án</span>
               <span class="sm:hidden">Bố cục</span>
             </button>
             ${!this.isStandaloneApp() ? `
-              <a href="${finalUrl}" target="_blank" class="hidden sm:flex px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-indigo-300 hover:text-white items-center transition cursor-pointer" title="Mở trong tab mới">
+              <a href="${finalUrl}" target="_blank" class="hidden sm:flex px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-indigo-300 hover:text-white items-center transition cursor-pointer whitespace-nowrap" title="Mở trong tab mới">
                 <i class="fa-solid fa-arrow-up-right-from-square mr-1.5"></i>Tab Mới
               </a>
             ` : ''}
-            <a href="${finalUrl}" download="Tai_Lieu_${Date.now()}.pdf" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-white flex items-center transition cursor-pointer" title="Tải về máy">
-              <i class="fa-solid fa-download mr-1.5"></i>Tải Về
+            <a href="${finalUrl}" download="Tai_Lieu_${Date.now()}.pdf" class="px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-white flex items-center transition cursor-pointer whitespace-nowrap" title="Tải về máy">
+              <i class="fa-solid fa-download sm:mr-1.5"></i><span class="hidden sm:inline">Tải Về</span>
             </a>
-            <button onclick="document.getElementById('previewPdfModal').remove()" class="w-8 h-8 rounded-lg bg-slate-700 hover:bg-red-600 text-white flex items-center justify-center transition cursor-pointer">
+            <button onclick="document.getElementById('previewPdfModal').remove()" class="w-8 h-8 rounded-lg bg-slate-700 hover:bg-red-600 text-white flex items-center justify-center transition cursor-pointer shrink-0">
               <i class="fa-solid fa-xmark"></i>
             </button>
           </div>

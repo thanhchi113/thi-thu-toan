@@ -1,4 +1,4 @@
-const CACHE_NAME = 'khao-thi-toan-shell-v11';
+const CACHE_NAME = 'khao-thi-toan-shell-v12';
 const SHELL_ASSETS = [
   './',
   './index.html',

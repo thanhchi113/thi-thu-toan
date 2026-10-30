@@ -696,8 +696,131 @@ const PDFStorage = require('../js/pdf_storage.js');
   App.state.currentUser = null;
   App.state.deletedIds = [];
 
-  console.log('[OK] TẤT CẢ 18 BỘ TEST (CHẤM ĐIỂM, DẤU ./, TIẾN ĐỘ, BỐ CỤC, THANH CUỘN & TỰ ĐỘNG HÓA LƯU SERVER SUPABASE 0 THAO TÁC) ĐÃ ĐẠT 100%!');
+  console.log('[OK] Test 18 Passed: Zero-touch Supabase auto-upload & mobile sync verified.');
+
+  // =========================================================================
+  // TEST 19: Chuẩn hóa hiển thị dấu "," cho Trả lời ngắn + Tắt đánh dấu sao & Bỏ chọn câu trắc nghiệm
+  // =========================================================================
+  const testExam19 = {
+    id: 'EXAM-19',
+    part1: [{ id: 1, correct_answer: 'B' }, { id: 2, correct_answer: 'C' }],
+    part2: [{ id: 1, statements: [{ sub_id: 'a', correct: true }, { sub_id: 'b', correct: false }, { sub_id: 'c', correct: true }, { sub_id: 'd', correct: false }] }],
+    part3: [{ id: 1, correct_answer: '1,5' }, { id: 2, correct_answer: '12,5' }, { id: 3, correct_answer: '0,5' }]
+  };
+  App.state.activeExam = testExam19;
+  App.state.answers = { part1: {}, part2: {}, part3: {}, part4: {}, flagged: {} };
+
+  // 19.1 Gõ dấu "." hoặc "," trong handleBoxInput đều hiển thị ","
+  const makeMockBox = () => ({
+    value: '',
+    classList: {
+      _set: new Set(),
+      add(c) { this._set.add(c); },
+      remove(c) { this._set.delete(c); },
+      contains(c) { return this._set.has(c); }
+    }
+  });
+  const box0 = makeMockBox();
+  box0.value = '1';
+  App.handleBoxInput({ data: '1', target: box0 }, 1, 0);
+  assert.strictEqual(box0.value, '1');
+
+  const box1 = makeMockBox();
+  box1.value = '.';
+  App.handleBoxInput({ data: '.', target: box1 }, 1, 1);
+  assert.strictEqual(box1.value, ',', 'Typing "." via keyboard must immediately display "," in input box');
+  assert.strictEqual(App.state.answers.part3[1][1], ',', 'Typing "." must store "," in state.answers.part3');
+
+  // Bàn phím số điện thoại (IME không gửi event.data, chỉ đổi target.value)
+  const box1Mobile = makeMockBox();
+  box1Mobile.value = '.';
+  App.handleBoxInput({ data: null, target: box1Mobile }, 1, 1);
+  assert.strictEqual(box1Mobile.value, ',', 'Mobile decimal pad "." without event.data must still display ","');
+
+  // Gõ dấu "," giữ nguyên ","
+  const boxComma = makeMockBox();
+  boxComma.value = ',';
+  App.handleBoxInput({ data: ',', target: boxComma }, 1, 1);
+  assert.strictEqual(boxComma.value, ',', 'Typing "," must display ","');
+
+  // Dán chuỗi "12.5" -> tự rải thành ['1', '2', ',', '5']
+  App.state.answers.part3[2] = ['', '', '', ''];
+  const pasteBox = makeMockBox();
+  pasteBox.value = '12.5';
+  App.handleBoxInput({ inputType: 'insertFromPaste', data: '12.5', target: pasteBox }, 2, 0);
+  assert.strictEqual(App.state.answers.part3[2].join(''), '12,5', 'Pasting "12.5" must convert "." to "," across boxes');
+  assert.strictEqual(App.getQuestionProgressState('p3', 2).label, 'Đã điền: 12,5', 'Progress badge must display comma "12,5"');
+
+  // Bàn phím ảo trên màn hình bấm "." -> hiển thị ","
+  App.state.answers.part3[3] = ['', '', '', ''];
+  App.state.activePart3Target = { qId: 3, boxIdx: 0 };
+  App.handleKeypadPress('0');
+  App.handleKeypadPress('.');
+  App.handleKeypadPress('5');
+  assert.strictEqual(App.state.answers.part3[3].join(''), '0,5', 'Virtual math keypad "." must insert ","');
+
+  // Giáo viên nhập đáp án Phần III bằng "." -> tự đổi hiển thị sang ","
+  App.initAnswerKeyDraft({ p1Count: 1, p2Count: 0, p3Count: 2, p4Count: 0 });
+  const teacherInput = { value: '3.75' };
+  App.setDraftP3(0, '3.75', teacherInput);
+  assert.strictEqual(teacherInput.value, '3,75', 'Teacher P3 input must immediately convert "." to ","');
+  assert.strictEqual(App.state.answerKeyDraft.p3[0], '3,75', 'Teacher P3 draft must store "3,75"');
+
+  // Chấm điểm vẫn công nhận tuyệt đối cả "," và "."
+  const commaExam = {
+    id: 'TEST-COMMA',
+    part1: [],
+    part2: [],
+    part3: [{ id: 1, correct_answer: '12.5' }, { id: 2, correct_answer: '-0,75' }]
+  };
+  const commaGrade = GradingSystem.grade({ part1: {}, part2: {}, part3: { 1: '12,5', 2: '-0,75' } }, commaExam);
+  assert.strictEqual(commaGrade.part3.correctCount, 2, 'Comma-formatted answers must match both "." and "," answer keys');
+  const detailSheetHtml = App.renderSubmissionAnswerSheetBody(
+    commaExam,
+    { id: 'S1', answers: { part1: {}, part2: {}, part3: { 1: '12.5', 2: '-0.75' } } },
+    GradingSystem.grade({ part1: {}, part2: {}, part3: { 1: '12.5', 2: '-0.75' } }, commaExam),
+    true,
+    true
+  );
+  assert(detailSheetHtml.includes('12,5') && detailSheetHtml.includes('-0,75') && !detailSheetHtml.includes('12.5'), 'Submission detail must display "," for both student answer and answer key');
+
+  // 19.2 Bật & Tắt đánh dấu ngôi sao (toggleFlag)
+  App.state.activeExam = testExam19;
+  App.state.answers = { part1: {}, part2: {}, part3: {}, part4: {}, flagged: {} };
+  App.toggleFlag('p1', 1);
+  assert.strictEqual(App.getQuestionProgressState('p1', 1).isFlagged, true, 'First tap must flag question');
+  assert.strictEqual(App.calculateProgress().flagged, 1, 'Flagged count must be 1');
+  assert(App.renderAnswerSheetPartBlock(testExam19, 'p1').includes('fa-solid fa-star'), 'Flagged star must use fa-solid');
+
+  App.toggleFlag('p1', 1);
+  assert.strictEqual(App.getQuestionProgressState('p1', 1).isFlagged, false, 'Second tap must unflag question');
+  assert.strictEqual(App.calculateProgress().flagged, 0, 'Flagged count must return to 0');
+  assert.strictEqual('p1_1' in App.state.answers.flagged, false, 'Unflagged key must be deleted cleanly');
+  assert(!App.renderAnswerSheetPartBlock(testExam19, 'p1').includes('is-flagged'), 'Unflagged render must have zero is-flagged stars');
+
+  // 19.3 Bấm lại đáp án đang chọn ở Phần I & Phần II -> Tự tắt chọn (Bỏ đánh dấu phương án)
+  App.selectPart1Answer(1, 'B');
+  assert.strictEqual(App.getQuestionProgressState('p1', 1).status, 'answered');
+  assert.strictEqual(App.getQuestionProgressState('p1', 1).label, 'Đã chọn B');
+  App.selectPart1Answer(1, 'B');
+  assert.strictEqual(App.state.answers.part1[1], undefined, 'Tapping selected Part I choice again must unselect it');
+  assert.strictEqual(App.getQuestionProgressState('p1', 1).status, 'unanswered');
+  assert.strictEqual(App.getQuestionProgressState('p1', 1).label, 'Chưa chọn');
+
+  App.selectPart2Answer(1, 'a', true);
+  assert.strictEqual(App.getQuestionProgressState('p2', 1).status, 'partial');
+  App.selectPart2Answer(1, 'a', true);
+  assert.strictEqual(App.state.answers.part2[1], undefined, 'Tapping selected Part II Đúng/Sai again must unselect it');
+  assert.strictEqual(App.getQuestionProgressState('p2', 1).status, 'unanswered');
+
+  App.state.layoutPreviewSampleAns = null;
+  App.pickPreviewSampleAns(1, 'B');
+  assert.strictEqual(App.state.layoutPreviewSampleAns[1], undefined, 'Preview sample answer must also toggle off when tapped again');
+
+  App.state.activeExam = null;
+
+  console.log('[OK] TẤT CẢ 19 BỘ TEST (TỐI ƯU ĐIỆN THOẠI, DẤU PHẨY TRẢ LỜI NGẮN, TẮT ĐÁNH DẤU TRẮC NGHIỆM & TỰ ĐỘNG HÓA SUPABASE) ĐÃ ĐẠT 100%!');
 })().catch((err) => {
-  console.error('[FAIL] Test 18 failed:', err);
+  console.error('[FAIL] Test suite failed:', err);
   process.exit(1);
 });

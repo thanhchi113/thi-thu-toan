@@ -31,6 +31,8 @@ html {
 
 html, body {
   min-height: 100%;
+  max-width: 100%;
+  overflow-x: clip;
   margin: 0;
   padding: 0;
 }
@@ -73,6 +75,8 @@ body.in-exam {
 /* Hệ thống Nút bấm Đồng bộ (Mobile-First Touch Targets >= 38px) */
 .ui-btn {
   min-height: 38px;
+  max-width: 100%;
+  min-width: 0;
   padding: 0.45rem 0.85rem;
   border-radius: 0.75rem;
   font-size: 0.75rem;
@@ -88,6 +92,18 @@ body.in-exam {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.1s ease, box-shadow 0.14s ease;
+}
+.ui-btn > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 639px) {
+  .ui-btn {
+    padding: 0.4rem 0.65rem;
+    font-size: 0.72rem;
+    gap: 0.3rem;
+  }
 }
 .ui-btn:active,
 .ui-btn-icon:active,
@@ -1056,6 +1072,29 @@ body[data-theme="dark"] .q-matrix-btn.partial {
   background-color: rgba(245, 158, 11, 0.22) !important;
   color: #fcd34d !important;
   border-color: rgba(251, 191, 36, 0.5) !important;
+}
+
+/* Nút ngôi sao đánh dấu câu hỏi: chỉ hover trên thiết bị có chuột để tránh kẹt màu vàng trên cảm ứng */
+.flag-star-btn {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .flag-star-btn:not(.is-flagged):hover {
+    color: #f59e0b;
+    border-color: #fde68a;
+    background-color: #fffbeb;
+  }
+}
+body[data-theme="dark"] .flag-star-btn:not(.is-flagged) {
+  background-color: #0f172a !important;
+  border-color: #334155 !important;
+  color: #94a3b8 !important;
+}
+body[data-theme="dark"] .flag-star-btn.is-flagged {
+  background-color: rgba(245, 158, 11, 0.2) !important;
+  border-color: rgba(251, 191, 36, 0.55) !important;
+  color: #fbbf24 !important;
 }
 
 /* Print Stylesheet */
