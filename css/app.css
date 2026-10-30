@@ -1107,7 +1107,7 @@ body.exam-screenshot-shield #app {
 .exam-watermark-layer {
   position: fixed;
   inset: 0;
-  z-index: 25;
+  z-index: 5;
   pointer-events: none;
   user-select: none;
   overflow: hidden;
@@ -1129,6 +1129,57 @@ body.exam-screenshot-shield #app {
 }
 body[data-theme="dark"] .exam-watermark-item {
   color: #f8fafc;
+}
+
+/* Chống đè nút trên điện thoại: vùng tai thỏ, hộp thoại cuộn an toàn (không bao giờ âm tọa độ top) & nút cuộn đầu trang */
+header.sticky.top-0 {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+[id$="Modal"].fixed.inset-0:not(#previewPdfModal),
+#appSystemDialog.fixed.inset-0 {
+  overflow-y: auto !important;
+  align-items: flex-start !important;
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0px)) !important;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px)) !important;
+  padding-left: max(0.75rem, env(safe-area-inset-left, 0px)) !important;
+  padding-right: max(0.75rem, env(safe-area-inset-right, 0px)) !important;
+}
+
+[id$="Modal"].fixed.inset-0:not(#previewPdfModal) > div,
+#appSystemDialog.fixed.inset-0 > div {
+  margin-top: auto !important;
+  margin-bottom: auto !important;
+}
+
+[id$="Modal"].fixed.inset-0:not(#previewPdfModal) > div[class*="max-h-"] {
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 1.5rem) !important;
+}
+
+#previewPdfModal.fixed.inset-0 {
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px)) !important;
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px)) !important;
+  padding-left: max(0.5rem, env(safe-area-inset-left, 0px)) !important;
+  padding-right: max(0.5rem, env(safe-area-inset-right, 0px)) !important;
+}
+
+.scroll-top-fab {
+  position: fixed;
+  right: max(0.85rem, env(safe-area-inset-right, 0px));
+  bottom: max(0.85rem, env(safe-area-inset-bottom, 0px));
+  z-index: 30;
+  width: 2.65rem;
+  height: 2.65rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px) scale(0.92);
+  transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.15s ease;
+}
+
+.scroll-top-fab.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
 }
 
 /* Print Stylesheet */

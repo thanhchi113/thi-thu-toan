@@ -1018,7 +1018,116 @@ const PDFStorage = require('../js/pdf_storage.js');
   App._enableNodeCloudTest = false;
   global.fetch = prevFetch;
 
-  console.log('[OK] TẤT CẢ 21 BỘ TEST (ICON ĐỒNG BỘ, SỬA PHẦN THƯỞNG, TÌM NHANH HS, BẢO VỆ ĐỀ SERVER & CHỐNG CHỤP MÀN HÌNH) ĐÃ ĐẠT 100%!');
+  // Test 22: Chống tự động quay về trang đầu (sync digest + canSafelyAutoReRender + lưu kép phiên đăng nhập) & Nút Back trên điện thoại (openModalElement + handleBrowserBackPop)
+  // 22.1 mergeCloudState không báo changed=true khi dữ liệu Server giống hệt dữ liệu hiện tại
+  App.state.localStateUpdatedAt = 5000;
+  App.state.exams = [{ id: 'EX-STABLE-1', title: 'Đề ổn định', grade: 12, category: 'GK1', is_active: true, part1: [], part2: [], part3: [], part4: [] }];
+  App.state.homeworks = [];
+  App.state.submissions = [];
+  App.state.deletedIds = [];
+  const sameSnapRes = App.mergeCloudState({
+    updatedAt: 5000,
+    deletedIds: [],
+    exams: [{ id: 'EX-STABLE-1', title: 'Đề ổn định', grade: 12, category: 'GK1', is_active: true, part1: [], part2: [], part3: [], part4: [] }],
+    homeworks: [],
+    students: App.state.students.map(s => ({ ...s })),
+    settings: { ...App.state.settings },
+    submissions: []
+  });
+  assert.strictEqual(sameSnapRes.changed, false, 'Identical cloud snapshot must report changed=false so 25s poll does not reset view');
+
+  // 22.2 Lưu kép phiên đăng nhập: mất sessionStorage trên điện thoại vẫn khôi phục từ localStorage
+  const storeMap = { session: {}, local: {} };
+  const prevSessionStorage = global.sessionStorage;
+  const prevLocalStorage = global.localStorage;
+  global.sessionStorage = {
+    getItem: (k) => (k in storeMap.session ? storeMap.session[k] : null),
+    setItem: (k, v) => { storeMap.session[k] = String(v); },
+    removeItem: (k) => { delete storeMap.session[k]; }
+  };
+  global.localStorage = {
+    getItem: (k) => (k in storeMap.local ? storeMap.local[k] : null),
+    setItem: (k, v) => { storeMap.local[k] = String(v); },
+    removeItem: (k) => { delete storeMap.local[k]; }
+  };
+  App.saveSessionUser({ role: 'student', studentId: 'HS001', fullName: 'Quốc Việt', grade: 12 });
+  delete storeMap.session.thpt_current_user; // Giả lập trình duyệt điện thoại giải phóng RAM tab ngầm
+  App.state.currentUser = null;
+  App.checkSession();
+  assert.ok(App.state.currentUser && App.state.currentUser.studentId === 'HS001', 'checkSession must recover student session from localStorage when sessionStorage is cleared');
+  App.clearSessionUser();
+  assert.strictEqual(storeMap.local.thpt_current_user, undefined, 'clearSessionUser must remove localStorage session');
+  global.sessionStorage = prevSessionStorage;
+  global.localStorage = prevLocalStorage;
+
+  // 22.3 openModalElement & handleBrowserBackPop đóng đúng thứ tự lớp phủ và không đẩy trùng history khi mở lại modal
+  const prevWindow = global.window;
+  const prevDocument = global.document;
+  let pushedCount = 0;
+  let cleanedCreateExam = 0;
+  const domNodes = [];
+  const makeNode = (id, tag = 'DIV') => ({
+    id,
+    tagName: tag,
+    classList: {
+      _set: new Set(),
+      contains(c) { return this._set.has(c); },
+      add(c) { this._set.add(c); },
+      remove(c) { this._set.delete(c); },
+      toggle(c) { if (this._set.has(c)) this._set.delete(c); else this._set.add(c); }
+    },
+    remove() {
+      const idx = domNodes.indexOf(this);
+      if (idx >= 0) domNodes.splice(idx, 1);
+    }
+  });
+  global.window = {
+    history: { pushState: () => { pushedCount += 1; } }
+  };
+  global.document = {
+    activeElement: { tagName: 'BODY' },
+    body: { appendChild(n) { domNodes.push(n); }, classList: { remove() {} }, style: {} },
+    documentElement: { style: {} },
+    getElementById(id) { return domNodes.find(n => n.id === id) || null; },
+    querySelector(sel) {
+      if (sel.includes('[id$="Modal"]')) {
+        return domNodes.find(n => (n.id && n.id.endsWith('Modal')) || n.id === 'appSystemDialog' || n.id === 'appCustomSelectMenu') || null;
+      }
+      return null;
+    },
+    querySelectorAll(sel) {
+      if (sel === '[id$="Modal"]') return domNodes.filter(n => n.id && n.id.endsWith('Modal'));
+      return [];
+    }
+  };
+
+  App.state.activeExam = null;
+  App.state.activeSubmissionDetailId = 'SUB-DETAIL-1';
+  assert.strictEqual(App.canSafelyAutoReRender(), false, 'canSafelyAutoReRender must be false while viewing submission detail');
+  App.state.activeSubmissionDetailId = null;
+  assert.strictEqual(App.canSafelyAutoReRender(), true, 'canSafelyAutoReRender must be true on idle dashboard');
+
+  const m1 = makeNode('createExamModal');
+  App.openModalElement(m1, false);
+  assert.strictEqual(pushedCount, 1, 'First modal open must push 1 history entry');
+  assert.strictEqual(App.canSafelyAutoReRender(), false, 'canSafelyAutoReRender must be false when modal is open');
+
+  const m1Reopen = makeNode('createExamModal');
+  App.openModalElement(m1Reopen, true);
+  assert.strictEqual(pushedCount, 1, 'Re-rendering an already open modal must NOT push duplicate history');
+  assert.strictEqual(domNodes.filter(n => n.id === 'createExamModal').length, 1, 'Old modal node must be replaced');
+
+  const origCleanup = App.cleanupUnusedPreuploads;
+  App.cleanupUnusedPreuploads = () => { cleanedCreateExam += 1; };
+  assert.strictEqual(App.handleBrowserBackPop(), true, 'Back button must close topmost modal');
+  assert.strictEqual(cleanedCreateExam, 1, 'Closing createExamModal via Back must clean up pre-uploads');
+  assert.strictEqual(domNodes.length, 0, 'Modal must be removed from DOM after Back');
+  App.cleanupUnusedPreuploads = origCleanup;
+
+  global.window = prevWindow;
+  global.document = prevDocument;
+
+  console.log('[OK] TẤT CẢ 22 BỘ TEST (CHỐNG RESET TRANG, LƯU PHIÊN MOBILE, NÚT BACK LỚP PHỦ, SỬA PHẦN THƯỞNG & CHỐNG CHỤP MÀN HÌNH) ĐÃ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

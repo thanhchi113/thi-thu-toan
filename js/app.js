@@ -101,6 +101,7 @@ const App = {
     collapseAnswerSheetInDetail: false, // Thu gọn / Mở rộng bảng đáp án ngang khi xem PDF lời giải
     detailAnswerFilter: 'all', // 'all' | 'wrong' | 'correct'
     currentDetailSubId: null,
+    activeSubmissionDetailId: null,
     activePart3Target: { qId: 1, boxIdx: 0 },
     theme: 'light',           // 'light' | 'sepia' | 'dark'
     accentHex: '#4f46e5',     // Mã màu chủ đạo (#RRGGBB)
@@ -480,9 +481,80 @@ const App = {
     }
   },
 
+  pushOverlayHistory() {
+    if (typeof window === 'undefined' || !window.history || typeof window.history.pushState !== 'function') return;
+    if (this._handlingPopState) return;
+    try {
+      window.history.pushState({ khaoThiSub: Date.now() }, '');
+    } catch (_) {}
+  },
+
+  openModalElement(modal, wasAlreadyOpen = false) {
+    if (typeof document === 'undefined' || !modal) return;
+    const prev = modal.id ? document.getElementById(modal.id) : null;
+    if (prev) prev.remove();
+    if (!prev && !wasAlreadyOpen) this.pushOverlayHistory();
+    document.body.appendChild(modal);
+  },
+
+  handleBrowserBackPop() {
+    if (typeof document === 'undefined') return false;
+    this._handlingPopState = true;
+    try {
+      this.closeCustomSelectPopover?.();
+      const sysDialog = document.getElementById('appSystemDialog');
+      if (sysDialog) {
+        const cancelBtn = document.getElementById('appDialogCancelBtn') || document.getElementById('appDialogConfirmBtn');
+        if (cancelBtn) cancelBtn.click();
+        else sysDialog.remove();
+        return true;
+      }
+      const openModals = Array.from(document.querySelectorAll('[id$="Modal"]'));
+      if (openModals.length > 0) {
+        const topModal = openModals[openModals.length - 1];
+        if (topModal.id === 'createExamModal') this.cleanupUnusedPreuploads();
+        if (topModal.id === 'addHomeworkModal') this.cleanupUnusedHwPreupload();
+        if (topModal.id === 'antiCheatModal') this.clearScreenshotShield();
+        topModal.remove();
+        return true;
+      }
+      const drawer = document.getElementById('mobileDrawer');
+      if (drawer && !drawer.classList.contains('hidden')) {
+        this.toggleMobileDrawer();
+        return true;
+      }
+      if (this.state.activeSubmissionDetailId) {
+        this.goHome();
+        return true;
+      }
+      if (this.state.activeExam) {
+        this._handlingPopState = false;
+        this.pushOverlayHistory();
+        this.confirmExitExam();
+        return true;
+      }
+      return false;
+    } finally {
+      this._handlingPopState = false;
+    }
+  },
+
+  syncScrollTopButtons() {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+    const show = (window.scrollY || document.documentElement?.scrollTop || 0) > 260;
+    document.querySelectorAll('.scroll-top-fab').forEach(btn => {
+      btn.classList.toggle('is-visible', show);
+    });
+  },
+
   initGlobalEvents() {
     if (this._globalEventsBound) return;
     this._globalEventsBound = true;
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('popstate', () => App.handleBrowserBackPop());
+      window.addEventListener('scroll', () => App.syncScrollTopButtons(), { passive: true });
+    }
 
     // Giám sát thoát màn hình trên điện thoại (App iOS / Android) & tự động tải đề mới khi mở lại App ngoài phòng thi
     document.addEventListener('visibilitychange', () => {
@@ -944,7 +1016,7 @@ const App = {
         </button>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal, Boolean(existing));
   },
 
   updateExamHeaderViolationBadge() {
@@ -1227,9 +1299,12 @@ const App = {
       localStorage.removeItem('thpt_local_updated_at');
       localStorage.removeItem('thpt_unsynced_admin_changes');
       try {
-        const cur = JSON.parse(sessionStorage.getItem('thpt_current_user') || 'null');
+        const rawCur = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('thpt_current_user'))
+          || (typeof localStorage !== 'undefined' && localStorage.getItem('thpt_current_user'))
+          || 'null';
+        const cur = JSON.parse(rawCur);
         if (cur && cur.role === 'student' && !(INITIAL_SEED_DATA.students || []).some(s => s.studentId === cur.studentId)) {
-          sessionStorage.removeItem('thpt_current_user');
+          this.clearSessionUser();
         }
       } catch (e) {}
       if (typeof PDFStorage !== 'undefined' && typeof PDFStorage.clearAllPdfs === 'function') {
@@ -1510,6 +1585,34 @@ const App = {
     }
   },
 
+  getCloudSyncDigest() {
+    const canon = (v) => {
+      if (Array.isArray(v)) return v.map(canon);
+      if (v && typeof v === 'object') {
+        const out = {};
+        Object.keys(v).sort().forEach(k => { if (v[k] !== undefined) out[k] = canon(v[k]); });
+        return out;
+      }
+      return v;
+    };
+    return JSON.stringify(canon({
+      deletedIds: this.state.deletedIds || [],
+      exams: (this.state.exams || []).map(e => this.normalizeExamRecord({ ...e })),
+      homeworks: (this.state.homeworks || []).map(h => this.normalizeHomeworkRecord({ ...h })),
+      students: (this.state.students || []).map(s => this.normalizeStudentRecord({ ...s })),
+      settings: this.state.settings || {},
+      submissions: (this.state.submissions || []).map(s => [
+        s?.id,
+        s?.updatedAt,
+        s?.submittedAt,
+        s?.totalScore ?? s?.scoreResult?.totalScore,
+        s?.tabSwitches,
+        s?.screenshotCount,
+        s?.answers?.part4Scores || null
+      ])
+    }));
+  },
+
   mergeCloudState(cloud) {
     if (!cloud || typeof cloud !== 'object') return { changed: false };
 
@@ -1521,6 +1624,8 @@ const App = {
       || (Array.isArray(cloud.submissions) && cloud.submissions.length > 0)
       || Boolean(cloud.hasStudentUpdates);
     if (!hasCloudPayload) return { changed: false };
+
+    const beforeDigest = this.getCloudSyncDigest();
 
     const mergedDeleted = [...new Set([
       ...(Array.isArray(this.state.deletedIds) ? this.state.deletedIds : []),
@@ -1606,9 +1711,7 @@ const App = {
         const freshMe = this.state.students.find(s => s.studentId === this.state.currentUser.studentId);
         if (freshMe) {
           this.state.currentUser = { ...freshMe, role: 'student' };
-          if (typeof sessionStorage !== 'undefined') {
-            try { sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser)); } catch (_) {}
-          }
+          this.saveSessionUser(this.state.currentUser);
         }
       }
     }
@@ -1647,16 +1750,51 @@ const App = {
       }
     }
 
-    this.saveData({ markAdminDirty: false, skipAutoPush: true });
-    return { changed: true };
+    const changed = beforeDigest !== this.getCloudSyncDigest();
+    if (changed || cloudUpdated > localUpdated) {
+      this.saveData({ markAdminDirty: false, skipAutoPush: true });
+    }
+    return { changed };
   },
 
   canSafelyAutoReRender() {
-    if (typeof document === 'undefined' || this.state.activeExam) return false;
-    if (document.querySelector('[id$="Modal"], #appSystemDialog')) return false;
+    if (typeof document === 'undefined' || this.state.activeExam || this.state.activeSubmissionDetailId) return false;
+    if (document.querySelector('[id$="Modal"], #appSystemDialog, #appCustomSelectMenu')) return false;
     const active = document.activeElement;
-    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return false;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return false;
     return true;
+  },
+
+  renderPreservingScroll() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      this.render();
+      return;
+    }
+    const prevY = window.scrollY || document.documentElement?.scrollTop || 0;
+    const prevX = window.scrollX || document.documentElement?.scrollLeft || 0;
+    this.render();
+    if (prevY > 0 || prevX > 0) {
+      try { window.scrollTo({ top: prevY, left: prevX, behavior: 'instant' }); } catch (_) { window.scrollTo(prevX, prevY); }
+      this.syncScrollTopButtons();
+    }
+  },
+
+  updateCloudSyncIndicatorsDom() {
+    if (typeof document === 'undefined') return;
+    const syncing = this.state.cloudSyncStatus === 'syncing';
+    const isErr = this.state.cloudSyncStatus === 'error';
+    const adminBadge = document.getElementById('adminAutoCloudBadge');
+    if (adminBadge) {
+      adminBadge.className = `hidden lg:inline-flex items-center gap-1.5 h-9 px-3 rounded-xl text-[11px] font-bold border ${
+        syncing
+          ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
+          : (isErr ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30')
+      }`;
+      adminBadge.innerHTML = `<i class="fa-solid ${syncing ? 'fa-spinner fa-spin' : (isErr ? 'fa-triangle-exclamation' : 'fa-cloud-arrow-up')}"></i><span>${syncing ? 'Đang tự động lưu...' : (isErr ? 'Chờ kết nối mạng' : 'Tự động lưu Server')}</span>`;
+    }
+    document.querySelectorAll('#studentSyncBtn i, #studentEmptySyncBtn i').forEach(ic => {
+      ic.classList.toggle('fa-spin', syncing);
+    });
   },
 
   async fetchSupabaseServerSnapshot() {
@@ -1719,7 +1857,8 @@ const App = {
 
     const wasInitialSync = !this.state.cloudLastSyncedAt;
     this.state.cloudSyncStatus = 'syncing';
-    if (manual && typeof document !== 'undefined') this.render();
+    this.updateCloudSyncIndicatorsDom();
+    if (manual && typeof document !== 'undefined') this.renderPreservingScroll();
 
     this._syncFromCloudPromise = (async () => {
       try {
@@ -1737,6 +1876,7 @@ const App = {
         this.state.cloudLastSyncedAt = Date.now();
         this.state.cloudSyncStatus = 'ok';
         this.state.cloudSyncMessage = '';
+        this.updateCloudSyncIndicatorsDom();
 
         // Tự động đẩy lên Server mọi đề/chuyên đề cục bộ (idb:...) hoặc thay đổi của Giáo viên chưa lưu Server
         if (this.needsAutoServerUpload()) {
@@ -1744,7 +1884,7 @@ const App = {
         }
 
         if (manual) {
-          if (typeof document !== 'undefined' && !this.state.activeExam) this.render();
+          if (typeof document !== 'undefined' && !this.state.activeExam) this.renderPreservingScroll();
           const curCount = (this.state.exams || []).length;
           const diff = curCount - prevExamCount;
           this.notify(
@@ -1754,15 +1894,16 @@ const App = {
             'success',
             'Đồng bộ dữ liệu hoàn tất'
           );
-        } else if ((mergedAny || wasInitialSync) && this.canSafelyAutoReRender()) {
-          this.render();
+        } else if ((mergedAny || (wasInitialSync && (this.state.exams || []).length === 0)) && this.canSafelyAutoReRender()) {
+          this.renderPreservingScroll();
         }
         return true;
       } catch (err) {
         this.state.cloudSyncStatus = 'error';
         this.state.cloudSyncMessage = String(err?.message || 'Lỗi kết nối máy chủ');
+        this.updateCloudSyncIndicatorsDom();
         if (manual) {
-          if (typeof document !== 'undefined' && !this.state.activeExam) this.render();
+          if (typeof document !== 'undefined' && !this.state.activeExam) this.renderPreservingScroll();
           this.notify('Không thể kết nối máy chủ. Vui lòng kiểm tra mạng Internet và thử lại!', 'warning', 'Chưa tải được dữ liệu mới');
         }
         return false;
@@ -1791,7 +1932,8 @@ const App = {
     }
 
     this.state.cloudSyncStatus = 'syncing';
-    if (manual && typeof document !== 'undefined') this.render();
+    this.updateCloudSyncIndicatorsDom();
+    if (manual && typeof document !== 'undefined') this.renderPreservingScroll();
 
     this._pushCloudPromise = (async () => {
       let ok = false;
@@ -1861,16 +2003,18 @@ const App = {
         this.state.cloudSyncStatus = 'ok';
         this.state.cloudSyncMessage = '';
         this.saveData({ markAdminDirty: false, skipAutoPush: true });
+        this.updateCloudSyncIndicatorsDom();
 
-        if (this.canSafelyAutoReRender()) {
-          this.render();
+        if (manual && this.canSafelyAutoReRender()) {
+          this.renderPreservingScroll();
         }
         ok = true;
       } catch (err) {
         this.state.cloudSyncStatus = 'error';
         this.state.cloudSyncMessage = String(err?.message || 'Lỗi lưu máy chủ');
-        if (this.canSafelyAutoReRender()) {
-          this.render();
+        this.updateCloudSyncIndicatorsDom();
+        if (manual && this.canSafelyAutoReRender()) {
+          this.renderPreservingScroll();
         }
       } finally {
         this._pushCloudPromise = null;
@@ -2085,7 +2229,7 @@ const App = {
         if (e.target === overlay) close(false);
       });
       document.addEventListener('keydown', onKey);
-      document.body.appendChild(overlay);
+      this.openModalElement(overlay, Boolean(existing));
 
       const confirmBtn = overlay.querySelector('#appDialogConfirmBtn');
       const cancelBtn = overlay.querySelector('#appDialogCancelBtn');
@@ -2115,18 +2259,40 @@ const App = {
     });
   },
 
-  // 2. Quản lý Đăng nhập / Phiên làm việc
+  // 2. Quản lý Đăng nhập / Phiên làm việc (Lưu kép sessionStorage + localStorage để không bị văng ra khi điện thoại ẩn tab)
+  saveSessionUser(user) {
+    if (!user) return;
+    const raw = JSON.stringify(user);
+    try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('thpt_current_user', raw); } catch (_) {}
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('thpt_current_user', raw); } catch (_) {}
+  },
+
+  clearSessionUser() {
+    try { if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem('thpt_current_user'); } catch (_) {}
+    try { if (typeof localStorage !== 'undefined') localStorage.removeItem('thpt_current_user'); } catch (_) {}
+  },
+
   checkSession() {
-    const session = sessionStorage.getItem('thpt_current_user');
+    let session = null;
+    try {
+      session = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('thpt_current_user'))
+        || (typeof localStorage !== 'undefined' && localStorage.getItem('thpt_current_user'))
+        || null;
+    } catch (_) {}
     if (session) {
-      const parsed = JSON.parse(session);
-      if (parsed && parsed.role === 'admin' && this.state.admin) {
+      let parsed = null;
+      try { parsed = JSON.parse(session); } catch (_) { parsed = null; }
+      if (!parsed || typeof parsed !== 'object') {
+        this.clearSessionUser();
+        return;
+      }
+      if (parsed.role === 'admin' && this.state.admin) {
         this.state.currentUser = { ...this.state.admin };
-        sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
-      } else if (parsed && parsed.role === 'student') {
+        this.saveSessionUser(this.state.currentUser);
+      } else if (parsed.role === 'student') {
         const fresh = this.state.students.find(x => x.studentId === parsed.studentId);
         this.state.currentUser = fresh ? { role: 'student', ...fresh } : { ...parsed, grade: this.getStudentGrade(parsed) };
-        sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+        this.saveSessionUser(this.state.currentUser);
       } else {
         this.state.currentUser = parsed;
       }
@@ -2146,7 +2312,7 @@ const App = {
       return false;
     }
     this.state.currentUser = { role: 'student', ...s };
-    sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+    this.saveSessionUser(this.state.currentUser);
     this.render();
     this.syncFromCloud({ silent: true });
     return true;
@@ -2158,7 +2324,7 @@ const App = {
     const targetUser = String(adminAcc.username || 'ADMIN').trim().toUpperCase();
     if (inputUser === targetUser && password === adminAcc.password) {
       this.state.currentUser = { ...adminAcc, role: 'admin', email: this.ADMIN_RECOVERY_EMAIL };
-      sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+      this.saveSessionUser(this.state.currentUser);
       this.render();
       this.syncFromCloud({ silent: true });
       return true;
@@ -2172,6 +2338,8 @@ const App = {
     this.resetExamMonitorState();
     this.state.currentUser = null;
     this.state.activeExam = null;
+    this.state.activeSubmissionDetailId = null;
+    this.state.currentDetailSubId = null;
     this.state.studentExamSearchQuery = '';
     this.state.studentExamGradeFilter = 'ALL';
     this.state.studentExamCategoryFilter = 'ALL';
@@ -2181,7 +2349,7 @@ const App = {
     this.state.examStatusFilter = 'ALL';
     this.state.studentGradeFilter = 'ALL';
     this.state.adminGradeFilter = 'ALL';
-    sessionStorage.removeItem('thpt_current_user');
+    this.clearSessionUser();
     this.render();
   },
 
@@ -2628,32 +2796,33 @@ const App = {
   },
 
   showThemeModal() {
+    const wasOpen = typeof document !== 'undefined' && Boolean(document.getElementById('themeCustomizerModal'));
     this.closeThemeModal();
     const modal = document.createElement('div');
     modal.id = 'themeCustomizerModal';
-    modal.className = 'fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in';
+    modal.className = 'fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in';
     modal.innerHTML = `
       <div class="dialog-card bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-indigo-50/40 flex items-center justify-between">
-          <div class="flex items-center gap-2.5">
-            <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+        <div class="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-indigo-50/40 flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
               <i class="fa-solid fa-palette"></i>
             </div>
-            <div>
+            <div class="min-w-0">
               <h3 class="text-sm sm:text-base font-extrabold text-slate-900">Tùy Chỉnh Giao Diện, Bộ Màu &amp; Độ Tương Phản</h3>
               <p class="text-[11px] text-slate-500">Chuyển Sáng / Dịu mắt / Tối, đổi màu tùy ý và tối ưu độ nét dễ nhìn</p>
             </div>
           </div>
-          <button type="button" onclick="App.closeThemeModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center cursor-pointer" title="Đóng">
+          <button type="button" onclick="App.closeThemeModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center cursor-pointer shrink-0" title="Đóng">
             <i class="fa-solid fa-xmark text-base"></i>
           </button>
         </div>
-        <div id="themeCustomizerModalBody" class="p-5 overflow-y-auto">
+        <div id="themeCustomizerModalBody" class="p-4 sm:p-5 overflow-y-auto">
           ${this.renderAppearanceControlsHtml('modal')}
         </div>
-        <div class="px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
-          <span class="text-[11px] text-slate-500"><i class="fa-solid fa-floppy-disk text-indigo-600 mr-1"></i>Tự động lưu cho các phiên đăng nhập tiếp theo</span>
-          <button type="button" onclick="App.closeThemeModal()" class="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer">
+        <div class="px-4 sm:px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-2">
+          <span class="text-[11px] text-slate-500 min-w-0"><i class="fa-solid fa-floppy-disk text-indigo-600 mr-1"></i>Tự động lưu cho các phiên đăng nhập tiếp theo</span>
+          <button type="button" onclick="App.closeThemeModal()" class="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer shrink-0">
             Hoàn tất
           </button>
         </div>
@@ -2662,7 +2831,7 @@ const App = {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) this.closeThemeModal();
     });
-    document.body.appendChild(modal);
+    this.openModalElement(modal, wasOpen);
   },
 
   closeThemeModal() {
@@ -2692,6 +2861,7 @@ const App = {
   },
 
   showExamLayoutModal(examId = '') {
+    const wasOpen = typeof document !== 'undefined' && Boolean(document.getElementById('examLayoutModal'));
     this.closeExamLayoutModal();
     const curMode = this.getNormalizedExamLayoutMode();
     this.state.layoutPreviewMode = curMode;
@@ -2713,7 +2883,7 @@ const App = {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) this.closeExamLayoutModal();
     });
-    document.body.appendChild(modal);
+    this.openModalElement(modal, wasOpen);
   },
 
   closeExamLayoutModal() {
@@ -2987,17 +3157,29 @@ const App = {
     }
 
     if (!this.state.currentUser) {
+      this.state.activeSubmissionDetailId = null;
       this.renderLoginView(appContainer);
       return;
     }
 
+    if (this.state.activeSubmissionDetailId) {
+      const subExists = (this.state.submissions || []).some(s => s && s.id === this.state.activeSubmissionDetailId);
+      if (subExists) {
+        this.viewSubmissionDetail(this.state.activeSubmissionDetailId, { fromRender: true });
+        return;
+      }
+      this.state.activeSubmissionDetailId = null;
+    }
+
     if (this.state.currentUser.role === 'admin') {
       this.renderAdminDashboard(appContainer);
+      this.syncScrollTopButtons();
       return;
     }
 
     if (this.state.currentUser.role === 'student') {
       this.renderStudentPortal(appContainer);
+      this.syncScrollTopButtons();
       return;
     }
   },
@@ -3010,8 +3192,8 @@ const App = {
 
     container.innerHTML = `
       <div class="min-h-screen bg-slate-50 flex flex-col justify-center py-6 sm:py-12 sm:px-6 lg:px-8 relative text-slate-900">
-        <!-- Thanh công cụ đồng bộ: gọn gàng trên điện thoại, ghim góc phải trên máy tính -->
-        <div class="w-full max-w-md mx-auto px-4 mb-5 sm:mb-0 sm:w-auto sm:px-0 sm:fixed sm:top-4 sm:right-4 z-30 flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2">
+        <!-- Thanh công cụ đồng bộ: gọn gàng trên điện thoại dọc & ngang, chỉ ghim góc phải trên màn hình rộng -->
+        <div class="w-full max-w-md mx-auto px-4 mb-5 lg:mb-0 lg:w-auto lg:px-0 lg:fixed lg:top-4 lg:right-4 z-30 flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2">
           <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex-1 sm:flex-initial min-w-0" title="Quét mã QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
             <i class="fa-solid fa-qrcode shrink-0"></i>
             <span>Tạo App ĐT / QR</span>
@@ -3347,9 +3529,7 @@ const App = {
     student.updatedAt = nowIso;
 
     this.state.currentUser = { ...student, role: 'student' };
-    if (typeof sessionStorage !== 'undefined') {
-      try { sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser)); } catch (_) {}
-    }
+    this.saveSessionUser(this.state.currentUser);
 
     this.saveData();
     this.pushStudentSubmissionToCloud(null, student);
@@ -3487,23 +3667,24 @@ const App = {
     const rw = this.getRewardCatalog().find(r => r.id === rewardId);
     if (!rw) return;
 
+    const wasOpen = Boolean(document.getElementById('editRewardModal'));
     document.getElementById('editRewardModal')?.remove();
     const modal = document.createElement('div');
     modal.id = 'editRewardModal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4">
-        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div class="flex items-center gap-2.5">
-            <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+      <div class="bg-white rounded-3xl p-4 sm:p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
               <i class="fa-solid fa-pen-to-square"></i>
             </div>
-            <div>
+            <div class="min-w-0">
               <h3 class="text-sm sm:text-base font-extrabold text-slate-900">Chỉnh Sửa Phần Thưởng</h3>
               <p class="text-[11px] text-slate-500">Cập nhật trực tiếp không cần xóa &amp; tạo lại</p>
             </div>
           </div>
-          <button type="button" onclick="document.getElementById('editRewardModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer">
+          <button type="button" onclick="document.getElementById('editRewardModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer shrink-0">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
@@ -3548,7 +3729,7 @@ const App = {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) modal.remove();
     });
-    document.body.appendChild(modal);
+    this.openModalElement(modal, wasOpen);
   },
 
   handleEditRewardSubmit(rewardId, customPayload = null) {
@@ -3854,7 +4035,7 @@ const App = {
         </header>
 
         <!-- Main Body -->
-        <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 py-5 sm:py-8 flex-1 space-y-5 sm:space-y-6">
+        <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 pt-5 sm:pt-8 pb-20 sm:pb-12 flex-1 space-y-5 sm:space-y-6">
           <!-- Student Banner -->
           <div class="bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-800 rounded-2xl p-4 sm:p-6 text-white shadow-xl relative overflow-hidden">
             <div class="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -4403,9 +4584,9 @@ const App = {
           </div>
         </main>
 
-        <!-- Floating Scroll-To-Top Button (Hình tròn có mũi tên ở góc phải màn hình) -->
-        <button onclick="App.scrollToTop()" class="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xl flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer border-2 border-white" title="Lên đầu trang">
-          <i class="fa-solid fa-arrow-up text-lg"></i>
+        <!-- Floating Scroll-To-Top Button (Chỉ hiện khi đã cuộn xuống, không bao giờ đè lên nút nội dung) -->
+        <button type="button" onclick="App.scrollToTop()" class="scroll-top-fab rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl flex items-center justify-center active:scale-95 cursor-pointer border-2 border-white" title="Lên đầu trang">
+          <i class="fa-solid fa-arrow-up text-base"></i>
         </button>
       </div>
     `;
@@ -4441,6 +4622,8 @@ const App = {
     document.documentElement.style.overflow = '';
     document.body.style.overflow = '';
 
+    this.state.activeSubmissionDetailId = null;
+    this.state.currentDetailSubId = null;
     this.state.adminMainTab = 'main';
     this.state.adminViewTab = 'matrix';
     this.state.adminClassFilter = 'ALL';
@@ -4755,7 +4938,10 @@ const App = {
     document.body.style.overflow = 'hidden';
 
     if (!Array.isArray(exam.part4)) exam.part4 = [];
+    this.state.activeSubmissionDetailId = null;
+    this.state.currentDetailSubId = null;
     this.state.activeExam = exam;
+    this.pushOverlayHistory();
     this.state.answers = { 
       part1: {}, 
       part2: {}, 
@@ -5051,9 +5237,11 @@ const App = {
         <!-- Top Sticky Header -->
         <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 px-2.5 sm:px-6 py-2 flex items-center justify-between gap-2 shrink-0 z-30 shadow-xs sticky top-0">
           <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
-            <!-- Nút Về Trang Chủ -->
-            <button type="button" onclick="App.confirmExitExam()" class="ui-btn-icon sm:w-auto sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 text-xs font-bold shadow-xs sm:gap-1.5" title="Quay về trang chủ">
-              <i class="fa-solid fa-house text-indigo-600"></i>
+            <!-- Nút Về Trang Chủ / Thoát rõ ràng trên cả Điện thoại & Máy tính -->
+            <button type="button" id="examExitHomeBtn" onclick="App.confirmExitExam()" class="ui-btn px-2 sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 text-xs font-bold shadow-xs shrink-0" title="Quay về trang chủ">
+              <i class="fa-solid fa-arrow-left sm:hidden text-indigo-600"></i>
+              <i class="fa-solid fa-house hidden sm:inline text-indigo-600"></i>
+              <span class="sm:hidden">Thoát</span>
               <span class="hidden sm:inline">Trang chủ</span>
             </button>
 
@@ -5112,7 +5300,7 @@ const App = {
             </div>
 
             <!-- Nút đổi theme: Sáng / Dịu mắt / Tối & Bộ màu -->
-            <button type="button" id="examQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn-icon bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
+            <button type="button" id="examQuickThemeBtn" onclick="App.cycleTheme()" class="hidden min-[390px]:inline-flex ui-btn-icon bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
               <i class="fa-solid fa-circle-half-stroke"></i>
             </button>
             <button type="button" id="examThemeBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex ui-btn-icon bg-slate-100 hover:bg-slate-200 text-indigo-600 border border-slate-200" title="Tùy chỉnh bộ màu & độ tương phản">
@@ -5195,9 +5383,12 @@ const App = {
     const drawer = document.getElementById('mobileDrawer');
     if (backdrop && drawer) {
       const willOpen = drawer.classList.contains('hidden');
-      if (willOpen && this.state.activeExam) {
-        const body = document.getElementById('examProgressDrawerBody');
-        if (body) body.innerHTML = this.renderPaletteMatrix(this.state.activeExam);
+      if (willOpen) {
+        this.pushOverlayHistory();
+        if (this.state.activeExam) {
+          const body = document.getElementById('examProgressDrawerBody');
+          if (body) body.innerHTML = this.renderPaletteMatrix(this.state.activeExam);
+        }
       }
       backdrop.classList.toggle('hidden');
       drawer.classList.toggle('hidden');
@@ -5245,7 +5436,7 @@ const App = {
         sheetBody: `${onlySheetMob ? 'flex-1 lg:flex-initial' : ''} flex flex-col`,
         pdfViewer: `${onlyPdfMob ? 'flex-1 lg:flex-initial w-full h-full lg:h-auto min-h-0' : 'w-full h-auto'} flex flex-col bg-slate-950`,
         pdfBanner: 'hidden',
-        pdfHeader: `bg-slate-950 text-slate-300 text-xs px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-800 shrink-0 ${isUnifiedFlow ? 'sticky top-0 z-20' : ''}`
+        pdfHeader: `bg-slate-950 text-slate-300 text-xs px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-800 shrink-0 ${isUnifiedFlow ? 'lg:sticky lg:top-0 lg:z-20' : ''}`
       };
     }
 
@@ -5260,7 +5451,7 @@ const App = {
         sheetBody: `${onlySheetMob ? 'flex-1 lg:flex-initial' : ''} flex flex-col`,
         pdfViewer: `${onlyPdfMob ? 'flex-1 lg:flex-initial w-full h-full lg:h-auto min-h-0' : 'w-full h-auto'} flex flex-col bg-slate-950`,
         pdfBanner: 'hidden',
-        pdfHeader: `bg-slate-950 text-slate-300 text-xs px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-800 shrink-0 ${isUnifiedFlow ? 'sticky top-0 z-20' : ''}`
+        pdfHeader: `bg-slate-950 text-slate-300 text-xs px-2.5 sm:px-4 py-1.5 flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-800 shrink-0 ${isUnifiedFlow ? 'lg:sticky lg:top-0 lg:z-20' : ''}`
       };
     }
 
@@ -5347,6 +5538,7 @@ const App = {
     const pdfViewerEl = document.getElementById('examRoomPdfViewer');
     const sheetBodyEl = document.getElementById('examSheetBodyWrap');
     const sheetCollapsedHint = document.getElementById('examSheetCollapsedHint');
+    const sheetControlBar = document.getElementById('examRightSheetControlBar');
 
     if (ws) ws.className = cls.workspace;
     if (leftEl) leftEl.className = cls.left;
@@ -5356,6 +5548,9 @@ const App = {
     if (pdfViewerEl) pdfViewerEl.className = cls.pdfViewer;
     if (sheetBodyEl) sheetBodyEl.className = cls.sheetBody;
     if (sheetCollapsedHint) sheetCollapsedHint.classList.toggle('hidden', !sheetCollapsed);
+    if (sheetControlBar) {
+      sheetControlBar.className = `p-2 sm:p-3 border-b border-slate-200 bg-slate-50 ${isStacked ? 'relative z-20' : 'lg:sticky lg:top-0 lg:z-20'} space-y-2`;
+    }
 
     this.syncPdfViewerFlowMode('examRoomPdfViewer', this.isExamStackedFlowMode());
 
@@ -5454,7 +5649,7 @@ const App = {
 
       <!-- Khung Ô Điền Đáp Án Trực Tuyến + Theo Dõi Quá Trình -->
       <div id="examRightSheetPane" class="${paneCls.right}">
-        <div class="p-2 sm:p-3 border-b border-slate-200 bg-slate-50 sticky top-0 z-10 space-y-2">
+        <div id="examRightSheetControlBar" class="p-2 sm:p-3 border-b border-slate-200 bg-slate-50 ${isStacked ? 'relative z-20' : 'lg:sticky lg:top-0 lg:z-20'} space-y-2">
           <!-- Thanh tóm tắt quá trình & công cụ thu gọn đề / đổi bố cục ngay trên ô đáp án -->
           <div class="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2 shadow-2xs">
             <div class="min-w-0 flex items-center gap-2 text-xs">
@@ -6021,7 +6216,7 @@ const App = {
         <button type="button" class="mt-3 ui-btn bg-white text-slate-800 px-4">Đóng ảnh</button>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal, Boolean(old));
   },
 
   handleBoxInput(event, qId, boxIdx, prefix = 'split_box_') {
@@ -6464,17 +6659,17 @@ const App = {
           </div>
         ` : ''}
 
-        <div class="flex space-x-3 pt-2">
-          <button onclick="document.getElementById('scoreModal').remove(); App.viewSubmissionDetail('${sub.id}');" class="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow-md transition">
+        <div class="flex gap-2.5 pt-2">
+          <button onclick="document.getElementById('scoreModal').remove(); App.viewSubmissionDetail('${sub.id}');" class="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md transition cursor-pointer">
             Xem Lời Giải Chi Tiết
           </button>
-          <button onclick="document.getElementById('scoreModal').remove();" class="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold text-sm transition">
+          <button onclick="document.getElementById('scoreModal').remove();" class="px-4 sm:px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold text-xs sm:text-sm transition cursor-pointer shrink-0">
             Đóng
           </button>
         </div>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal);
   },
 
   toggleSubmissionAnswerCollapse() {
@@ -6790,10 +6985,18 @@ const App = {
     `;
   },
 
-  async viewSubmissionDetail(subId) {
+  async viewSubmissionDetail(subId, opts = {}) {
     const sub = this.state.submissions.find(s => s.id === subId);
-    if (!sub) return;
+    if (!sub) {
+      this.state.activeSubmissionDetailId = null;
+      return;
+    }
+    const entering = this.state.activeSubmissionDetailId !== subId;
+    this.state.activeSubmissionDetailId = subId;
     this.state.currentDetailSubId = subId;
+    if (entering && !opts.fromRender) {
+      this.pushOverlayHistory();
+    }
 
     // Khôi phục cuộn trang
     document.body.classList.remove('in-exam');
@@ -6822,8 +7025,10 @@ const App = {
         <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 shadow-xs">
           <div class="w-full max-w-[98%] mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2">
             <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
-              <button type="button" onclick="App.goHome()" class="px-2.5 sm:px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer shrink-0 whitespace-nowrap" title="Quay về trang chủ">
-                <i class="fa-solid fa-house"></i>
+              <button type="button" id="submissionDetailBackBtn" onclick="App.goHome()" class="px-2.5 sm:px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-xs cursor-pointer shrink-0 whitespace-nowrap" title="Quay về trang chủ">
+                <i class="fa-solid fa-arrow-left sm:hidden"></i>
+                <i class="fa-solid fa-house hidden sm:inline"></i>
+                <span class="sm:hidden">Quay lại</span>
                 <span class="hidden sm:inline">Trang chủ</span>
               </button>
               <div class="h-5 w-px bg-slate-200 shrink-0"></div>
@@ -6845,20 +7050,20 @@ const App = {
               ` : ''}
 
               ${!isStudent ? `
-                <button type="button" onclick="App.toggleExamViewAnswers('${exam.id}'); setTimeout(() => App.viewSubmissionDetail('${subId}'), 100);" class="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer whitespace-nowrap ${exam.allow_view_answers !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100' : 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'}" title="Bật/Tắt quyền cho học sinh xem đáp án và file lời giải của đề này">
+                <button type="button" onclick="App.toggleExamViewAnswers('${exam.id}')" class="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center cursor-pointer whitespace-nowrap ${exam.allow_view_answers !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100' : 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'}" title="Bật/Tắt quyền cho học sinh xem đáp án và file lời giải của đề này">
                   <i class="fa-solid ${exam.allow_view_answers !== false ? 'fa-eye' : 'fa-eye-slash'} sm:mr-1.5"></i>
                   <span class="hidden sm:inline">${exam.allow_view_answers !== false ? 'Học sinh: Mở xem đáp án' : 'Học sinh: Khóa xem đáp án'}</span>
                 </button>
               ` : ''}
 
-              <button type="button" onclick="window.print()" class="text-xs bg-white border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-lg shadow-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center cursor-pointer whitespace-nowrap" title="In kết quả">
-                <i class="fa-solid fa-print sm:mr-1.5"></i><span class="hidden sm:inline">In kết quả</span>
+              <button type="button" onclick="window.print()" class="hidden sm:flex text-xs bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-xs font-semibold text-slate-700 hover:bg-slate-50 transition items-center cursor-pointer whitespace-nowrap" title="In kết quả">
+                <i class="fa-solid fa-print mr-1.5"></i><span>In kết quả</span>
               </button>
             </div>
           </div>
         </header>
 
-        <div class="py-5 px-3 sm:px-6 flex-1 w-full max-w-[98%] mx-auto space-y-5">
+        <div class="pt-5 pb-20 sm:pb-12 px-3 sm:px-6 flex-1 w-full max-w-[98%] mx-auto space-y-5">
           <!-- Banner tóm tắt điểm số & Học sinh -->
           <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
@@ -6942,7 +7147,7 @@ const App = {
           ${showPdf ? `
             <!-- PHẦN DƯỚI (TOÀN CHIỀU RỘNG): ĐỒNG BỘ 1 THANH CUỘN CHUNG VỚI TRANG XEM PDF LỜI GIẢI CHI TIẾT -->
             <div id="submissionSolutionPdfSection" class="w-full min-h-[520px] bg-slate-900 rounded-2xl border border-slate-700 shadow-xl flex flex-col">
-              <div class="px-3 sm:px-4 py-2.5 bg-slate-800 rounded-t-2xl text-white flex flex-wrap items-center justify-between gap-2 text-xs font-bold shrink-0 border-b border-slate-700 sticky top-14 z-20">
+              <div class="px-3 sm:px-4 py-2.5 bg-slate-800 rounded-t-2xl text-white flex flex-wrap items-center justify-between gap-2 text-xs font-bold shrink-0 border-b border-slate-700 lg:sticky lg:top-14 z-20">
                 <span class="flex items-center min-w-0 truncate text-white"><i class="fa-solid fa-file-pdf text-red-400 mr-2 text-sm shrink-0"></i><span class="truncate">File PDF Đáp Án &amp; Lời Giải Chi Tiết</span></span>
                 <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   <button type="button" onclick="document.getElementById('submissionAnswerCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' })" class="px-2 sm:px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-amber-300 hover:text-white rounded text-[11px] font-semibold transition cursor-pointer flex items-center whitespace-nowrap">
@@ -6967,12 +7172,13 @@ const App = {
         </div>
 
         <!-- Floating Scroll-To-Top Button -->
-        <button type="button" onclick="App.scrollToTop()" class="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xl flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer border-2 border-white" title="Lên đầu trang">
-          <i class="fa-solid fa-arrow-up text-lg"></i>
+        <button type="button" onclick="App.scrollToTop()" class="scroll-top-fab rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl flex items-center justify-center active:scale-95 cursor-pointer border-2 border-white" title="Lên đầu trang">
+          <i class="fa-solid fa-arrow-up text-base"></i>
         </button>
       </div>
     `;
 
+    this.syncScrollTopButtons();
     if (showPdf) {
       this.mountPdfViewer('submissionSolPdfViewer', solPdfUrl, { flowWithPage: true });
     }
@@ -7623,7 +7829,7 @@ const App = {
         </header>
 
         <!-- Main Body -->
-        <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 py-5 sm:py-8 flex-1 space-y-5 sm:space-y-6">
+        <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 pt-5 sm:pt-8 pb-20 sm:pb-12 flex-1 space-y-5 sm:space-y-6">
           <!-- Thanh Điều Hướng Cổng Giáo Viên -->
           <div class="bg-white rounded-2xl p-2 sm:p-2.5 border border-slate-200 shadow-sm">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -8369,9 +8575,9 @@ const App = {
           ` : ''}
         </main>
 
-        <!-- Floating Scroll-To-Top Button (Hình tròn có mũi tên ở góc phải màn hình) -->
-        <button onclick="App.scrollToTop()" class="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xl flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer border-2 border-white" title="Lên đầu trang">
-          <i class="fa-solid fa-arrow-up text-lg"></i>
+        <!-- Floating Scroll-To-Top Button (Chỉ hiện khi đã cuộn xuống, không bao giờ đè lên nút nội dung) -->
+        <button type="button" onclick="App.scrollToTop()" class="scroll-top-fab rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl flex items-center justify-center active:scale-95 cursor-pointer border-2 border-white" title="Lên đầu trang">
+          <i class="fa-solid fa-arrow-up text-base"></i>
         </button>
       </div>
     `;
@@ -8379,12 +8585,16 @@ const App = {
 
   // --- HÀM CHUYỂN TAB ĐA NHIỆM CHO GIÁO VIÊN & HỌC SINH ---
   setAdminMainTab(tab) {
+    this.state.activeSubmissionDetailId = null;
+    this.state.currentDetailSubId = null;
     this.state.adminMainTab = tab;
     this.render();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   },
 
   setStudentMainTab(tab) {
+    this.state.activeSubmissionDetailId = null;
+    this.state.currentDetailSubId = null;
     this.state.studentMainTab = tab;
     this.render();
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -8403,14 +8613,14 @@ const App = {
 
     const modal = document.createElement('div');
     modal.id = 'updatePdfModal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl p-6 max-w-3xl w-full shadow-2xl space-y-4 my-8 max-h-[92vh] overflow-y-auto">
-        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-          <h3 class="font-extrabold text-slate-900 text-base flex items-center">
-            <i class="fa-solid fa-file-pdf text-indigo-600 mr-2"></i>Cập Nhật PDF Đề Thi, Lời Giải &amp; Bảng Đáp Án
+      <div class="bg-white rounded-3xl p-4 sm:p-6 max-w-3xl w-full shadow-2xl space-y-4 my-2 sm:my-8 max-h-[92vh] overflow-y-auto">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <h3 class="font-extrabold text-slate-900 text-sm sm:text-base flex items-center min-w-0">
+            <i class="fa-solid fa-file-pdf text-indigo-600 mr-2 shrink-0"></i><span>Cập Nhật PDF Đề Thi, Lời Giải &amp; Bảng Đáp Án</span>
           </h3>
-          <button onclick="document.getElementById('updatePdfModal').remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
+          <button onclick="document.getElementById('updatePdfModal').remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer shrink-0"><i class="fa-solid fa-xmark"></i></button>
         </div>
 
         <p class="text-xs text-slate-600">Đề thi: <strong>${exam.title}</strong></p>
@@ -8466,7 +8676,7 @@ const App = {
         </div>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal, Boolean(old) || Boolean(keepDraft));
   },
 
   async handleDirectPdfUpdate(event, examId, type = 'question') {
@@ -8697,25 +8907,25 @@ const App = {
 
     const modal = document.createElement('div');
     modal.id = 'examAccessModal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm';
     modal.innerHTML = `
       <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
         <!-- Header cố định -->
-        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 shrink-0">
-          <div>
-            <h3 class="font-extrabold text-slate-900 text-base sm:text-lg flex items-center gap-2">
-              <i class="fa-solid fa-user-shield text-indigo-600"></i>
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 flex items-center justify-between gap-2 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 shrink-0">
+          <div class="min-w-0">
+            <h3 class="font-extrabold text-slate-900 text-sm sm:text-lg flex items-center gap-2">
+              <i class="fa-solid fa-user-shield text-indigo-600 shrink-0"></i>
               <span>Cấu Hình Đề Thi & Phân Quyền Dự Thi</span>
             </h3>
             <p class="text-xs text-slate-500 mt-0.5">Mã đề: <span class="font-mono font-bold text-indigo-600">${exam.id}</span> • Chọn khối lớp, đợt thi và đối tượng được phép làm bài</p>
           </div>
-          <button type="button" onclick="document.getElementById('examAccessModal').remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer">
+          <button type="button" onclick="document.getElementById('examAccessModal').remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer shrink-0">
             <i class="fa-solid fa-xmark text-base"></i>
           </button>
         </div>
 
         <!-- Body cuộn mượt -->
-        <form id="examAccessForm" onsubmit="event.preventDefault(); App.handleExamAccessSubmit('${exam.id}');" class="p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+        <form id="examAccessForm" onsubmit="event.preventDefault(); App.handleExamAccessSubmit('${exam.id}');" class="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
           <div>
             <label class="block font-bold text-slate-700 mb-1">Tên đề thi</label>
             <input type="text" id="accessExamTitle" required value="${exam.title.replace(/"/g, '&quot;')}" class="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:border-indigo-500 outline-none">
@@ -8838,15 +9048,15 @@ const App = {
         </form>
 
         <!-- Footer cố định -->
-        <div class="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
-          <button type="button" onclick="document.getElementById('examAccessModal').remove()" class="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-700 cursor-pointer">Hủy</button>
-          <button type="submit" form="examAccessForm" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition inline-flex items-center gap-1.5 cursor-pointer">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+          <button type="button" onclick="document.getElementById('examAccessModal').remove()" class="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-700 cursor-pointer shrink-0">Hủy</button>
+          <button type="submit" form="examAccessForm" class="px-4 sm:px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition inline-flex items-center gap-1.5 cursor-pointer">
             <i class="fa-solid fa-floppy-disk"></i><span>Lưu Cấu Hình & Phân Quyền</span>
           </button>
         </div>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal, Boolean(existingModal));
   },
 
   onAccessModeChange(mode) {
@@ -9098,7 +9308,7 @@ const App = {
     st.updatedAt = new Date().toISOString();
     if (this.state.currentUser && this.state.currentUser.studentId === studentId) {
       this.state.currentUser.grade = g;
-      sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+      this.saveSessionUser(this.state.currentUser);
     }
     this.saveData({ markAdminDirty: true });
     this.render();
@@ -9119,22 +9329,22 @@ const App = {
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
     modal.innerHTML = `
       <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[88vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
-        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between shrink-0">
-          <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between gap-2 shrink-0">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
               <i class="fa-solid fa-layer-group text-base"></i>
             </div>
-            <div>
-              <h3 class="font-extrabold text-base text-slate-900">Xếp Khối Cho Học Sinh (Khối 6 – 12)</h3>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900">Xếp Khối Cho Học Sinh (Khối 6 – 12)</h3>
               <p class="text-xs text-slate-500 mt-0.5">Chọn học sinh hoặc cả lớp để phân vào khối tương ứng phục vụ mở đề &amp; chuyên đề</p>
             </div>
           </div>
-          <button type="button" onclick="document.getElementById('bulkGradeModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition">
+          <button type="button" onclick="document.getElementById('bulkGradeModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition shrink-0">
             <i class="fa-solid fa-xmark text-base"></i>
           </button>
         </div>
 
-        <form id="bulkGradeForm" onsubmit="event.preventDefault(); App.handleBulkGradeSubmit();" class="p-6 space-y-4 text-xs overflow-y-auto flex-1">
+        <form id="bulkGradeForm" onsubmit="event.preventDefault(); App.handleBulkGradeSubmit();" class="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1">
           <!-- Chọn khối đích -->
           <div class="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200 space-y-2.5">
             <label class="block font-extrabold text-indigo-950 text-xs uppercase tracking-wider">
@@ -9200,7 +9410,7 @@ const App = {
           </div>
         </form>
 
-        <div class="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2.5 shrink-0">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2.5 shrink-0">
           <button type="button" onclick="document.getElementById('bulkGradeModal').remove()" class="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold rounded-xl text-xs transition cursor-pointer">
             Hủy
           </button>
@@ -9210,7 +9420,7 @@ const App = {
         </div>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal, Boolean(existing));
   },
 
   selectBulkTargetGrade(g) {
@@ -9270,7 +9480,7 @@ const App = {
     });
     if (this.state.currentUser && idSet.has(this.state.currentUser.studentId)) {
       this.state.currentUser.grade = targetGrade;
-      sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+      this.saveSessionUser(this.state.currentUser);
     }
 
     this.saveData({ markAdminDirty: true });
@@ -9294,23 +9504,23 @@ const App = {
     modal.id = 'addStudentModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-8">
-        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between">
-          <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm">
+      <div class="bg-white rounded-3xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-2 sm:my-8">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between gap-2">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
               <i class="fa-solid fa-user-plus text-base"></i>
             </div>
-            <div>
-              <h3 class="font-extrabold text-base text-slate-900">Thêm Học Sinh Mới</h3>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900">Thêm Học Sinh Mới</h3>
               <p class="text-xs text-slate-500 mt-0.5">Khởi tạo hồ sơ học sinh, xếp khối (Khối 6 – 12), mật khẩu và liên hệ</p>
             </div>
           </div>
-          <button onclick="document.getElementById('addStudentModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition">
+          <button onclick="document.getElementById('addStudentModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition shrink-0">
             <i class="fa-solid fa-xmark text-base"></i>
           </button>
         </div>
 
-        <form onsubmit="event.preventDefault(); App.handleAddStudentSubmit();" class="p-6 space-y-4 text-sm">
+        <form onsubmit="event.preventDefault(); App.handleAddStudentSubmit();" class="p-4 sm:p-6 space-y-4 text-sm">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Mã Học Sinh (Tự động IN HOA) *</label>
@@ -9366,7 +9576,7 @@ const App = {
         </form>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal);
   },
 
   handleAddStudentSubmit() {
@@ -9425,23 +9635,23 @@ const App = {
     modal.id = 'editStudentModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-8">
-        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between">
-          <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm">
+      <div class="bg-white rounded-3xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-2 sm:my-8">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between gap-2">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
               <i class="fa-solid fa-user-pen text-base"></i>
             </div>
-            <div>
-              <h3 class="font-extrabold text-base text-slate-900">Chỉnh Sửa Hồ Sơ Học Sinh</h3>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900">Chỉnh Sửa Hồ Sơ Học Sinh</h3>
               <p class="text-xs text-slate-500 mt-0.5">Mã hiện tại: <span class="font-mono text-indigo-600 font-bold">${student.studentId}</span> • Khối ${curGrade}</p>
             </div>
           </div>
-          <button onclick="document.getElementById('editStudentModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition">
+          <button onclick="document.getElementById('editStudentModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition shrink-0">
             <i class="fa-solid fa-xmark text-base"></i>
           </button>
         </div>
 
-        <form onsubmit="event.preventDefault(); App.handleEditStudentSubmit('${student.studentId}');" class="p-6 space-y-4 text-sm">
+        <form onsubmit="event.preventDefault(); App.handleEditStudentSubmit('${student.studentId}');" class="p-4 sm:p-6 space-y-4 text-sm">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Mã Học Sinh <span class="text-indigo-600 font-normal">(IN HOA)</span> *</label>
@@ -9520,7 +9730,7 @@ const App = {
         </form>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal);
   },
 
   handleEditStudentSubmit(originalId) {
@@ -9569,7 +9779,7 @@ const App = {
       if (this.state.currentUser && this.state.currentUser.studentId === originalId) {
         this.state.currentUser.studentId = newId;
         this.state.currentUser.fullName = name;
-        sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+        this.saveSessionUser(this.state.currentUser);
       }
     }
 
@@ -9586,7 +9796,7 @@ const App = {
 
     if (this.state.currentUser && this.state.currentUser.studentId === newId) {
       this.state.currentUser = { ...this.state.currentUser, ...student };
-      sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+      this.saveSessionUser(this.state.currentUser);
     }
 
     if (newId !== originalId) {
@@ -9611,23 +9821,23 @@ const App = {
     modal.id = 'selfEditStudentModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden my-8">
-        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between">
-          <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm">
+      <div class="bg-white rounded-3xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden my-2 sm:my-8">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between gap-2">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
               <i class="fa-solid fa-user-gear"></i>
             </div>
-            <div>
-              <h3 class="font-extrabold text-base text-slate-900">Hồ Sơ Cá Nhân &amp; Đổi Mật Khẩu</h3>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900">Hồ Sơ Cá Nhân &amp; Đổi Mật Khẩu</h3>
               <p class="text-xs text-slate-500 mt-0.5">Tài khoản học sinh: <span class="font-mono text-indigo-600 font-bold">${currentStudent.studentId}</span></p>
             </div>
           </div>
-          <button onclick="document.getElementById('selfEditStudentModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition">
+          <button onclick="document.getElementById('selfEditStudentModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition shrink-0">
             <i class="fa-solid fa-xmark text-base"></i>
           </button>
         </div>
 
-        <form onsubmit="event.preventDefault(); App.handleStudentSelfEditSubmit();" class="p-6 space-y-4 text-sm">
+        <form onsubmit="event.preventDefault(); App.handleStudentSelfEditSubmit();" class="p-4 sm:p-6 space-y-4 text-sm">
           <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs flex justify-between items-center">
             <div>Mã học sinh: <strong class="font-mono text-indigo-700">${currentStudent.studentId}</strong></div>
             <div>Khối <strong class="text-indigo-700">${this.getStudentGrade(currentStudent)}</strong> • Lớp <strong class="text-slate-800">${currentStudent.className || '12'}</strong></div>
@@ -9659,7 +9869,7 @@ const App = {
         </form>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal);
   },
 
   handleStudentSelfEditSubmit() {
@@ -9695,7 +9905,7 @@ const App = {
     u.fullName = name;
     u.phone = phone;
     u.password = pass;
-    sessionStorage.setItem('thpt_current_user', JSON.stringify(u));
+    this.saveSessionUser(u);
 
     this.saveData();
     if (student) this.pushStudentSubmissionToCloud(null, student);
@@ -11048,17 +11258,17 @@ const App = {
 
     const modal = document.createElement('div');
     modal.id = 'createExamModal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl p-6 sm:p-7 max-w-3xl w-full border border-slate-200 shadow-2xl space-y-4 my-8 max-h-[92vh] overflow-y-auto">
-        <div class="flex items-center justify-between border-b border-slate-100 pb-3.5">
-          <div>
-            <h3 class="font-extrabold text-slate-900 text-lg flex items-center">
-              <i class="fa-solid fa-file-pdf text-red-500 mr-2"></i>Đăng Tải Đề Thi PDF Mới
+      <div class="bg-white rounded-3xl p-4 sm:p-7 max-w-3xl w-full border border-slate-200 shadow-2xl space-y-4 my-2 sm:my-8 max-h-[92vh] overflow-y-auto">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-100 pb-3.5">
+          <div class="min-w-0">
+            <h3 class="font-extrabold text-slate-900 text-base sm:text-lg flex items-center">
+              <i class="fa-solid fa-file-pdf text-red-500 mr-2 shrink-0"></i><span>Đăng Tải Đề Thi PDF Mới</span>
             </h3>
             <p class="text-xs text-slate-500 mt-0.5">Tải lên là tự động lưu trực tiếp trên máy chủ đám mây, học sinh mở điện thoại xem ngay</p>
           </div>
-          <button onclick="App.cleanupUnusedPreuploads(); document.getElementById('createExamModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer"><i class="fa-solid fa-xmark text-base"></i></button>
+          <button onclick="App.cleanupUnusedPreuploads(); document.getElementById('createExamModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer shrink-0"><i class="fa-solid fa-xmark text-base"></i></button>
         </div>
 
         <form onsubmit="event.preventDefault(); App.handleCreateExamSubmit();" class="space-y-4 text-xs">
@@ -11163,14 +11373,14 @@ const App = {
             <button type="submit" id="createExamSubmitBtn" class="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center cursor-pointer">
               <i class="fa-solid fa-check mr-2"></i>Xuất Bản Đề Thi PDF
             </button>
-            <button type="button" onclick="App.cleanupUnusedPreuploads(); document.getElementById('createExamModal')?.remove()" class="px-5 py-3 bg-slate-100 rounded-xl font-semibold text-slate-700 cursor-pointer">
+            <button type="button" onclick="App.cleanupUnusedPreuploads(); document.getElementById('createExamModal')?.remove()" class="px-5 py-3 bg-slate-100 rounded-xl font-semibold text-slate-700 cursor-pointer shrink-0">
               Đóng
             </button>
           </div>
         </form>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal);
   },
 
   handlePdfFileSelect(event) {
@@ -11698,9 +11908,12 @@ const App = {
     modal.innerHTML = `
       <div class="bg-slate-900 rounded-2xl shadow-2xl flex-1 flex flex-col overflow-hidden border border-slate-700 max-w-6xl w-full mx-auto">
         <!-- Header -->
-        <div class="px-3 sm:px-5 py-2.5 sm:py-3.5 bg-slate-800 border-b border-slate-700 flex items-center justify-between gap-2 text-white shrink-0">
+        <div class="px-2.5 sm:px-5 py-2.5 sm:py-3.5 bg-slate-800 border-b border-slate-700 flex items-center justify-between gap-2 text-white shrink-0">
           <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
-            <span class="w-8 h-8 rounded-lg bg-red-600 flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
+            <button type="button" onclick="App.closePdfModal()" class="sm:hidden px-2.5 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer" title="Quay lại">
+              <i class="fa-solid fa-arrow-left text-[11px]"></i><span>Quay lại</span>
+            </button>
+            <span class="hidden sm:flex w-8 h-8 rounded-lg bg-red-600 items-center justify-center font-bold text-sm shrink-0 shadow-sm">
               <i class="fa-solid fa-file-pdf"></i>
             </span>
             <div class="min-w-0 truncate">
@@ -11722,7 +11935,7 @@ const App = {
             <a href="${finalUrl}" download="Tai_Lieu_${Date.now()}.pdf" class="px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-white flex items-center transition cursor-pointer whitespace-nowrap" title="Tải về máy">
               <i class="fa-solid fa-download sm:mr-1.5"></i><span class="hidden sm:inline">Tải Về</span>
             </a>
-            <button onclick="document.getElementById('previewPdfModal').remove()" class="w-8 h-8 rounded-lg bg-slate-700 hover:bg-red-600 text-white flex items-center justify-center transition cursor-pointer shrink-0">
+            <button type="button" onclick="App.closePdfModal()" class="w-8 h-8 rounded-lg bg-slate-700 hover:bg-red-600 text-white flex items-center justify-center transition cursor-pointer shrink-0" title="Đóng">
               <i class="fa-solid fa-xmark"></i>
             </button>
           </div>
@@ -11732,8 +11945,13 @@ const App = {
         <div id="modalPdfViewer" class="flex-1 w-full h-full min-h-0 flex flex-col bg-slate-950"></div>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal, Boolean(old));
     this.mountPdfViewer('modalPdfViewer', finalUrl);
+  },
+
+  closePdfModal() {
+    if (typeof document === 'undefined') return;
+    document.getElementById('previewPdfModal')?.remove();
   },
 
   async previewAdminPdf(examId) {
@@ -11787,22 +12005,24 @@ const App = {
     const maxScore = validScores.length > 0 ? Math.max(...validScores).toFixed(2) : '--';
     const totalViolations = subs.reduce((a, b) => a + (b.tabSwitches || 0), 0);
 
+    const wasOpen = Boolean(document.getElementById('studentDetailModal'));
+    document.getElementById('studentDetailModal')?.remove();
     const modal = document.createElement('div');
     modal.id = 'studentDetailModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm overflow-y-auto';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl p-6 sm:p-7 max-w-4xl w-full max-h-[88vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <div class="bg-white rounded-3xl p-4 sm:p-7 max-w-4xl w-full max-h-[88vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
         <!-- Header -->
-        <div class="flex items-start justify-between border-b pb-4 flex-shrink-0">
-          <div class="flex items-center space-x-3.5">
-            <div class="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xl shadow-md shadow-indigo-200">
+        <div class="flex items-start justify-between gap-2 border-b pb-3.5 sm:pb-4 flex-shrink-0">
+          <div class="flex items-start sm:items-center gap-2.5 sm:gap-3.5 min-w-0 flex-1">
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-lg sm:text-xl shadow-md shadow-indigo-200 shrink-0">
               <i class="fa-solid fa-user-graduate"></i>
             </div>
-            <div>
-              <div class="flex items-center space-x-2">
-                <h3 class="text-lg sm:text-xl font-extrabold text-slate-900">${student.fullName}</h3>
-                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-indigo-100 text-indigo-800">${student.studentId}</span>
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${student.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <h3 class="text-base sm:text-xl font-extrabold text-slate-900 break-words">${student.fullName}</h3>
+                <span class="px-2 py-0.5 rounded-full text-xs font-bold font-mono bg-indigo-100 text-indigo-800 shrink-0">${student.studentId}</span>
+                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${student.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
                   <span class="w-2 h-2 rounded-full ${student.status === 'active' ? 'bg-emerald-500' : 'bg-red-500'}"></span>
                   <span>${student.status === 'active' ? 'Đang hoạt động' : 'Đã khóa'}</span>
                 </span>
@@ -11827,11 +12047,11 @@ const App = {
               </p>
             </div>
           </div>
-          <div class="flex items-center space-x-2">
-            <button onclick="document.getElementById('studentDetailModal').remove(); App.showEditStudentModal('${student.studentId}');" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-indigo-200 cursor-pointer shadow-2xs" title="Chỉnh sửa tài khoản & thông tin học sinh">
-              <i class="fa-solid fa-user-pen"></i><span>Sửa thông tin</span>
+          <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <button type="button" onclick="document.getElementById('studentDetailModal').remove(); App.showEditStudentModal('${student.studentId}');" class="px-2.5 sm:px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-indigo-200 cursor-pointer shadow-2xs whitespace-nowrap" title="Chỉnh sửa tài khoản & thông tin học sinh">
+              <i class="fa-solid fa-user-pen"></i><span class="hidden sm:inline">Sửa thông tin</span><span class="sm:hidden">Sửa</span>
             </button>
-            <button onclick="document.getElementById('studentDetailModal').remove()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition cursor-pointer">
+            <button type="button" onclick="document.getElementById('studentDetailModal').remove()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition cursor-pointer shrink-0" title="Đóng">
               <i class="fa-solid fa-xmark"></i>
             </button>
           </div>
@@ -11950,7 +12170,7 @@ const App = {
         </div>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal, wasOpen);
   },
 
   cleanupUnusedHwPreupload() {
@@ -11970,21 +12190,21 @@ const App = {
     modal.id = 'addHomeworkModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl max-w-xl w-full border border-slate-200 shadow-2xl overflow-hidden my-8">
-        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between">
-          <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm">
+      <div class="bg-white rounded-3xl max-w-xl w-full border border-slate-200 shadow-2xl overflow-hidden my-2 sm:my-8">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between gap-2">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
               <i class="fa-solid fa-book-open text-base"></i>
             </div>
-            <div>
-              <h3 class="font-extrabold text-slate-900 text-base">Thêm Tài Liệu &amp; Chuyên Đề Mới</h3>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-slate-900 text-sm sm:text-base">Thêm Tài Liệu &amp; Chuyên Đề Mới</h3>
               <p class="text-xs text-slate-500 mt-0.5">Phân chia theo Khối 6 – 12, tự động lưu lên máy chủ và phân quyền học sinh</p>
             </div>
           </div>
-          <button onclick="App.cleanupUnusedHwPreupload(); document.getElementById('addHomeworkModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition"><i class="fa-solid fa-xmark text-base"></i></button>
+          <button onclick="App.cleanupUnusedHwPreupload(); document.getElementById('addHomeworkModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition shrink-0"><i class="fa-solid fa-xmark text-base"></i></button>
         </div>
 
-        <form onsubmit="event.preventDefault(); App.handleAddHomeworkSubmit();" class="p-6 space-y-4 text-sm">
+        <form onsubmit="event.preventDefault(); App.handleAddHomeworkSubmit();" class="p-4 sm:p-6 space-y-4 text-sm">
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Khối lớp (6 – 12) *</label>
@@ -12044,7 +12264,7 @@ const App = {
         </form>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal);
   },
 
   renderAdminHwGridHtml() {
@@ -12323,7 +12543,7 @@ const App = {
 
     if (this.state.currentUser && this.state.currentUser.role === 'admin') {
       this.state.currentUser = { ...this.state.admin };
-      sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+      this.saveSessionUser(this.state.currentUser);
     }
 
     this.saveData();
@@ -12361,7 +12581,7 @@ const App = {
 
     if (this.state.currentUser && this.state.currentUser.role === 'admin') {
       this.state.currentUser = { ...this.state.admin };
-      sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+      this.saveSessionUser(this.state.currentUser);
     }
 
     this.saveData();
@@ -12379,23 +12599,23 @@ const App = {
     modal.id = 'adminProfileModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl max-w-xl w-full border border-slate-200 shadow-2xl overflow-hidden my-8">
-        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-emerald-50/70 via-white to-slate-50 flex items-center justify-between">
-          <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-sm">
+      <div class="bg-white rounded-3xl max-w-xl w-full border border-slate-200 shadow-2xl overflow-hidden my-2 sm:my-8">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-emerald-50/70 via-white to-slate-50 flex items-center justify-between gap-2">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-sm shrink-0">
               <i class="fa-solid fa-user-gear text-base"></i>
             </div>
-            <div>
-              <h3 class="font-extrabold text-base text-slate-900">Hồ Sơ &amp; Mật Khẩu Giáo Viên</h3>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900">Hồ Sơ &amp; Mật Khẩu Giáo Viên</h3>
               <p class="text-xs text-slate-500 mt-0.5">Đổi tên hiển thị, tài khoản đăng nhập hoặc mật khẩu quản trị</p>
             </div>
           </div>
-          <button onclick="document.getElementById('adminProfileModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition">
+          <button onclick="document.getElementById('adminProfileModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition shrink-0">
             <i class="fa-solid fa-xmark text-base"></i>
           </button>
         </div>
 
-        <form onsubmit="event.preventDefault(); App.handleAdminModalSubmit();" class="p-6 space-y-4 text-sm">
+        <form onsubmit="event.preventDefault(); App.handleAdminModalSubmit();" class="p-4 sm:p-6 space-y-4 text-sm">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Tên hiển thị của Giáo viên *</label>
@@ -12407,8 +12627,8 @@ const App = {
             </div>
           </div>
 
-          <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2 text-xs">
-            <span class="text-slate-600"><i class="fa-solid fa-envelope text-emerald-600 mr-1.5"></i>Email khôi phục mật khẩu: <strong class="font-mono text-slate-900">${this.ADMIN_RECOVERY_EMAIL}</strong></span>
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span class="text-slate-600 min-w-0"><i class="fa-solid fa-envelope text-emerald-600 mr-1.5"></i>Email khôi phục mật khẩu: <strong class="font-mono text-slate-900 break-all">${this.ADMIN_RECOVERY_EMAIL}</strong></span>
             <button type="button" onclick="document.getElementById('adminProfileModal')?.remove(); App.requestAdminPasswordReset();" class="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer shrink-0">
               Gửi link đặt lại MK
             </button>
@@ -12446,7 +12666,7 @@ const App = {
         </form>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal, Boolean(existing));
   },
 
   handleAdminModalSubmit() {
@@ -12489,7 +12709,7 @@ const App = {
 
     if (this.state.currentUser && this.state.currentUser.role === 'admin') {
       this.state.currentUser = { ...this.state.admin };
-      sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+      this.saveSessionUser(this.state.currentUser);
     }
 
     this.saveData();
@@ -12636,23 +12856,23 @@ const App = {
     modal.id = 'resetAdminPasswordModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden my-8">
-        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-emerald-50/80 via-white to-indigo-50/40 flex items-center justify-between">
-          <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-sm">
+      <div class="bg-white rounded-3xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden my-2 sm:my-8">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-emerald-50/80 via-white to-indigo-50/40 flex items-center justify-between gap-2">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-sm shrink-0">
               <i class="fa-solid fa-key text-base"></i>
             </div>
-            <div>
-              <h3 class="font-extrabold text-base text-slate-900">Đặt Lại Mật Khẩu Giáo Viên</h3>
-              <p class="text-xs text-slate-500 mt-0.5">Xác thực từ liên kết email ${this.ADMIN_RECOVERY_EMAIL}</p>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900">Đặt Lại Mật Khẩu Giáo Viên</h3>
+              <p class="text-xs text-slate-500 mt-0.5 break-all">Xác thực từ liên kết email ${this.ADMIN_RECOVERY_EMAIL}</p>
             </div>
           </div>
-          <button onclick="document.getElementById('resetAdminPasswordModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition">
+          <button onclick="document.getElementById('resetAdminPasswordModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition shrink-0">
             <i class="fa-solid fa-xmark text-base"></i>
           </button>
         </div>
 
-        <form id="resetAdminPasswordForm" class="p-6 space-y-4 text-sm">
+        <form id="resetAdminPasswordForm" class="p-4 sm:p-6 space-y-4 text-sm">
           <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex items-center justify-between">
             <span class="text-slate-600">Tài khoản: <strong class="text-slate-900">${adminAcc.fullName}</strong></span>
             <span class="font-mono font-bold text-indigo-700">${adminAcc.username}</span>
@@ -12679,7 +12899,7 @@ const App = {
         </form>
       </div>
     `;
-    document.body.appendChild(modal);
+    this.openModalElement(modal, Boolean(existing));
     const form = modal.querySelector('#resetAdminPasswordForm');
     if (form) {
       form.addEventListener('submit', (e) => {
@@ -12729,7 +12949,7 @@ const App = {
 
     if (this.state.currentUser && this.state.currentUser.role === 'admin') {
       this.state.currentUser = { ...this.state.admin };
-      sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser));
+      this.saveSessionUser(this.state.currentUser);
     }
 
     this.saveData();
@@ -12860,6 +13080,7 @@ const App = {
   },
 
   showIosAppModal(autoOpened = false, preferredPlatform = null) {
+    const wasOpen = typeof document !== 'undefined' && Boolean(document.getElementById('iosAppGuideModal'));
     this.closeIosAppModal();
     const isIos = this.isIosDevice();
     const isAndroid = this.isAndroidDevice();
@@ -13130,7 +13351,7 @@ const App = {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) this.closeIosAppModal();
     });
-    document.body.appendChild(modal);
+    this.openModalElement(modal, wasOpen);
   },
 
   // --- TRÌNH XEM ĐỀ PDF ĐA TRANG (PDF.JS CANVAS) TỐI ƯU CHO APP iOS & MỌI TRÌNH DUYỆT ---
@@ -13161,9 +13382,8 @@ const App = {
 
   getPdfViewerFlowClasses(containerId, flowWithPage = false) {
     if (flowWithPage) {
-      const stickyOffset = containerId === 'submissionSolPdfViewer' ? 'sticky top-[98px] z-10' : 'sticky top-[33px] z-10';
       return {
-        toolbar: `bg-slate-900/95 backdrop-blur-xs border-b border-slate-800 px-3 py-1.5 flex items-center justify-between text-xs text-slate-200 shrink-0 ${stickyOffset}`,
+        toolbar: 'bg-slate-900/95 border-b border-slate-800 px-3 py-1.5 flex items-center justify-between text-xs text-slate-200 shrink-0 relative z-10',
         scroll: 'pdf-viewer-scroll pdf-viewer-flow w-full h-auto overflow-visible p-2 sm:p-4 space-y-3 bg-slate-900 rounded-b-2xl'
       };
     }
