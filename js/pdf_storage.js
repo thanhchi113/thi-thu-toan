@@ -1,10 +1,10 @@
-// PDFStorage: Bộ lưu trữ file PDF cục bộ không giới hạn dung lượng bằng IndexedDB
-// Giúp lưu file PDF thực tế của giáo viên bền vững, không bị giới hạn 5MB của LocalStorage
+// PDFStorage: Bộ lưu trữ file PDF siêu tốc (RAM Cache 0ms + IndexedDB bền vững không giới hạn dung lượng)
 
 const PDFStorage = {
   dbName: 'THPT_Math_Exam_PDF_DB',
   storeName: 'exam_pdf_blobs',
   dbPromise: null,
+  memCache: new Map(),
 
   getDB() {
     if (typeof indexedDB === 'undefined') return Promise.resolve(null);
@@ -27,10 +27,36 @@ const PDFStorage = {
     return this.dbPromise;
   },
 
+  _putMem(examId, blob) {
+    if (!examId || !blob) return;
+    const prev = this.memCache.get(examId);
+    if (prev && prev.url && prev.blob !== blob && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+      try { URL.revokeObjectURL(prev.url); } catch (_) {}
+    }
+    const keptUrl = (prev && prev.blob === blob) ? prev.url : null;
+    this.memCache.set(examId, { blob, url: keptUrl });
+  },
+
+  getCachedBlobUrlSync(examId) {
+    if (!examId) return '';
+    const entry = this.memCache.get(examId);
+    if (!entry || !entry.blob) return '';
+    if (!entry.url && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+      entry.url = URL.createObjectURL(entry.blob);
+    }
+    return entry.url || '';
+  },
+
+  hasMemBlob(examId) {
+    return Boolean(examId && this.memCache.has(examId));
+  },
+
   async savePdf(examId, blobOrFile) {
+    if (!examId || !blobOrFile) return false;
+    this._putMem(examId, blobOrFile);
     try {
       const db = await this.getDB();
-      if (!db) return false;
+      if (!db) return true;
       return new Promise((resolve, reject) => {
         const tx = db.transaction(this.storeName, 'readwrite');
         const store = tx.objectStore(this.storeName);
@@ -47,6 +73,8 @@ const PDFStorage = {
   async getPdfBlob(examId) {
     try {
       if (!examId) return null;
+      const mem = this.memCache.get(examId);
+      if (mem && mem.blob) return mem.blob;
       const db = await this.getDB();
       if (!db) return null;
       return new Promise((resolve) => {
@@ -55,7 +83,9 @@ const PDFStorage = {
         const req = store.get(examId);
         req.onsuccess = () => {
           const result = req.result;
-          resolve(result instanceof Blob ? result : null);
+          const valid = (typeof Blob !== 'undefined' && result instanceof Blob) ? result : null;
+          if (valid) this._putMem(examId, valid);
+          resolve(valid);
         };
         req.onerror = () => resolve(null);
       });
@@ -66,17 +96,26 @@ const PDFStorage = {
   },
 
   async getPdfBlobUrl(examId) {
+    const syncUrl = this.getCachedBlobUrlSync(examId);
+    if (syncUrl) return syncUrl;
     const blob = await this.getPdfBlob(examId);
-    return blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
-      ? URL.createObjectURL(blob)
-      : null;
+    if (!blob) return null;
+    this._putMem(examId, blob);
+    return this.getCachedBlobUrlSync(examId) || null;
   },
 
   async deletePdf(examId) {
+    if (examId && this.memCache.has(examId)) {
+      const prev = this.memCache.get(examId);
+      if (prev && prev.url && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        try { URL.revokeObjectURL(prev.url); } catch (_) {}
+      }
+      this.memCache.delete(examId);
+    }
     try {
       const db = await this.getDB();
       if (!db) return false;
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         const tx = db.transaction(this.storeName, 'readwrite');
         const store = tx.objectStore(this.storeName);
         store.delete(examId);
@@ -89,6 +128,12 @@ const PDFStorage = {
   },
 
   async clearAllPdfs() {
+    this.memCache.forEach((entry) => {
+      if (entry && entry.url && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        try { URL.revokeObjectURL(entry.url); } catch (_) {}
+      }
+    });
+    this.memCache.clear();
     try {
       const db = await this.getDB();
       if (!db) return false;

@@ -1127,7 +1127,112 @@ const PDFStorage = require('../js/pdf_storage.js');
   global.window = prevWindow;
   global.document = prevDocument;
 
-  console.log('[OK] TẤT CẢ 22 BỘ TEST (CHỐNG RESET TRANG, LƯU PHIÊN MOBILE, NÚT BACK LỚP PHỦ, SỬA PHẦN THƯỞNG & CHỐNG CHỤP MÀN HÌNH) ĐÃ ĐẠT 100%!');
+  // Test 23: Tăng tốc tải file & lưu file lên Server (RAM Cache 0ms, gộp luồng tải trùng, tải song song Promise.all + tái sử dụng pre-upload & bỏ tải thừa submissions khi lưu state)
+  await PDFStorage.clearAllPdfs();
+  const sampleFastBlob = new Blob(['%PDF-1.4 fast-ram'], { type: 'application/pdf' });
+  await PDFStorage.savePdf('FAST-EXAM-1', sampleFastBlob);
+  assert.strictEqual(PDFStorage.hasMemBlob('FAST-EXAM-1'), true, 'savePdf must populate 0ms RAM memCache immediately');
+  const syncBlobUrl = PDFStorage.getCachedBlobUrlSync('FAST-EXAM-1');
+  assert.ok(syncBlobUrl.startsWith('blob:'), 'getCachedBlobUrlSync must return instant blob URL from RAM');
+  assert.strictEqual(PDFStorage.getCachedBlobUrlSync('FAST-EXAM-1'), syncBlobUrl, 'Repeated getCachedBlobUrlSync must reuse same ObjectURL');
+  await PDFStorage.deletePdf('FAST-EXAM-1');
+  assert.strictEqual(PDFStorage.hasMemBlob('FAST-EXAM-1'), false, 'deletePdf must clear RAM memCache');
+
+  // 23.1 Hợp nhất các luồng tải PDF trùng lặp (5 lượt gọi đồng thời chỉ phát sinh đúng 1 HTTP GET)
+  const prevFetch23 = global.fetch;
+  let pdfGetCalls = 0;
+  let storagePostCalls = 0;
+  let submissionsGetCalls = 0;
+  let maxConcurrentUploads = 0;
+  let activeUploads = 0;
+  const targetFastPdfUrl = `${App.SUPABASE_URL}/storage/v1/object/public/${App.SUPABASE_BUCKET}/DEDUP_TEST_999.pdf`;
+
+  global.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    const method = (opts.method || 'GET').toUpperCase();
+    if (u === targetFastPdfUrl && method === 'GET') {
+      pdfGetCalls += 1;
+      await new Promise(r => setTimeout(r, 35));
+      return { ok: true, status: 200, blob: async () => new Blob(['%PDF-1.4 dedup'], { type: 'application/pdf' }) };
+    }
+    if (u.includes('/storage/v1/object/') && method === 'POST') {
+      storagePostCalls += 1;
+      activeUploads += 1;
+      if (activeUploads > maxConcurrentUploads) maxConcurrentUploads = activeUploads;
+      assert.strictEqual(opts.headers['cache-control'], '31536000', 'Upload must set 1-year immutable CDN cache-control header');
+      await new Promise(r => setTimeout(r, 40));
+      activeUploads -= 1;
+      return { ok: true, status: 200, text: async () => '' };
+    }
+    if (u.includes('/rest/v1/khao_thi_submissions') && method === 'GET') {
+      submissionsGetCalls += 1;
+      return { ok: true, status: 200, json: async () => [] };
+    }
+    if (u.includes('/rest/v1/khao_thi_state') && method === 'GET') {
+      return { ok: true, status: 200, json: async () => [] };
+    }
+    if (u.includes('/rest/v1/khao_thi_state') && method === 'POST') {
+      return { ok: true, status: 201, text: async () => '' };
+    }
+    return { ok: true, status: 200, json: async () => [] };
+  };
+
+  const parallelUrls = await Promise.all([
+    App.resolvePdfSourceUrl(targetFastPdfUrl, 'DEDUP-SLOT'),
+    App.resolvePdfSourceUrl(targetFastPdfUrl, 'DEDUP-SLOT'),
+    App.resolvePdfSourceUrl(targetFastPdfUrl, 'DEDUP-SLOT'),
+    App.resolvePdfSourceUrl(targetFastPdfUrl, 'DEDUP-SLOT'),
+    App.resolvePdfSourceUrl(targetFastPdfUrl, 'DEDUP-SLOT')
+  ]);
+  assert.strictEqual(pdfGetCalls, 1, '5 concurrent resolvePdfSourceUrl calls must share 1 single HTTP download');
+  assert.ok(parallelUrls.every(u => u.startsWith('blob:')), 'All callers must receive valid blob URL');
+
+  // Lần mở tiếp theo phải lấy thẳng từ RAM 0ms (không gọi thêm bất kỳ fetch nào)
+  const instantSecondOpen = await App.resolvePdfSourceUrl(targetFastPdfUrl, 'DEDUP-SLOT');
+  assert.strictEqual(pdfGetCalls, 1, 'Subsequent open must hit 0ms RAM cache with 0 network calls');
+  assert.strictEqual(instantSecondOpen, parallelUrls[0], 'Subsequent open must reuse cached blob URL');
+
+  // 23.2 Lưu song song nhiều file PDF (Đề + Lời giải + Tài liệu) & tái sử dụng luồng pre-upload không tải lại từ đầu
+  await PDFStorage.savePdf('EX-PAR-1', new Blob(['%PDF-Q'], { type: 'application/pdf' }));
+  await PDFStorage.savePdf('EX-PAR-1_sol', new Blob(['%PDF-SOL'], { type: 'application/pdf' }));
+  await PDFStorage.savePdf('HW-PAR-1', new Blob(['%PDF-HW'], { type: 'application/pdf' }));
+
+  const preuploadedUrl = `${App.SUPABASE_URL}/storage/v1/object/public/${App.SUPABASE_BUCKET}/PREUPLOADED_HW_1.pdf`;
+  App.registerInFlightSlotUpload('HW-PAR-1', new Promise(r => setTimeout(() => r(preuploadedUrl), 15)));
+
+  App._enableNodeCloudTest = true;
+  App.state.cloudLastSyncedAt = 0;
+  App.state.exams = [{
+    id: 'EX-PAR-1',
+    title: 'Đề Tải Song Song',
+    grade: 12,
+    category: 'GK1',
+    is_active: true,
+    pdf_url: 'idb:EX-PAR-1',
+    solution_pdf_url: 'idb:EX-PAR-1_sol',
+    part1: [], part2: [], part3: [], part4: []
+  }];
+  App.state.homeworks = [{
+    id: 'HW-PAR-1',
+    title: 'Chuyên Đề Tốc Độ Cao',
+    grade: 12,
+    pdfUrl: 'idb:HW-PAR-1',
+    allowedAll: true
+  }];
+
+  await App.pushAdminStateToCloud({ manual: false });
+  assert.strictEqual(submissionsGetCalls, 0, 'pushAdminStateToCloud must skip fetching 2000 submissions when merging stateOnly');
+  assert.strictEqual(storagePostCalls, 2, 'Must reuse pre-uploaded HW promise and only POST the remaining 2 PDFs');
+  assert.strictEqual(maxConcurrentUploads, 2, 'Question PDF and Solution PDF must upload in parallel (concurrency = 2)');
+  assert.strictEqual(App.state.homeworks[0].pdfUrl, preuploadedUrl, 'Homework must receive reused pre-uploaded URL');
+  assert.ok(App.state.exams[0].pdf_url.includes('/storage/v1/object/public/'), 'Question PDF must be uploaded to CDN');
+  assert.ok(App.state.exams[0].solution_pdf_url.includes('/storage/v1/object/public/'), 'Solution PDF must be uploaded to CDN');
+
+  App._enableNodeCloudTest = false;
+  global.fetch = prevFetch23;
+  await PDFStorage.clearAllPdfs();
+
+  console.log('[OK] TẤT CẢ 23 BỘ TEST (TĂNG TỐC TẢI/LƯU SERVER, RAM CACHE 0MS, CHỐNG RESET TRANG & NÚT BACK MOBILE) ĐÃ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

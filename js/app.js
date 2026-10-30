@@ -1485,24 +1485,67 @@ const App = {
     }
   },
 
-  async uploadPdfToServer(storageKey, blob) {
+  async uploadPdfToServer(storageKey, blob, onProgress = null) {
     if (!this.isServerSyncEnabled() || !blob) {
       throw new Error('Server sync unavailable');
     }
     const safeKey = String(storageKey || 'exam').replace(/[^a-zA-Z0-9_-]/g, '_');
     const objName = `${safeKey}_${Date.now()}.pdf`;
-    const res = await fetch(`${this.SUPABASE_URL}/storage/v1/object/${this.SUPABASE_BUCKET}/${objName}`, {
-      method: 'POST',
-      headers: this.getSupabaseHeaders({
-        'Content-Type': 'application/pdf',
-        'x-upsert': 'true'
-      }),
-      body: blob
+    const endpoint = `${this.SUPABASE_URL}/storage/v1/object/${this.SUPABASE_BUCKET}/${objName}`;
+    const headers = this.getSupabaseHeaders({
+      'Content-Type': 'application/pdf',
+      'cache-control': '31536000',
+      'x-upsert': 'true'
     });
-    if (!res || !res.ok) {
-      const errText = res && typeof res.text === 'function' ? await res.text().catch(() => '') : '';
-      throw new Error(errText || `Upload PDF HTTP ${res ? res.status : 0}`);
+
+    const attemptUpload = () => {
+      if (typeof XMLHttpRequest === 'function' && typeof window !== 'undefined') {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', endpoint, true);
+          Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+          if (typeof onProgress === 'function' && xhr.upload) {
+            xhr.upload.onprogress = (ev) => {
+              if (ev.lengthComputable && ev.total > 0) {
+                onProgress(Math.min(99, Math.max(1, Math.round((ev.loaded / ev.total) * 100))));
+              }
+            };
+          }
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              if (typeof onProgress === 'function') onProgress(100);
+              resolve();
+            } else {
+              const err = new Error(xhr.responseText || `Upload PDF HTTP ${xhr.status}`);
+              err.status = xhr.status;
+              reject(err);
+            }
+          };
+          xhr.onerror = () => reject(new Error('Network upload error'));
+          xhr.send(blob);
+        });
+      }
+      return fetch(endpoint, { method: 'POST', headers, body: blob }).then(async (res) => {
+        if (!res || !res.ok) {
+          const errText = res && typeof res.text === 'function' ? await res.text().catch(() => '') : '';
+          const err = new Error(errText || `Upload PDF HTTP ${res ? res.status : 0}`);
+          err.status = res ? res.status : 0;
+          throw err;
+        }
+        if (typeof onProgress === 'function') onProgress(100);
+      });
+    };
+
+    try {
+      await attemptUpload();
+    } catch (firstErr) {
+      if (firstErr && firstErr.status >= 400 && firstErr.status < 500 && firstErr.status !== 408 && firstErr.status !== 429) {
+        throw firstErr;
+      }
+      await new Promise(r => setTimeout(r, 300));
+      await attemptUpload();
     }
+
     const publicUrl = `${this.SUPABASE_URL}/storage/v1/object/public/${this.SUPABASE_BUCKET}/${objName}`;
     if (storageKey) this.setPdfCacheVersion(storageKey, publicUrl);
     return publicUrl;
@@ -1523,35 +1566,64 @@ const App = {
     } catch (_) {}
   },
 
+  async resolveCachedPdfUrlFast(rawUrl, storageKey = null) {
+    const urlStr = String(rawUrl || '').trim();
+    if (!urlStr && !storageKey) return '';
+    if (/^(blob:|data:application\/pdf)/i.test(urlStr)) return urlStr;
+    const derivedKey = storageKey || (urlStr.startsWith('idb:') ? urlStr.slice(4) : '');
+    if (!derivedKey || typeof PDFStorage === 'undefined') return '';
+    const verMap = this.getPdfCacheVersionMap();
+    const expectedVer = (urlStr && !urlStr.startsWith('idb:')) ? urlStr : '';
+    if (expectedVer && verMap[derivedKey] && verMap[derivedKey] !== expectedVer) return '';
+
+    if (typeof PDFStorage.getCachedBlobUrlSync === 'function') {
+      const ramUrl = PDFStorage.getCachedBlobUrlSync(derivedKey);
+      if (ramUrl) return ramUrl;
+    }
+    if (typeof PDFStorage.getPdfBlobUrl === 'function') {
+      const idbUrl = await PDFStorage.getPdfBlobUrl(derivedKey);
+      if (idbUrl) return idbUrl;
+    }
+    return '';
+  },
+
   async resolvePdfSourceUrl(rawUrl, storageKey = null) {
     const urlStr = String(rawUrl || '').trim();
     if (!urlStr && !storageKey) return '';
     if (/^(blob:|data:application\/pdf)/i.test(urlStr)) return urlStr;
 
     const derivedKey = storageKey || (urlStr.startsWith('idb:') ? urlStr.slice(4) : '');
-    const verMap = this.getPdfCacheVersionMap();
+    const fastCached = await this.resolveCachedPdfUrlFast(urlStr, derivedKey);
+    if (fastCached) return fastCached;
 
-    // 1. Mở tức thì 0ms từ bộ nhớ đệm IndexedDB trên thiết bị nếu đúng phiên bản
-    if (derivedKey && typeof PDFStorage !== 'undefined' && typeof PDFStorage.getPdfBlobUrl === 'function') {
-      const expectedVer = (urlStr && !urlStr.startsWith('idb:')) ? urlStr : '';
-      if (!expectedVer || !verMap[derivedKey] || verMap[derivedKey] === expectedVer) {
-        const cachedBlobUrl = await PDFStorage.getPdfBlobUrl(derivedKey);
-        if (cachedBlobUrl) return cachedBlobUrl;
-      }
-    }
-
-    // 2. Tải từ Server Đám mây (Supabase Storage / HTTPS / pdfs/...) và tự động lưu đệm vào IndexedDB của điện thoại
+    // Tải từ Server Đám mây (hợp nhất luồng đang tải trùng lặp) & nạp tức thì vào RAM + IndexedDB
     const isDirectPdfUrl = /^(\.\/)?pdfs\//i.test(urlStr) || (this.SUPABASE_URL && urlStr.startsWith(this.SUPABASE_URL));
     if (isDirectPdfUrl && typeof fetch === 'function') {
       const targetUrl = /^(\.\/)?pdfs\//i.test(urlStr) ? `./${urlStr.replace(/^\.\//, '')}` : urlStr;
-      try {
-        const res = await fetch(targetUrl);
-        if (res && res.ok) {
+      if (!this._inflightPdfDownloads) this._inflightPdfDownloads = new Map();
+      let dlPromise = this._inflightPdfDownloads.get(targetUrl);
+      if (!dlPromise) {
+        dlPromise = (async () => {
+          const res = await fetch(targetUrl);
+          if (!res || !res.ok) return null;
           const rawBlob = await res.blob();
-          const pdfBlob = rawBlob.type === 'application/pdf' ? rawBlob : new Blob([rawBlob], { type: 'application/pdf' });
+          return rawBlob.type === 'application/pdf' ? rawBlob : new Blob([rawBlob], { type: 'application/pdf' });
+        })().finally(() => {
+          this._inflightPdfDownloads.delete(targetUrl);
+        });
+        this._inflightPdfDownloads.set(targetUrl, dlPromise);
+      }
+      try {
+        const pdfBlob = await dlPromise;
+        if (pdfBlob) {
           if (derivedKey && typeof PDFStorage !== 'undefined') {
-            await PDFStorage.savePdf(derivedKey, pdfBlob);
             this.setPdfCacheVersion(derivedKey, urlStr);
+            const saveTask = PDFStorage.savePdf(derivedKey, pdfBlob);
+            if (typeof PDFStorage.getCachedBlobUrlSync === 'function') {
+              const memUrl = PDFStorage.getCachedBlobUrlSync(derivedKey);
+              if (memUrl) return memUrl;
+            }
+            await saveTask;
           }
           if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
             return URL.createObjectURL(pdfBlob);
@@ -1565,6 +1637,45 @@ const App = {
       return urlStr;
     }
     return '';
+  },
+
+  scheduleIdlePdfPrefetch() {
+    if (typeof window === 'undefined' || typeof fetch !== 'function' || this.state.activeExam) return;
+    if (this._idlePrefetchTimer) clearTimeout(this._idlePrefetchTimer);
+    this._idlePrefetchTimer = setTimeout(async () => {
+      this._idlePrefetchTimer = null;
+      if (this.state.activeExam || (typeof document !== 'undefined' && document.hidden)) return;
+      const u = this.state.currentUser;
+      if (!u) return;
+
+      const candidates = [];
+      const activeExams = (this.state.exams || []).filter(e =>
+        e && e.is_active !== false && e.pdf_url && !String(e.pdf_url).startsWith('idb:') &&
+        (u.role === 'admin' || this.isStudentAllowedExam(e, u))
+      );
+      activeExams.slice(0, 4).forEach(e => candidates.push({ url: e.pdf_url, key: e.id }));
+
+      if (candidates.length < 4) {
+        const hws = (this.state.homeworks || []).filter(h =>
+          h && h.pdfUrl && !String(h.pdfUrl).startsWith('idb:') &&
+          (u.role === 'admin' || h.allowedAll || (Array.isArray(h.allowedStudents) && h.allowedStudents.includes(u.studentId)))
+        );
+        hws.slice(0, 4 - candidates.length).forEach(h => candidates.push({ url: h.pdfUrl, key: h.id }));
+      }
+
+      const uncached = [];
+      for (const item of candidates) {
+        const hit = await this.resolveCachedPdfUrlFast(item.url, item.key);
+        if (!hit) uncached.push(item);
+      }
+      const runWorker = async () => {
+        while (uncached.length > 0 && !this.state.activeExam) {
+          const next = uncached.shift();
+          if (next) await this.resolvePdfSourceUrl(next.url, next.key).catch(() => {});
+        }
+      };
+      await Promise.all([runWorker(), runWorker()]);
+    }, 450);
   },
 
   async downloadHomeworkPdf(hwId) {
@@ -1797,12 +1908,14 @@ const App = {
     });
   },
 
-  async fetchSupabaseServerSnapshot() {
+  async fetchSupabaseServerSnapshot({ stateOnly = false } = {}) {
     if (!this.isServerSyncEnabled()) return null;
     const headers = this.getSupabaseHeaders();
     const [stateRes, subsRes, stuRes] = await Promise.all([
       fetch(`${this.SUPABASE_URL}/rest/v1/khao_thi_state?id=eq.main&select=updated_at,deleted_ids,exams,homeworks,students,settings`, { headers, cache: 'no-store' }).catch(() => null),
-      fetch(`${this.SUPABASE_URL}/rest/v1/khao_thi_submissions?select=id,payload&order=submitted_at.desc&limit=2000`, { headers, cache: 'no-store' }).catch(() => null),
+      stateOnly
+        ? Promise.resolve(null)
+        : fetch(`${this.SUPABASE_URL}/rest/v1/khao_thi_submissions?select=id,payload&order=submitted_at.desc&limit=2000`, { headers, cache: 'no-store' }).catch(() => null),
       fetch(`${this.SUPABASE_URL}/rest/v1/khao_thi_student_updates?select=student_id,payload,updated_at`, { headers, cache: 'no-store' }).catch(() => null)
     ]);
 
@@ -1846,7 +1959,7 @@ const App = {
       homeworks: updatedAt > 0 && Array.isArray(stateRow?.homeworks) ? stateRow.homeworks : undefined,
       students: (updatedAt > 0 || hasStuUpdates) ? students : undefined,
       settings: updatedAt > 0 && stateRow?.settings ? stateRow.settings : undefined,
-      submissions,
+      submissions: stateOnly ? undefined : submissions,
       hasStudentUpdates: hasStuUpdates
     };
   },
@@ -1921,7 +2034,18 @@ const App = {
     this._autoCloudPushTimer = setTimeout(() => {
       this._autoCloudPushTimer = null;
       this.pushAdminStateToCloud({ manual: false });
-    }, 250);
+    }, 80);
+  },
+
+  registerInFlightSlotUpload(slotKey, uploadPromise) {
+    if (!slotKey || !uploadPromise) return;
+    if (!this._inFlightSlotUploads) this._inFlightSlotUploads = new Map();
+    const tracked = Promise.resolve(uploadPromise).finally(() => {
+      if (this._inFlightSlotUploads && this._inFlightSlotUploads.get(slotKey) === tracked) {
+        this._inFlightSlotUploads.delete(slotKey);
+      }
+    });
+    this._inFlightSlotUploads.set(slotKey, tracked);
   },
 
   async pushAdminStateToCloud({ manual = false } = {}) {
@@ -1938,34 +2062,45 @@ const App = {
     this._pushCloudPromise = (async () => {
       let ok = false;
       try {
-        // Bảo vệ dữ liệu Server: nếu phiên hiện tại chưa tải trạng thái Server lần nào, gộp trước để không bao giờ ghi đè mất đề thi cũ
+        // Bảo vệ dữ liệu Server: nếu phiên hiện tại chưa tải trạng thái Server lần nào, gộp nhanh chỉ bảng khao_thi_state
         if (!this.state.cloudLastSyncedAt) {
-          const snap = await this.fetchSupabaseServerSnapshot().catch(() => null);
+          const snap = await this.fetchSupabaseServerSnapshot({ stateOnly: true }).catch(() => null);
           if (snap) this.mergeCloudState(snap);
         }
 
         const uploadSlotIfNeeded = async (currentUrl, storageKey) => {
           const cur = String(currentUrl || '');
           if (!cur.startsWith('idb:')) return cur;
+          if (this._inFlightSlotUploads && this._inFlightSlotUploads.has(storageKey)) {
+            const inflightUrl = await this._inFlightSlotUploads.get(storageKey).catch(() => '');
+            if (inflightUrl) {
+              this.setPdfCacheVersion(storageKey, inflightUrl);
+              return inflightUrl;
+            }
+          }
           if (typeof PDFStorage === 'undefined' || typeof PDFStorage.getPdfBlob !== 'function') return cur;
           const blob = await PDFStorage.getPdfBlob(storageKey);
           if (!blob) return cur;
           return await this.uploadPdfToServer(storageKey, blob);
         };
 
+        // Tải song song toàn bộ các tệp PDF chờ đồng bộ lên Supabase Storage thay vì tuần tự từng file
+        const uploadJobs = [];
         for (const ex of (this.state.exams || [])) {
-          if (ex.pdf_url) {
-            ex.pdf_url = await uploadSlotIfNeeded(ex.pdf_url, ex.id);
+          if (ex.pdf_url && String(ex.pdf_url).startsWith('idb:')) {
+            uploadJobs.push(uploadSlotIfNeeded(ex.pdf_url, ex.id).then((u) => { ex.pdf_url = u; }));
           }
-          if (ex.solution_pdf_url) {
-            ex.solution_pdf_url = await uploadSlotIfNeeded(ex.solution_pdf_url, `${ex.id}_sol`);
+          if (ex.solution_pdf_url && String(ex.solution_pdf_url).startsWith('idb:')) {
+            uploadJobs.push(uploadSlotIfNeeded(ex.solution_pdf_url, `${ex.id}_sol`).then((u) => { ex.solution_pdf_url = u; }));
           }
         }
-
         for (const hw of (this.state.homeworks || [])) {
-          if (hw.pdfUrl) {
-            hw.pdfUrl = await uploadSlotIfNeeded(hw.pdfUrl, hw.id);
+          if (hw.pdfUrl && String(hw.pdfUrl).startsWith('idb:')) {
+            uploadJobs.push(uploadSlotIfNeeded(hw.pdfUrl, hw.id).then((u) => { hw.pdfUrl = u; }));
           }
+        }
+        if (uploadJobs.length > 0) {
+          await Promise.all(uploadJobs);
         }
 
         const nowTs = Date.now();
@@ -2048,56 +2183,62 @@ const App = {
   async pushStudentSubmissionToCloud(submission, studentUpdate = null) {
     if (!this.isServerSyncEnabled()) return false;
     let ok = true;
+    const tasks = [];
 
     if (submission && submission.id) {
-      try {
-        const res = await fetch(`${this.SUPABASE_URL}/rest/v1/khao_thi_submissions?on_conflict=id`, {
-          method: 'POST',
-          headers: this.getSupabaseHeaders({
-            'Content-Type': 'application/json',
-            Prefer: 'resolution=merge-duplicates,return=minimal'
-          }),
-          body: JSON.stringify({
-            id: submission.id,
-            student_id: String(submission.studentId || 'HS'),
-            exam_id: String(submission.examId || 'EXAM'),
-            submitted_at: submission.submittedAt || new Date().toISOString(),
-            payload: submission,
-            updated_at: submission.updatedAt || new Date().toISOString()
-          })
-        });
-        if (res && res.ok) {
-          this.setPendingSubmissionIds(this.getPendingSubmissionIds().filter(id => id !== submission.id));
-        } else {
+      tasks.push((async () => {
+        try {
+          const res = await fetch(`${this.SUPABASE_URL}/rest/v1/khao_thi_submissions?on_conflict=id`, {
+            method: 'POST',
+            headers: this.getSupabaseHeaders({
+              'Content-Type': 'application/json',
+              Prefer: 'resolution=merge-duplicates,return=minimal'
+            }),
+            body: JSON.stringify({
+              id: submission.id,
+              student_id: String(submission.studentId || 'HS'),
+              exam_id: String(submission.examId || 'EXAM'),
+              submitted_at: submission.submittedAt || new Date().toISOString(),
+              payload: submission,
+              updated_at: submission.updatedAt || new Date().toISOString()
+            })
+          });
+          if (res && res.ok) {
+            this.setPendingSubmissionIds(this.getPendingSubmissionIds().filter(id => id !== submission.id));
+          } else {
+            ok = false;
+            this.setPendingSubmissionIds([...this.getPendingSubmissionIds(), submission.id]);
+          }
+        } catch (_) {
           ok = false;
           this.setPendingSubmissionIds([...this.getPendingSubmissionIds(), submission.id]);
         }
-      } catch (_) {
-        ok = false;
-        this.setPendingSubmissionIds([...this.getPendingSubmissionIds(), submission.id]);
-      }
+      })());
     }
 
     if (studentUpdate && studentUpdate.studentId) {
-      try {
-        const res = await fetch(`${this.SUPABASE_URL}/rest/v1/khao_thi_student_updates?on_conflict=student_id`, {
-          method: 'POST',
-          headers: this.getSupabaseHeaders({
-            'Content-Type': 'application/json',
-            Prefer: 'resolution=merge-duplicates,return=minimal'
-          }),
-          body: JSON.stringify({
-            student_id: studentUpdate.studentId,
-            payload: studentUpdate,
-            updated_at: studentUpdate.updatedAt || new Date().toISOString()
-          })
-        });
-        if (!res || !res.ok) ok = false;
-      } catch (_) {
-        ok = false;
-      }
+      tasks.push((async () => {
+        try {
+          const res = await fetch(`${this.SUPABASE_URL}/rest/v1/khao_thi_student_updates?on_conflict=student_id`, {
+            method: 'POST',
+            headers: this.getSupabaseHeaders({
+              'Content-Type': 'application/json',
+              Prefer: 'resolution=merge-duplicates,return=minimal'
+            }),
+            body: JSON.stringify({
+              student_id: studentUpdate.studentId,
+              payload: studentUpdate,
+              updated_at: studentUpdate.updatedAt || new Date().toISOString()
+            })
+          });
+          if (!res || !res.ok) ok = false;
+        } catch (_) {
+          ok = false;
+        }
+      })());
     }
 
+    if (tasks.length) await Promise.all(tasks);
     return ok;
   },
 
@@ -2115,12 +2256,10 @@ const App = {
     if (!this.isServerSyncEnabled()) return;
     const pendingIds = this.getPendingSubmissionIds();
     if (!pendingIds.length) return;
-    for (const subId of pendingIds) {
+    await Promise.all(pendingIds.map((subId) => {
       const sub = (this.state.submissions || []).find(s => s.id === subId);
-      if (sub) {
-        await this.pushStudentSubmissionToCloud(sub);
-      }
-    }
+      return sub ? this.pushStudentSubmissionToCloud(sub) : Promise.resolve();
+    }));
   },
 
   // Hệ thống Hộp thoại Thông báo & Xác nhận đồng bộ giao diện toàn web
@@ -3174,12 +3313,14 @@ const App = {
     if (this.state.currentUser.role === 'admin') {
       this.renderAdminDashboard(appContainer);
       this.syncScrollTopButtons();
+      this.scheduleIdlePdfPrefetch();
       return;
     }
 
     if (this.state.currentUser.role === 'student') {
       this.renderStudentPortal(appContainer);
       this.syncScrollTopButtons();
+      this.scheduleIdlePdfPrefetch();
       return;
     }
   },
@@ -4972,11 +5113,32 @@ const App = {
     this.state.paletteFilter = 'all';
     this.state.activePart3Target = { qId: 1, boxIdx: 0 };
 
-    // Giải mã file PDF từ IndexedDB hoặc tự động tải từ Đám mây (GitHub / Google Drive) cho điện thoại
-    this.state.resolvedPdfUrl = await this.resolvePdfSourceUrl(exam.pdf_url, exam.id);
+    // Mở phòng thi tức thì (0ms nếu đã có trong RAM/IndexedDB, hoặc tải nền song song ngay trong khung đề)
+    const fastPdfUrl = await this.resolveCachedPdfUrlFast(exam.pdf_url, exam.id);
+    this.state.resolvedPdfUrl = fastPdfUrl || '';
 
     this.render();
     this.startTimer();
+
+    if (!fastPdfUrl && exam.pdf_url) {
+      const host = typeof document !== 'undefined' ? document.getElementById('examRoomPdfViewer') : null;
+      if (host) {
+        host.innerHTML = `
+          <div class="flex-1 w-full h-full min-h-[240px] flex flex-col items-center justify-center p-6 text-center text-slate-300 text-xs gap-2.5">
+            <i class="fa-solid fa-spinner fa-spin text-2xl text-indigo-400"></i>
+            <div class="font-semibold">Đang tải nhanh đề thi PDF từ máy chủ...</div>
+          </div>
+        `;
+      }
+      this.resolvePdfSourceUrl(exam.pdf_url, exam.id).then((resolved) => {
+        if (!resolved || !this.state.activeExam || this.state.activeExam.id !== exam.id) return;
+        this.state.resolvedPdfUrl = resolved;
+        if (typeof document !== 'undefined') {
+          document.querySelectorAll(`a[download="De_Thi_${exam.id}.pdf"]`).forEach(a => { a.href = resolved; });
+        }
+        this.mountPdfViewer('examRoomPdfViewer', resolved, { flowWithPage: this.isExamStackedFlowMode() });
+      }).catch(() => {});
+    }
   },
 
   startTimer() {
@@ -6156,8 +6318,8 @@ const App = {
 
   async compressImageFile(file, maxWidth = 1200, quality = 0.72) {
     return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
+      const useObjUrl = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function';
+      const loadFromSrc = (src, cleanup) => {
         const img = new Image();
         img.onload = () => {
           const scale = img.width > maxWidth ? maxWidth / img.width : 1;
@@ -6166,11 +6328,22 @@ const App = {
           canvas.height = Math.max(1, Math.round(img.height * scale));
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          if (cleanup) cleanup();
           resolve(canvas.toDataURL('image/jpeg', quality));
         };
-        img.onerror = () => resolve(ev.target.result);
-        img.src = ev.target.result;
+        img.onerror = () => {
+          if (cleanup) cleanup();
+          resolve('');
+        };
+        img.src = src;
       };
+      if (useObjUrl) {
+        const objUrl = URL.createObjectURL(file);
+        loadFromSrc(objUrl, () => { try { URL.revokeObjectURL(objUrl); } catch (_) {} });
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => loadFromSrc(ev.target.result, null);
       reader.onerror = () => resolve('');
       reader.readAsDataURL(file);
     });
@@ -6182,10 +6355,10 @@ const App = {
     if (!files.length) return;
     if (!this.state.answers.part4) this.state.answers.part4 = {};
     if (!this.state.answers.part4[qId]) this.state.answers.part4[qId] = { text: '', images: [] };
-    for (const f of files.slice(0, 4)) {
-      const dataUrl = await this.compressImageFile(f);
+    const compressed = await Promise.all(files.slice(0, 4).map(f => this.compressImageFile(f)));
+    compressed.forEach((dataUrl) => {
       if (dataUrl) this.state.answers.part4[qId].images.push(dataUrl);
-    }
+    });
     this.refreshQuestionProgressDom('p4', qId);
     this.updateProgressUi();
     const pane = document.getElementById('splitAnswerInputsContainer');
@@ -6580,6 +6753,10 @@ const App = {
     const gainedPoints = Math.max(0, updatedRewardStats.earnedPoints - prevEarnedPoints);
     this.saveData();
     this.pushStudentSubmissionToCloud(submission);
+    const finishedExam = this.state.activeExam;
+    if (finishedExam && finishedExam.solution_pdf_url && finishedExam.allow_view_answers !== false) {
+      this.resolvePdfSourceUrl(finishedExam.solution_pdf_url, `${finishedExam.id}_sol`).catch(() => {});
+    }
 
     this.state.activeExam = null;
     this.render();
@@ -7009,11 +7186,13 @@ const App = {
     const isStudent = this.state.currentUser && this.state.currentUser.role === 'student';
     const canViewAnswers = !isStudent || (exam.allow_view_answers !== false && (this.state.settings && this.state.settings.allowStudentViewAnswers !== false));
 
-    const solPdfUrl = exam.solution_pdf_url
-      ? (await this.resolvePdfSourceUrl(exam.solution_pdf_url, exam.id + '_sol'))
+    const hasSolPdfSource = Boolean(exam.solution_pdf_url);
+    const fastSolUrl = (canViewAnswers && hasSolPdfSource)
+      ? await this.resolveCachedPdfUrlFast(exam.solution_pdf_url, exam.id + '_sol')
       : '';
+    const solPdfUrl = fastSolUrl || (hasSolPdfSource ? exam.solution_pdf_url : '');
 
-    const showPdf = canViewAnswers && solPdfUrl && !this.state.hideSolutionPdfInDetail;
+    const showPdf = canViewAnswers && hasSolPdfSource && !this.state.hideSolutionPdfInDetail;
     const p4List = Array.isArray(exam.part4) ? exam.part4 : [];
     const isCollapsed = Boolean(this.state.collapseAnswerSheetInDetail);
     const curFilter = canViewAnswers ? (this.state.detailAnswerFilter || 'all') : 'all';
@@ -7180,7 +7359,26 @@ const App = {
 
     this.syncScrollTopButtons();
     if (showPdf) {
-      this.mountPdfViewer('submissionSolPdfViewer', solPdfUrl, { flowWithPage: true });
+      if (fastSolUrl) {
+        this.mountPdfViewer('submissionSolPdfViewer', fastSolUrl, { flowWithPage: true });
+      } else {
+        const viewerEl = document.getElementById('submissionSolPdfViewer');
+        if (viewerEl) {
+          viewerEl.innerHTML = `
+            <div class="py-12 text-center text-slate-300 text-xs space-y-2">
+              <i class="fa-solid fa-spinner fa-spin text-2xl text-indigo-400"></i>
+              <div>Đang tải nhanh file PDF Lời giải từ máy chủ...</div>
+            </div>
+          `;
+        }
+        this.resolvePdfSourceUrl(exam.solution_pdf_url, exam.id + '_sol').then((resolvedSol) => {
+          if (!resolvedSol || this.state.activeSubmissionDetailId !== subId) return;
+          document.querySelectorAll('#submissionSolutionPdfSection a[download], #submissionSolutionPdfSection a[target="_blank"]').forEach(a => {
+            a.href = resolvedSol;
+          });
+          this.mountPdfViewer('submissionSolPdfViewer', resolvedSol, { flowWithPage: true });
+        }).catch(() => {});
+      }
     }
   },
 
@@ -8689,38 +8887,49 @@ const App = {
     const slotKey = type === 'question' ? examId : `${examId}_sol`;
     const oldUrl = type === 'question' ? exam.pdf_url : exam.solution_pdf_url;
 
-    if (typeof PDFStorage !== 'undefined') {
-      await PDFStorage.savePdf(slotKey, file);
-    }
+    const localSavePromise = (typeof PDFStorage !== 'undefined')
+      ? PDFStorage.savePdf(slotKey, file)
+      : Promise.resolve(false);
+
     if (oldUrl && !String(oldUrl).startsWith('idb:')) {
       this.deleteServerPdfByUrl(oldUrl);
     }
 
-    let uploadedUrl = '';
-    if (this.isServerSyncEnabled()) {
-      uploadedUrl = await this.uploadPdfToServer(slotKey, file).catch(() => '');
-    }
-    const finalUrl = uploadedUrl || (typeof PDFStorage !== 'undefined' ? ('idb:' + slotKey) : '');
-    if (finalUrl) this.setPdfCacheVersion(slotKey, finalUrl);
+    const fallbackLocalUrl = (typeof PDFStorage !== 'undefined') ? ('idb:' + slotKey) : '';
+    if (fallbackLocalUrl) this.setPdfCacheVersion(slotKey, fallbackLocalUrl);
 
     if (type === 'question') {
       exam.pdf_name = file.name;
-      exam.pdf_url = finalUrl;
+      exam.pdf_url = fallbackLocalUrl;
     } else {
       exam.solution_pdf_name = file.name;
-      exam.solution_pdf_url = finalUrl;
+      exam.solution_pdf_url = fallbackLocalUrl;
     }
 
+    await localSavePromise;
     this.saveData({ markAdminDirty: true, skipAutoPush: true });
-    await this.pushAdminStateToCloud({ manual: false });
-    this.render();
+
+    if (this.isServerSyncEnabled()) {
+      const uploadTask = this.uploadPdfToServer(slotKey, file).then((url) => {
+        if (url) {
+          this.setPdfCacheVersion(slotKey, url);
+          if (type === 'question' && exam.pdf_url === fallbackLocalUrl) exam.pdf_url = url;
+          if (type !== 'question' && exam.solution_pdf_url === fallbackLocalUrl) exam.solution_pdf_url = url;
+        }
+        return url;
+      });
+      this.registerInFlightSlotUpload(slotKey, uploadTask);
+      this.pushAdminStateToCloud({ manual: false });
+    }
+
+    this.renderPreservingScroll();
     if (document.getElementById('updatePdfModal')) {
       this.showUpdatePdfModal(examId, true);
     }
     this.notify(
-      `Đã cập nhật và tự động lưu lên máy chủ file PDF ${type === 'question' ? 'Đề Thi' : 'Đáp Án & Lời Giải'} "${file.name}" cho đề "${exam.title}".`,
+      `Đã cập nhật tức thì và đang đồng bộ ngầm lên máy chủ file PDF ${type === 'question' ? 'Đề Thi' : 'Đáp Án & Lời Giải'} "${file.name}" cho đề "${exam.title}".`,
       'success',
-      'Đã tự động lưu PDF lên máy chủ'
+      'Đã cập nhật & đồng bộ PDF siêu tốc'
     );
   },
 
@@ -11236,6 +11445,8 @@ const App = {
   },
 
   cleanupUnusedPreuploads() {
+    this._preuploadedExamPdfUrl = '';
+    this._preuploadedSolPdfUrl = '';
     if (this._preuploadedExamPdfPromise) {
       const p = this._preuploadedExamPdfPromise;
       this._preuploadedExamPdfPromise = null;
@@ -11387,6 +11598,7 @@ const App = {
     const file = event.target.files[0];
     if (!file) return;
 
+    this._preuploadedExamPdfUrl = '';
     if (this._preuploadedExamPdfPromise) {
       const oldP = this._preuploadedExamPdfPromise;
       oldP.then(u => { if (u) this.deleteServerPdfByUrl(u); }).catch(() => {});
@@ -11410,16 +11622,21 @@ const App = {
       this._examPdfUploadToken = token;
       if (urlInput) urlInput.value = 'Đang tự động lưu lên máy chủ: ' + file.name;
       if (badge) {
-        badge.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-indigo-600 mr-1"></i>Đã chọn: <strong>${file.name}</strong> (${sizeMb} MB) — Đang tự động lưu lên máy chủ...`;
+        badge.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-indigo-600 mr-1"></i>Đã chọn: <strong>${file.name}</strong> (${sizeMb} MB) — Đang tải lên máy chủ <strong id="examPdfUploadPct">0%</strong>...`;
         badge.classList.remove('hidden');
       }
-      this._preuploadedExamPdfPromise = this.uploadPdfToServer('EXAM_Q_' + Date.now(), file)
+      this._preuploadedExamPdfPromise = this.uploadPdfToServer('EXAM_Q_' + Date.now(), file, (pct) => {
+        if (this._examPdfUploadToken !== token) return;
+        const pctEl = document.getElementById('examPdfUploadPct');
+        if (pctEl) pctEl.textContent = `${pct}%`;
+      })
         .then((serverUrl) => {
           if (this._examPdfUploadToken === token) {
+            this._preuploadedExamPdfUrl = serverUrl || '';
             const inp = document.getElementById('newExamPdfUrl');
             if (inp) inp.value = serverUrl;
             const b = document.getElementById('pdfSelectedBadge');
-            if (b) b.innerHTML = `<i class="fa-solid fa-cloud-arrow-up text-emerald-600 mr-1"></i>Đã tự động lưu PDF lên máy chủ: <strong>${file.name}</strong> (${sizeMb} MB)!`;
+            if (b) b.innerHTML = `<i class="fa-solid fa-cloud-arrow-up text-emerald-600 mr-1"></i>Đã lưu sẵn PDF lên máy chủ: <strong>${file.name}</strong> (${sizeMb} MB — 100%)!`;
           }
           return serverUrl;
         })
@@ -11446,6 +11663,7 @@ const App = {
     const file = event.target.files[0];
     if (!file) return;
 
+    this._preuploadedSolPdfUrl = '';
     if (this._preuploadedSolPdfPromise) {
       const oldP = this._preuploadedSolPdfPromise;
       oldP.then(u => { if (u) this.deleteServerPdfByUrl(u); }).catch(() => {});
@@ -11461,16 +11679,21 @@ const App = {
       this._solPdfUploadToken = token;
       if (urlInput) urlInput.value = 'Đang tự động lưu lên máy chủ: ' + file.name;
       if (badge) {
-        badge.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-indigo-600 mr-1"></i>Đã chọn PDF Đáp án: <strong>${file.name}</strong> (${sizeMb} MB) — Đang tự động lưu lên máy chủ...`;
+        badge.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-indigo-600 mr-1"></i>Đã chọn PDF Đáp án: <strong>${file.name}</strong> (${sizeMb} MB) — Đang tải lên máy chủ <strong id="solPdfUploadPct">0%</strong>...`;
         badge.classList.remove('hidden');
       }
-      this._preuploadedSolPdfPromise = this.uploadPdfToServer('EXAM_SOL_' + Date.now(), file)
+      this._preuploadedSolPdfPromise = this.uploadPdfToServer('EXAM_SOL_' + Date.now(), file, (pct) => {
+        if (this._solPdfUploadToken !== token) return;
+        const pctEl = document.getElementById('solPdfUploadPct');
+        if (pctEl) pctEl.textContent = `${pct}%`;
+      })
         .then((serverUrl) => {
           if (this._solPdfUploadToken === token) {
+            this._preuploadedSolPdfUrl = serverUrl || '';
             const inp = document.getElementById('newExamSolutionPdfUrl');
             if (inp) inp.value = serverUrl;
             const b = document.getElementById('solutionPdfSelectedBadge');
-            if (b) b.innerHTML = `<i class="fa-solid fa-cloud-arrow-up text-emerald-600 mr-1"></i>Đã tự động lưu PDF Đáp án lên máy chủ: <strong>${file.name}</strong> (${sizeMb} MB)!`;
+            if (b) b.innerHTML = `<i class="fa-solid fa-cloud-arrow-up text-emerald-600 mr-1"></i>Đã lưu sẵn PDF Đáp án lên máy chủ: <strong>${file.name}</strong> (${sizeMb} MB — 100%)!`;
           }
           return serverUrl;
         })
@@ -11527,7 +11750,7 @@ const App = {
     const submitBtn = document.getElementById('createExamSubmitBtn');
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Đang tự động lưu đề thi lên máy chủ...';
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Đang xuất bản đề thi...';
     }
 
     try {
@@ -11538,39 +11761,43 @@ const App = {
       const accessMode = document.getElementById('newExamAccess')?.value || 'all';
       const checkedStudents = Array.from(document.querySelectorAll('#createExamModal input[name="newExamStudentCheck"]:checked')).map(cb => cb.value);
       const examId = 'EXAM-' + Date.now();
+      const localSaveJobs = [];
 
       let finalPdfUrl = inputUrl;
       let finalPdfName = inputUrl;
       if (this.state.tempSelectedPdfFile) {
-        finalPdfName = this.state.tempSelectedPdfFile.name;
+        const qFile = this.state.tempSelectedPdfFile;
+        finalPdfName = qFile.name;
         if (typeof PDFStorage !== 'undefined') {
-          await PDFStorage.savePdf(examId, this.state.tempSelectedPdfFile);
+          localSaveJobs.push(PDFStorage.savePdf(examId, qFile));
         }
-        let serverUrl = '';
-        if (this._preuploadedExamPdfPromise) {
-          serverUrl = await this._preuploadedExamPdfPromise;
-        } else if (this.isServerSyncEnabled()) {
-          serverUrl = await this.uploadPdfToServer(examId, this.state.tempSelectedPdfFile).catch(() => '');
+        if (this._preuploadedExamPdfUrl) {
+          finalPdfUrl = this._preuploadedExamPdfUrl;
+        } else {
+          finalPdfUrl = (typeof PDFStorage !== 'undefined') ? ('idb:' + examId) : '';
+          const inflightQ = this._preuploadedExamPdfPromise || (this.isServerSyncEnabled() ? this.uploadPdfToServer(examId, qFile) : null);
+          if (inflightQ) this.registerInFlightSlotUpload(examId, inflightQ);
         }
-        finalPdfUrl = serverUrl || (typeof PDFStorage !== 'undefined' ? ('idb:' + examId) : '');
         if (finalPdfUrl) this.setPdfCacheVersion(examId, finalPdfUrl);
       }
 
       let finalSolutionPdfUrl = '';
       let finalSolutionPdfName = '';
       if (this.state.tempSelectedSolutionPdfFile) {
-        finalSolutionPdfName = this.state.tempSelectedSolutionPdfFile.name;
+        const solFile = this.state.tempSelectedSolutionPdfFile;
+        const solKey = examId + '_sol';
+        finalSolutionPdfName = solFile.name;
         if (typeof PDFStorage !== 'undefined') {
-          await PDFStorage.savePdf(examId + '_sol', this.state.tempSelectedSolutionPdfFile);
+          localSaveJobs.push(PDFStorage.savePdf(solKey, solFile));
         }
-        let serverSolUrl = '';
-        if (this._preuploadedSolPdfPromise) {
-          serverSolUrl = await this._preuploadedSolPdfPromise;
-        } else if (this.isServerSyncEnabled()) {
-          serverSolUrl = await this.uploadPdfToServer(examId + '_sol', this.state.tempSelectedSolutionPdfFile).catch(() => '');
+        if (this._preuploadedSolPdfUrl) {
+          finalSolutionPdfUrl = this._preuploadedSolPdfUrl;
+        } else {
+          finalSolutionPdfUrl = (typeof PDFStorage !== 'undefined') ? ('idb:' + solKey) : '';
+          const inflightSol = this._preuploadedSolPdfPromise || (this.isServerSyncEnabled() ? this.uploadPdfToServer(solKey, solFile) : null);
+          if (inflightSol) this.registerInFlightSlotUpload(solKey, inflightSol);
         }
-        finalSolutionPdfUrl = serverSolUrl || (typeof PDFStorage !== 'undefined' ? ('idb:' + examId + '_sol') : '');
-        if (finalSolutionPdfUrl) this.setPdfCacheVersion(examId + '_sol', finalSolutionPdfUrl);
+        if (finalSolutionPdfUrl) this.setPdfCacheVersion(solKey, finalSolutionPdfUrl);
       } else {
         const inputSolUrl = document.getElementById('newExamSolutionPdfUrl').value.trim();
         if (inputSolUrl && !inputSolUrl.startsWith('File cục bộ:') && !inputSolUrl.startsWith('Đang tự động lưu lên máy chủ:')) {
@@ -11579,6 +11806,7 @@ const App = {
         }
       }
 
+      if (localSaveJobs.length) await Promise.all(localSaveJobs);
       const parts = this.buildPartsFromDraft(this.state.answerKeyDraft);
 
       const finalExam = {
@@ -11612,10 +11840,12 @@ const App = {
       this.state.tempSelectedSolutionPdfFile = null;
       this._preuploadedExamPdfPromise = null;
       this._preuploadedSolPdfPromise = null;
-      await this.pushAdminStateToCloud({ manual: false });
+      this._preuploadedExamPdfUrl = '';
+      this._preuploadedSolPdfUrl = '';
       document.getElementById('createExamModal')?.remove();
-      this.render();
-      this.notify(`Đã xuất bản và tự động lưu đề thi "${title}" lên máy chủ đám mây! Học sinh xem được ngay trên mọi điện thoại.`, 'success', 'Đã tự động lưu đề thi lên Server');
+      this.renderPreservingScroll();
+      this.pushAdminStateToCloud({ manual: false });
+      this.notify(`Đã xuất bản tức thì đề thi "${title}" và tự động đồng bộ lên máy chủ đám mây!`, 'success', 'Đã xuất bản & lưu đề thi siêu tốc');
     } finally {
       this._creatingExamInProgress = false;
     }
@@ -11893,12 +12123,19 @@ const App = {
   },
 
   async openPdfModal(title, pdfUrl, storageId = null) {
-    const finalUrl = await this.resolvePdfSourceUrl(pdfUrl, storageId);
-    if (!finalUrl) {
+    const rawStr = String(pdfUrl || '').trim();
+    if (!rawStr && !storageId) {
       this.notify('Mục này hiện chưa có file PDF đính kèm (hoặc Giáo viên chưa đồng bộ file PDF lên Đám mây)!', 'warning', 'Chưa có file PDF');
       return;
     }
 
+    const fastUrl = await this.resolveCachedPdfUrlFast(rawStr, storageId);
+    if (!fastUrl && rawStr.startsWith('idb:')) {
+      this.notify('Mục này hiện chưa có file PDF đính kèm (hoặc Giáo viên chưa đồng bộ file PDF lên Đám mây)!', 'warning', 'Chưa có file PDF');
+      return;
+    }
+
+    const initialHref = fastUrl || rawStr;
     const old = document.getElementById('previewPdfModal');
     if (old) old.remove();
 
@@ -11928,11 +12165,11 @@ const App = {
               <span class="sm:hidden">Bố cục</span>
             </button>
             ${!this.isStandaloneApp() ? `
-              <a href="${finalUrl}" target="_blank" class="hidden sm:flex px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-indigo-300 hover:text-white items-center transition cursor-pointer whitespace-nowrap" title="Mở trong tab mới">
+              <a id="pdfModalNewTabLink" href="${initialHref}" target="_blank" class="hidden sm:flex px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-indigo-300 hover:text-white items-center transition cursor-pointer whitespace-nowrap" title="Mở trong tab mới">
                 <i class="fa-solid fa-arrow-up-right-from-square mr-1.5"></i>Tab Mới
               </a>
             ` : ''}
-            <a href="${finalUrl}" download="Tai_Lieu_${Date.now()}.pdf" class="px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-white flex items-center transition cursor-pointer whitespace-nowrap" title="Tải về máy">
+            <a id="pdfModalDownloadLink" href="${initialHref}" download="Tai_Lieu_${Date.now()}.pdf" class="px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-white flex items-center transition cursor-pointer whitespace-nowrap" title="Tải về máy">
               <i class="fa-solid fa-download sm:mr-1.5"></i><span class="hidden sm:inline">Tải Về</span>
             </a>
             <button type="button" onclick="App.closePdfModal()" class="w-8 h-8 rounded-lg bg-slate-700 hover:bg-red-600 text-white flex items-center justify-center transition cursor-pointer shrink-0" title="Đóng">
@@ -11946,11 +12183,38 @@ const App = {
       </div>
     `;
     this.openModalElement(modal, Boolean(old));
-    this.mountPdfViewer('modalPdfViewer', finalUrl);
+    if (fastUrl) {
+      this.mountPdfViewer('modalPdfViewer', fastUrl);
+    } else {
+      const viewerHost = document.getElementById('modalPdfViewer');
+      if (viewerHost) {
+        viewerHost.innerHTML = `
+          <div class="flex-1 w-full h-full flex flex-col items-center justify-center p-6 text-center text-slate-300 text-xs gap-2.5">
+            <i class="fa-solid fa-spinner fa-spin text-2xl text-indigo-400"></i>
+            <div class="font-semibold">Đang tải nhanh file PDF từ máy chủ...</div>
+          </div>
+        `;
+      }
+      const resolvedUrl = await this.resolvePdfSourceUrl(rawStr, storageId);
+      if (!document.getElementById('previewPdfModal')) return;
+      if (!resolvedUrl) {
+        this.closePdfModal();
+        this.notify('Không tải được file PDF. Vui lòng kiểm tra kết nối mạng!', 'warning', 'Chưa tải được PDF');
+        return;
+      }
+      const dlLink = document.getElementById('pdfModalDownloadLink');
+      if (dlLink) dlLink.href = resolvedUrl;
+      const tabLink = document.getElementById('pdfModalNewTabLink');
+      if (tabLink) tabLink.href = resolvedUrl;
+      this.mountPdfViewer('modalPdfViewer', resolvedUrl);
+    }
   },
 
   closePdfModal() {
     if (typeof document === 'undefined') return;
+    if (this._pdfViewers && this._pdfViewers.modalPdfViewer && this._pdfViewers.modalPdfViewer.observer) {
+      this._pdfViewers.modalPdfViewer.observer.disconnect();
+    }
     document.getElementById('previewPdfModal')?.remove();
   },
 
@@ -12174,6 +12438,7 @@ const App = {
   },
 
   cleanupUnusedHwPreupload() {
+    this._preuploadedHwPdfUrl = '';
     if (this._preuploadedHwPdfPromise) {
       const p = this._preuploadedHwPdfPromise;
       this._preuploadedHwPdfPromise = null;
@@ -12378,6 +12643,7 @@ const App = {
   handleHwFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
+    this._preuploadedHwPdfUrl = '';
     if (this._preuploadedHwPdfPromise) {
       const oldP = this._preuploadedHwPdfPromise;
       oldP.then(u => { if (u) this.deleteServerPdfByUrl(u); }).catch(() => {});
@@ -12393,13 +12659,18 @@ const App = {
       const token = Symbol('hwPdf');
       this._hwPdfUploadToken = token;
       if (badge) {
-        badge.innerHTML = `<span class="text-indigo-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-spinner fa-spin"></i>Đã chọn: ${file.name} (${sizeMb} MB) — Đang tự động lưu lên máy chủ...</span>`;
+        badge.innerHTML = `<span class="text-indigo-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-spinner fa-spin"></i>Đã chọn: ${file.name} (${sizeMb} MB) — Đang tải lên máy chủ <span id="hwPdfUploadPct">0%</span>...</span>`;
       }
-      this._preuploadedHwPdfPromise = this.uploadPdfToServer('HW_' + Date.now(), file)
+      this._preuploadedHwPdfPromise = this.uploadPdfToServer('HW_' + Date.now(), file, (pct) => {
+        if (this._hwPdfUploadToken !== token) return;
+        const pctEl = document.getElementById('hwPdfUploadPct');
+        if (pctEl) pctEl.textContent = `${pct}%`;
+      })
         .then((serverUrl) => {
           if (this._hwPdfUploadToken === token) {
+            this._preuploadedHwPdfUrl = serverUrl || '';
             const b = document.getElementById('newHwFileBadge');
-            if (b) b.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-cloud-arrow-up"></i>Đã tự động lưu lên máy chủ: ${file.name} (${sizeMb} MB)</span>`;
+            if (b) b.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-cloud-arrow-up"></i>Đã lưu sẵn lên máy chủ: ${file.name} (${sizeMb} MB — 100%)</span>`;
           }
           return serverUrl;
         })
@@ -12435,25 +12706,26 @@ const App = {
     const submitBtn = document.getElementById('addHomeworkSubmitBtn');
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Đang lưu máy chủ...</span>';
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Đang lưu tài liệu...</span>';
     }
 
     try {
       const hwId = 'HW-' + Date.now();
-      let fileName = file.name;
-      let fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB';
+      const fileName = file.name;
+      const fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB';
 
       if (typeof PDFStorage !== 'undefined') {
         await PDFStorage.savePdf(hwId, file);
       }
 
-      let serverUrl = '';
-      if (this._preuploadedHwPdfPromise) {
-        serverUrl = await this._preuploadedHwPdfPromise;
-      } else if (this.isServerSyncEnabled()) {
-        serverUrl = await this.uploadPdfToServer(hwId, file).catch(() => '');
+      let pdfUrl = '';
+      if (this._preuploadedHwPdfUrl) {
+        pdfUrl = this._preuploadedHwPdfUrl;
+      } else {
+        pdfUrl = (typeof PDFStorage !== 'undefined') ? ('idb:' + hwId) : '';
+        const inflightHw = this._preuploadedHwPdfPromise || (this.isServerSyncEnabled() ? this.uploadPdfToServer(hwId, file) : null);
+        if (inflightHw) this.registerInFlightSlotUpload(hwId, inflightHw);
       }
-      const pdfUrl = serverUrl || (typeof PDFStorage !== 'undefined' ? ('idb:' + hwId) : '');
       if (pdfUrl) this.setPdfCacheVersion(hwId, pdfUrl);
 
       const newHw = {
@@ -12474,11 +12746,12 @@ const App = {
       this.saveData({ markAdminDirty: true, skipAutoPush: true });
       this.state.tempSelectedHwFile = null;
       this._preuploadedHwPdfPromise = null;
-      await this.pushAdminStateToCloud({ manual: false });
+      this._preuploadedHwPdfUrl = '';
       const m = document.getElementById('addHomeworkModal');
       if (m) m.remove();
-      this.render();
-      this.notify(`Đã thêm và tự động lưu tài liệu chuyên đề "${title}" (Khối ${grade}) lên máy chủ!`, 'success', 'Đã tự động lưu tài liệu lên Server');
+      this.renderPreservingScroll();
+      this.pushAdminStateToCloud({ manual: false });
+      this.notify(`Đã thêm tức thì và tự động đồng bộ tài liệu chuyên đề "${title}" (Khối ${grade}) lên máy chủ!`, 'success', 'Đã lưu tài liệu siêu tốc');
     } finally {
       this._addingHwInProgress = false;
     }
@@ -13472,14 +13745,22 @@ const App = {
       if (window.pdfjsLib.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       }
-      const loadingTask = window.pdfjsLib.getDocument(norm.embedUrl);
+      const loadingTask = window.pdfjsLib.getDocument({
+        url: norm.embedUrl,
+        disableAutoFetch: false,
+        disableStream: false
+      });
       const pdfDoc = await loadingTask.promise;
+      if (this._pdfViewers[containerId] && this._pdfViewers[containerId].observer) {
+        this._pdfViewers[containerId].observer.disconnect();
+      }
       this._pdfViewers[containerId] = {
         pdfDoc,
         zoomFactor: 1.0,
         url: norm.embedUrl,
         flowWithPage,
-        renderToken: 0
+        renderToken: 0,
+        observer: null
       };
       await this.renderPdfPages(containerId);
 
@@ -13518,6 +13799,11 @@ const App = {
     const scrollEl = document.getElementById(`${containerId}_scroll`);
     if (!vState || !vState.pdfDoc || !scrollEl) return;
 
+    if (vState.observer) {
+      vState.observer.disconnect();
+      vState.observer = null;
+    }
+
     const token = ++vState.renderToken;
     const pdfDoc = vState.pdfDoc;
     const total = pdfDoc.numPages;
@@ -13531,32 +13817,107 @@ const App = {
     const availWidth = Math.max(260, rawWidth - 20);
     const dpr = Math.min((typeof window !== 'undefined' && window.devicePixelRatio) || 1, 2);
 
+    const firstPage = await pdfDoc.getPage(1);
+    if (vState.renderToken !== token || !document.body.contains(scrollEl)) return;
+    const firstBaseVp = firstPage.getViewport({ scale: 1 });
+    const defaultFit = Math.min(1.85, Math.max(0.42, availWidth / firstBaseVp.width));
+    const estWidthPx = Math.floor(firstBaseVp.width * defaultFit * vState.zoomFactor);
+    const estHeightPx = Math.floor(firstBaseVp.height * defaultFit * vState.zoomFactor);
+
     scrollEl.innerHTML = '';
+    const wrappers = new Map();
+    const renderedSet = new Set();
+    const inProgressSet = new Set();
+
     for (let pageNum = 1; pageNum <= total; pageNum++) {
-      if (vState.renderToken !== token || !document.body.contains(scrollEl)) return;
-      const page = await pdfDoc.getPage(pageNum);
-      if (vState.renderToken !== token || !document.body.contains(scrollEl)) return;
-
-      const baseVp = page.getViewport({ scale: 1 });
-      const fitScale = Math.min(1.85, Math.max(0.42, availWidth / baseVp.width));
-      const cssScale = fitScale * vState.zoomFactor;
-      const renderVp = page.getViewport({ scale: cssScale * dpr });
-
       const wrap = document.createElement('div');
       wrap.setAttribute('data-pdf-page', String(pageNum));
-      wrap.className = 'w-full overflow-x-auto';
-
-      const canvas = document.createElement('canvas');
-      canvas.className = 'pdf-page-canvas';
-      canvas.width = Math.floor(renderVp.width);
-      canvas.height = Math.floor(renderVp.height);
-      canvas.style.width = `${Math.floor(baseVp.width * cssScale)}px`;
-      canvas.style.height = `${Math.floor(baseVp.height * cssScale)}px`;
-      wrap.appendChild(canvas);
+      wrap.className = 'w-full overflow-x-auto flex justify-center';
+      wrap.style.minHeight = `${estHeightPx}px`;
+      const placeholder = document.createElement('div');
+      placeholder.className = 'bg-slate-900/60 rounded-lg border border-slate-800/80 flex items-center justify-center text-[11px] font-mono text-slate-500';
+      placeholder.style.width = `${estWidthPx}px`;
+      placeholder.style.height = `${estHeightPx}px`;
+      placeholder.textContent = `Trang ${pageNum} / ${total}`;
+      wrap.appendChild(placeholder);
       scrollEl.appendChild(wrap);
+      wrappers.set(pageNum, wrap);
+    }
 
-      const ctx = canvas.getContext('2d', { alpha: false });
-      await page.render({ canvasContext: ctx, viewport: renderVp }).promise;
+    const renderSinglePage = async (pageNum, preloadedPage = null) => {
+      if (renderedSet.has(pageNum) || inProgressSet.has(pageNum)) return;
+      if (vState.renderToken !== token || !document.body.contains(scrollEl)) return;
+      const wrap = wrappers.get(pageNum);
+      if (!wrap) return;
+      inProgressSet.add(pageNum);
+      try {
+        const page = preloadedPage || await pdfDoc.getPage(pageNum);
+        if (vState.renderToken !== token || !document.body.contains(scrollEl)) return;
+        const baseVp = page.getViewport({ scale: 1 });
+        const fitScale = Math.min(1.85, Math.max(0.42, availWidth / baseVp.width));
+        const cssScale = fitScale * vState.zoomFactor;
+        const renderVp = page.getViewport({ scale: cssScale * dpr });
+
+        const canvas = document.createElement('canvas');
+        canvas.className = 'pdf-page-canvas';
+        canvas.width = Math.floor(renderVp.width);
+        canvas.height = Math.floor(renderVp.height);
+        const cssW = Math.floor(baseVp.width * cssScale);
+        const cssH = Math.floor(baseVp.height * cssScale);
+        canvas.style.width = `${cssW}px`;
+        canvas.style.height = `${cssH}px`;
+
+        const ctx = canvas.getContext('2d', { alpha: false });
+        await page.render({ canvasContext: ctx, viewport: renderVp }).promise;
+        if (vState.renderToken !== token || !document.body.contains(scrollEl)) return;
+
+        wrap.style.minHeight = `${cssH}px`;
+        wrap.innerHTML = '';
+        wrap.appendChild(canvas);
+        renderedSet.add(pageNum);
+      } finally {
+        inProgressSet.delete(pageNum);
+      }
+    };
+
+    // Hiển thị tức thì Trang 1 (và Trang 2 nếu có) ngay lập tức không chờ các trang cuối
+    await renderSinglePage(1, firstPage);
+    if (total >= 2 && vState.renderToken === token) {
+      renderSinglePage(2).catch(() => {});
+    }
+
+    if (total > 2 && typeof IntersectionObserver === 'function') {
+      const obs = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          const pNum = Number(entry.target.getAttribute('data-pdf-page'));
+          if (pNum) {
+            obs.unobserve(entry.target);
+            renderSinglePage(pNum).catch(() => {});
+          }
+        });
+      }, { root: vState.flowWithPage ? null : scrollEl, rootMargin: '1000px 0px' });
+      for (let p = 3; p <= total; p++) {
+        const w = wrappers.get(p);
+        if (w) obs.observe(w);
+      }
+      vState.observer = obs;
+    }
+
+    // Dựng tiếp các trang còn lại lúc rảnh để học sinh kéo tới đâu nét căng tới đó (0ms trễ)
+    if (total > 2) {
+      const pumpRemaining = (nextPage) => {
+        if (nextPage > total || vState.renderToken !== token || !document.body.contains(scrollEl)) return;
+        const schedule = typeof requestIdleCallback === 'function'
+          ? (cb) => requestIdleCallback(cb, { timeout: 250 })
+          : (cb) => setTimeout(cb, 24);
+        schedule(async () => {
+          if (vState.renderToken !== token || !document.body.contains(scrollEl)) return;
+          await renderSinglePage(nextPage).catch(() => {});
+          pumpRemaining(nextPage + 1);
+        });
+      };
+      pumpRemaining(3);
     }
   },
 
