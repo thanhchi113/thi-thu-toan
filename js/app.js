@@ -85,7 +85,8 @@ const App = {
     examStartTime: null,
     timerInterval: null,
     secondsLeft: 0,
-    tabSwitchesCount: 0,      // Giám sát số lần rời tab
+    tabSwitchesCount: 0,      // Giám sát số lần rời tab / vi phạm
+    screenshotCount: 0,       // Giám sát số lần chụp màn hình khi đang thi
     activeSectionTab: 'p1',   // 'all' | 'p1' | 'p2' | 'p3' | 'p4'
     mobileExamPane: 'both',   // 'pdf' | 'both' | 'sheet'
     examLayoutMode: 'split',  // 'split' | 'top-sheet' | 'fast-entry' | 'bottom-sheet'
@@ -141,6 +142,8 @@ const App = {
       anonymizeOtherStudents: true,      // Ẩn thông tin các bạn khác để bảo vệ sự riêng tư
       allowStudentViewAnswers: true,     // Cho phép học sinh xem đáp án & lời giải sau khi nộp
       warnOnExitExam: true,              // Cảnh báo & ghi nhận vi phạm khi thoát ra ngoài lúc đang thi (Điện thoại / App / Web)
+      warnOnScreenshot: true,            // Phát âm thanh & cảnh báo khi học sinh chụp màn hình lúc đang thi
+      rewardCatalog: null,               // Danh mục phần thưởng đổi điểm (null -> dùng DEFAULT_REWARD_CATALOG)
     },
     violationLogs: [],
     studentScoreTab: 'mine',             // 'mine' (Kết quả cá nhân) | 'classBoard' (So sánh Lớp / Khối)
@@ -175,6 +178,109 @@ const App = {
     return !(this.state.settings && this.state.settings.warnOnExitExam === false);
   },
 
+  isScreenshotWarningEnabled() {
+    return !(this.state.settings && this.state.settings.warnOnScreenshot === false);
+  },
+
+  isAnyExamGuardEnabled() {
+    return this.isExamExitWarningEnabled() || this.isScreenshotWarningEnabled();
+  },
+
+  // Phát còi cảnh báo 3 nhịp bằng Web Audio API khi phát hiện chụp màn hình (không cần file âm thanh rời)
+  playWarningAlarmSound() {
+    try {
+      const AudioCtx = (typeof window !== 'undefined') && (window.AudioContext || window.webkitAudioContext);
+      if (!AudioCtx) return false;
+      const ctx = this._warnAudioCtx && this._warnAudioCtx.state !== 'closed' ? this._warnAudioCtx : new AudioCtx();
+      this._warnAudioCtx = ctx;
+      if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+        ctx.resume().catch(() => {});
+      }
+      const now = ctx.currentTime || 0;
+      [880, 620, 920].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.14);
+        gain.gain.setValueAtTime(0.18, now + idx * 0.14);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.14 + 0.12);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.14);
+        osc.stop(now + idx * 0.14 + 0.13);
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  },
+
+  isScreenshotShortcutEvent(e) {
+    if (!e) return '';
+    const key = String(e.key || '');
+    const code = String(e.code || '');
+    const keyCode = Number(e.keyCode || e.which || 0);
+    if (key === 'PrintScreen' || code === 'PrintScreen' || keyCode === 44) {
+      return 'Nhấn phím chụp màn hình (PrintScreen)';
+    }
+    if (e.metaKey && e.shiftKey && ['s', 'S', 'r', 'R', '3', '4', '5', '6'].includes(key)) {
+      return 'Sử dụng tổ hợp phím chụp / quay màn hình hệ thống';
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && ['s', 'S'].includes(key)) {
+      return 'Sử dụng tổ hợp chụp màn hình trình duyệt (Ctrl/Cmd + Shift + S)';
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && ['p', 'P'].includes(key)) {
+      return 'Sử dụng lệnh In / Xuất màn hình đề thi (Ctrl/Cmd + P)';
+    }
+    return '';
+  },
+
+  clearScreenshotShield() {
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.remove('exam-screenshot-shield');
+    }
+  },
+
+  // shortcut: Mobile OS hardware screenshot keys (Power+VolDown on iOS/Android) are sandboxed from browser JS; mitigated via 3-finger touch detection + student ID watermark overlay, upgrade to a native Capacitor/Flutter wrapper if OS-level FLAG_SECURE is needed.
+  recordScreenshotViolation(reason = 'Phát hiện thao tác chụp màn hình trong lúc làm bài thi') {
+    if (!this.state.activeExam) return false;
+    if (!this.isScreenshotWarningEnabled()) return false;
+    if (this._suppressLeaveUntil && Date.now() < this._suppressLeaveUntil) return false;
+    if (this._lastScreenshotWarnAt && (Date.now() - this._lastScreenshotWarnAt) < 900) return false;
+
+    const nowTs = Date.now();
+    this._lastScreenshotWarnAt = nowTs;
+    this._lastViolationAt = nowTs; // Ngăn sự kiện blur ngay sau phím tắt chụp màn hình đếm trùng thành 2 lỗi
+
+    this.state.screenshotCount = (this.state.screenshotCount || 0) + 1;
+    this.state.tabSwitchesCount = (this.state.tabSwitchesCount || 0) + 1;
+    const timeStr = new Date().toLocaleTimeString('vi-VN');
+    if (!Array.isArray(this.state.violationLogs)) this.state.violationLogs = [];
+    this.state.violationLogs.push({
+      count: this.state.tabSwitchesCount,
+      type: 'screenshot',
+      screenshotCount: this.state.screenshotCount,
+      time: timeStr,
+      reason
+    });
+
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.add('exam-screenshot-shield');
+    }
+    this.playWarningAlarmSound();
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate([300, 100, 300, 100, 300]); } catch (_) {}
+    }
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try { navigator.clipboard.writeText('Cảnh báo: Không được chụp màn hình trong giờ làm bài thi!').catch(() => {}); } catch (_) {}
+    }
+    if (typeof document !== 'undefined') {
+      this.updateExamHeaderViolationBadge();
+      this.showAntiCheatWarning('screenshot');
+    }
+    return true;
+  },
+
   suppressAntiCheatTemporarily(ms = 1800) {
     this._suppressLeaveUntil = Date.now() + ms;
   },
@@ -182,6 +288,8 @@ const App = {
   resetExamMonitorState() {
     this._examAwayActive = false;
     this._lastViolationAt = 0;
+    this._lastScreenshotWarnAt = 0;
+    this.clearScreenshotShield();
     if (this._blurCheckTimer) {
       clearTimeout(this._blurCheckTimer);
       this._blurCheckTimer = null;
@@ -433,6 +541,30 @@ const App = {
 
     window.addEventListener('focus', () => {
       App.handleExamReturnFocus();
+    });
+
+    // Giám sát chụp màn hình (PrintScreen, Win/Cmd+Shift+S, Ctrl+Shift+S, Ctrl+P, vuốt 3 ngón cảm ứng)
+    const onScreenshotKey = (e) => {
+      if (!App.state.activeExam || !App.isScreenshotWarningEnabled()) return;
+      const shortcutReason = App.isScreenshotShortcutEvent(e);
+      if (!shortcutReason) return;
+      try { e.preventDefault(); } catch (_) {}
+      App.recordScreenshotViolation(shortcutReason);
+    };
+    window.addEventListener('keydown', onScreenshotKey, true);
+    window.addEventListener('keyup', onScreenshotKey, true);
+
+    window.addEventListener('touchstart', (e) => {
+      if (!App.state.activeExam || !App.isScreenshotWarningEnabled()) return;
+      if (e.touches && e.touches.length >= 3) {
+        App.recordScreenshotViolation('Thao tác 3 ngón chụp màn hình trên thiết bị cảm ứng');
+      }
+    }, { passive: true });
+
+    window.addEventListener('beforeprint', () => {
+      if (App.state.activeExam && App.isScreenshotWarningEnabled()) {
+        App.recordScreenshotViolation('In hoặc xuất màn hình đề thi');
+      }
     });
 
     // Tự động nhận diện ảnh đáp án khi Giáo viên nhấn Ctrl+V lúc đang mở bảng đáp án
@@ -745,50 +877,66 @@ const App = {
     }
   },
 
-  showAntiCheatWarning() {
-    if (!this.state.activeExam || !this.isExamExitWarningEnabled() || this.state.tabSwitchesCount <= 0) return;
+  showAntiCheatWarning(mode = null) {
+    if (!this.state.activeExam || this.state.tabSwitchesCount <= 0) return;
+    const latestLog = Array.isArray(this.state.violationLogs) && this.state.violationLogs.length
+      ? this.state.violationLogs[this.state.violationLogs.length - 1]
+      : { time: new Date().toLocaleTimeString('vi-VN'), reason: 'Thoát khỏi màn hình bài thi' };
+    const isScreenshot = mode === 'screenshot' || latestLog.type === 'screenshot';
+    if (isScreenshot && !this.isScreenshotWarningEnabled()) return;
+    if (!isScreenshot && !this.isExamExitWarningEnabled()) return;
+
     const existing = document.getElementById('antiCheatModal');
     if (existing) existing.remove();
 
     this.updateExamHeaderViolationBadge();
 
     const count = this.state.tabSwitchesCount;
-    const latestLog = Array.isArray(this.state.violationLogs) && this.state.violationLogs.length
-      ? this.state.violationLogs[this.state.violationLogs.length - 1]
-      : { time: new Date().toLocaleTimeString('vi-VN'), reason: 'Thoát khỏi màn hình bài thi' };
+    const shotCount = this.state.screenshotCount || 0;
 
     const modal = document.createElement('div');
     modal.id = 'antiCheatModal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-red-950/75 backdrop-blur-sm animate-fade-in';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-red-950/80 backdrop-blur-md animate-fade-in';
     modal.style.zIndex = '95';
     modal.innerHTML = `
       <div class="dialog-card bg-white rounded-3xl p-5 sm:p-7 max-w-md w-full shadow-2xl text-center space-y-4 border-2 border-red-500">
         <div class="w-16 h-16 mx-auto rounded-2xl bg-red-100 text-red-600 flex items-center justify-center text-3xl shadow-inner border border-red-200">
-          <i class="fa-solid fa-triangle-exclamation"></i>
+          <i class="fa-solid ${isScreenshot ? 'fa-camera' : 'fa-triangle-exclamation'}"></i>
         </div>
         <div class="space-y-1.5">
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 text-[11px] font-extrabold uppercase tracking-wider">
-            <i class="fa-solid fa-mobile-screen-button"></i><span>Cảnh Báo Quy Chế Phòng Thi</span>
+            <i class="fa-solid ${isScreenshot ? 'fa-volume-high' : 'fa-mobile-screen-button'}"></i>
+            <span>${isScreenshot ? 'Cảnh Báo Chống Chụp Màn Hình' : 'Cảnh Báo Quy Chế Phòng Thi'}</span>
           </span>
-          <h3 class="text-base sm:text-lg font-extrabold text-slate-900">NHẮC NHỞ VI PHẠM: THOÁT KHỎI MÀN HÌNH THI!</h3>
+          <h3 class="text-base sm:text-lg font-extrabold text-slate-900">
+            ${isScreenshot ? 'CẢNH BÁO VI PHẠM: PHÁT HIỆN CHỤP MÀN HÌNH!' : 'NHẮC NHỞ VI PHẠM: THOÁT KHỎI MÀN HÌNH THI!'}
+          </h3>
           <p class="text-xs text-slate-600 leading-relaxed">
-            Hệ thống phát hiện bạn vừa thoát ra ngoài ứng dụng trên điện thoại hoặc rời khỏi màn hình trong lúc đang làm bài thi.
+            ${isScreenshot
+              ? `Hệ thống vừa phát hiện thao tác chụp / xuất màn hình (${latestLog.reason || 'Chụp màn hình'}) và đã tạm làm mờ đề thi cùng âm thanh cảnh báo.`
+              : 'Hệ thống phát hiện bạn vừa thoát ra ngoài ứng dụng trên điện thoại hoặc rời khỏi màn hình trong lúc đang làm bài thi.'}
           </p>
         </div>
         <div class="bg-red-50 border border-red-200 rounded-2xl p-3.5 text-xs text-red-900 space-y-1.5 text-left">
-          <div class="flex items-center justify-between">
-            <span class="font-semibold text-red-800">Số lần vi phạm đã ghi nhận:</span>
-            <strong id="antiCheatCountValue" class="px-2.5 py-0.5 rounded-lg bg-red-600 text-white text-sm font-mono font-extrabold">${count} lần</strong>
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-semibold text-red-800">Tổng số lần vi phạm đã ghi nhận:</span>
+            <strong id="antiCheatCountValue" class="px-2.5 py-0.5 rounded-lg bg-red-600 text-white text-sm font-mono font-extrabold shrink-0">${count} lần</strong>
           </div>
+          ${shotCount > 0 ? `
+            <div class="flex items-center justify-between gap-2 text-[11px] text-red-800 font-bold">
+              <span>Trong đó chụp màn hình:</span>
+              <span id="antiCheatScreenshotCount" class="px-2 py-0.5 rounded bg-red-200/80 text-red-900 font-mono">${shotCount} lần</span>
+            </div>
+          ` : ''}
           <div class="flex items-center justify-between text-[11px] text-red-700">
             <span>Thời điểm phát hiện gần nhất:</span>
             <strong class="font-mono">${latestLog.time}</strong>
           </div>
           <div class="pt-1.5 border-t border-red-200/80 text-[11px] text-red-700 leading-snug">
-            <i class="fa-solid fa-circle-exclamation mr-1"></i>Toàn bộ số lần thoát màn hình được tự động lưu vào biên bản nộp bài gửi Giáo viên. Vui lòng giữ nguyên màn hình thi cho tới khi nộp bài!
+            <i class="fa-solid fa-circle-exclamation mr-1"></i>Mọi thao tác chụp màn hình và rời phòng thi đều được lưu tự động vào biên bản nộp bài gửi Giáo viên (đồng thời mất điểm thưởng kỷ luật).
           </div>
         </div>
-        <button type="button" id="antiCheatAckBtn" onclick="document.getElementById('antiCheatModal')?.remove();" class="ui-btn-lg w-full bg-red-600 hover:bg-red-700 text-white shadow-md">
+        <button type="button" id="antiCheatAckBtn" onclick="App.clearScreenshotShield(); document.getElementById('antiCheatModal')?.remove();" class="ui-btn-lg w-full bg-red-600 hover:bg-red-700 text-white shadow-md">
           <i class="fa-solid fa-shield-halved"></i>
           <span>Tôi Đã Hiểu &amp; Quay Lại Làm Bài</span>
         </button>
@@ -802,11 +950,13 @@ const App = {
     const guardBadge = document.getElementById('examGuardActiveBadge');
     const mobStuCode = document.getElementById('examHeaderMobStuCode');
     const count = this.state.tabSwitchesCount || 0;
-    const activeWarn = count > 0 && this.isExamExitWarningEnabled();
+    const shotCount = this.state.screenshotCount || 0;
+    const guardEnabled = this.isAnyExamGuardEnabled();
+    const activeWarn = count > 0 && guardEnabled;
     if (badge) {
       if (activeWarn) {
         badge.className = 'inline-flex items-center gap-1 bg-red-100 border border-red-300 px-1.5 sm:px-2 py-0.5 rounded-md text-red-700 font-bold text-[10px] sm:text-[11px] animate-pulse shrink-0 whitespace-nowrap';
-        badge.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-red-600"></i><span>Vi phạm: ${count}</span>`;
+        badge.innerHTML = `<i class="fa-solid ${shotCount > 0 ? 'fa-camera' : 'fa-triangle-exclamation'} text-red-600"></i><span>Vi phạm: ${count}${shotCount > 0 ? ` (Chụp: ${shotCount})` : ''}</span>`;
       } else {
         badge.className = 'hidden';
       }
@@ -815,8 +965,119 @@ const App = {
       mobStuCode.classList.toggle('hidden', activeWarn);
     }
     if (guardBadge) {
-      guardBadge.classList.toggle('hidden', !(this.isExamExitWarningEnabled() && count === 0));
+      guardBadge.classList.toggle('hidden', !(guardEnabled && count === 0));
     }
+  },
+
+  renderExamWatermarkHtml(u) {
+    if (!this.isScreenshotWarningEnabled() || !u) return '';
+    const stamp = `${u.studentId || 'HS'} • ${u.fullName || ''}`;
+    return `
+      <div class="exam-watermark-layer" aria-hidden="true">
+        ${Array.from({ length: 18 }, () => `<div class="exam-watermark-item">${stamp}</div>`).join('')}
+      </div>
+    `;
+  },
+
+  DEFAULT_REWARD_CATALOG: [
+    { id: 'RW-01', title: 'Cộng +0,5 điểm kiểm tra thường xuyên', cost: 60, icon: 'fa-circle-plus', desc: 'Áp dụng cộng điểm cho 1 bài kiểm tra miệng hoặc 15 phút trong học kì.', active: true },
+    { id: 'RW-02', title: 'Phiếu miễn 1 bài tập về nhà', cost: 100, icon: 'fa-ticket', desc: 'Được miễn 1 lần bài tập về nhà tự chọn mà vẫn tính đủ chuyên cần.', active: true },
+    { id: 'RW-03', title: 'Bộ tài liệu Bí kíp giải nhanh Toán', cost: 150, icon: 'fa-book', desc: 'Nhận chuyên đề công thức giải nhanh & mẹo bấm máy tính từ Giáo viên.', active: true },
+    { id: 'RW-04', title: 'Quà tặng học tập (Bút / Sổ tay Toán)', cost: 220, icon: 'fa-gift', desc: 'Nhận trực tiếp phần quà dụng cụ học tập trên lớp từ Giáo viên.', active: true },
+    { id: 'RW-05', title: 'Cộng +1,0 điểm thưởng / Quà đặc biệt', cost: 350, icon: 'fa-crown', desc: 'Vinh danh học sinh chăm chỉ đạt mốc tích lũy điểm xuất sắc.', active: true }
+  ],
+
+  getRewardCatalog() {
+    const custom = this.state.settings && Array.isArray(this.state.settings.rewardCatalog)
+      ? this.state.settings.rewardCatalog
+      : null;
+    const src = custom && custom.length > 0 ? custom : this.DEFAULT_REWARD_CATALOG;
+    return src.map(r => ({
+      id: String(r.id || 'RW'),
+      title: String(r.title || 'Phần thưởng'),
+      cost: Math.max(5, Math.round(Number(r.cost) || 50)),
+      icon: String(r.icon || 'fa-gift'),
+      desc: String(r.desc || ''),
+      active: r.active !== false
+    }));
+  },
+
+  calcSubmissionRewardPoints(sub) {
+    if (!sub || !sub.scoreResult) return { basePoints: 0, cleanBonus: 0, screenshotPenalty: 0, total: 0 };
+    const res = sub.scoreResult;
+    const maxTotal = Number(res.maxTotal || 10) || 10;
+    const pct = typeof res.percentage === 'number'
+      ? res.percentage
+      : (Number(res.totalScore || 0) / maxTotal) * 100;
+
+    let basePoints = 0;
+    if (pct >= 99.9) basePoints = 50;
+    else if (pct >= 90) basePoints = 45;
+    else if (pct >= 80) basePoints = 30;
+    else if (pct >= 70) basePoints = 20;
+    else if (pct >= 50) basePoints = 10;
+
+    const shots = Number(sub.screenshotCount || 0);
+    const leaves = Number(sub.tabSwitches || 0);
+    const cleanBonus = (pct >= 50 && leaves === 0 && shots === 0) ? 5 : 0;
+    const screenshotPenalty = shots > 0 ? shots * 5 : 0;
+    const total = Math.max(0, basePoints + cleanBonus - screenshotPenalty);
+    return { basePoints, cleanBonus, screenshotPenalty, total };
+  },
+
+  getStudentRewardStats(studentId) {
+    const stu = (this.state.students || []).find(s => s && s.studentId === studentId)
+      || (this.state.currentUser && this.state.currentUser.studentId === studentId ? this.state.currentUser : null);
+    const subs = (this.state.submissions || []).filter(s => s && s.studentId === studentId && s.scoreResult);
+
+    // Chống spam nộp bài rỗng: mỗi đề chỉ tính lượt làm đạt điểm tích lũy cao nhất
+    const bestByExam = new Map();
+    subs.forEach(sub => {
+      const key = sub.examId || sub.id;
+      const pts = this.calcSubmissionRewardPoints(sub);
+      const prev = bestByExam.get(key);
+      if (!prev || pts.total > prev.pts.total || (pts.total === prev.pts.total && Number(sub.scoreResult.totalScore || 0) > Number(prev.sub.scoreResult.totalScore || 0))) {
+        bestByExam.set(key, { sub, pts });
+      }
+    });
+
+    const examBreakdowns = Array.from(bestByExam.values());
+    const earnedPoints = examBreakdowns.reduce((sum, item) => sum + item.pts.total, 0);
+    const bonusPoints = Number(stu?.bonusPoints || 0);
+    const redemptions = Array.isArray(stu?.redemptions) ? [...stu.redemptions] : [];
+    const spentPoints = redemptions
+      .filter(r => r && r.status !== 'rejected')
+      .reduce((sum, r) => sum + Math.max(0, Number(r.cost || 0)), 0);
+
+    const totalAccumulated = Math.max(0, earnedPoints + bonusPoints);
+    const availablePoints = Math.max(0, totalAccumulated - spentPoints);
+
+    let tier = { name: 'Tân Binh Luyện Đề', icon: 'fa-seedling', cls: 'bg-indigo-100 text-indigo-800 border-indigo-200' };
+    if (totalAccumulated >= 300) tier = { name: 'Chiến Thần Toán Học', icon: 'fa-crown', cls: 'bg-amber-100 text-amber-800 border-amber-300' };
+    else if (totalAccumulated >= 150) tier = { name: 'Bứt Phá Xuất Sắc', icon: 'fa-fire', cls: 'bg-rose-100 text-rose-800 border-rose-200' };
+    else if (totalAccumulated >= 50) tier = { name: 'Học Sinh Chăm Chỉ', icon: 'fa-medal', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+
+    const activeRewards = this.getRewardCatalog().filter(r => r.active !== false).sort((a, b) => a.cost - b.cost);
+    const nextReward = activeRewards.find(r => r.cost > availablePoints) || activeRewards[activeRewards.length - 1] || null;
+
+    return {
+      earnedPoints,
+      bonusPoints,
+      totalAccumulated,
+      spentPoints,
+      availablePoints,
+      tier,
+      examBreakdowns,
+      redemptions,
+      nextReward
+    };
+  },
+
+  getPendingRedemptionsCount() {
+    return (this.state.students || []).reduce((sum, s) => {
+      const list = Array.isArray(s?.redemptions) ? s.redemptions : [];
+      return sum + list.filter(r => r && r.status === 'pending').length;
+    }, 0);
   },
 
   normalizeStudentRecord(s) {
@@ -825,8 +1086,34 @@ const App = {
     if (s.parentName === undefined) s.parentName = '';
     if (s.notes === undefined) s.notes = '';
     if (!s.status) s.status = 'active';
+    s.bonusPoints = Number(s.bonusPoints || 0) || 0;
+    s.redemptions = Array.isArray(s.redemptions) ? s.redemptions : [];
     s.grade = this.getStudentGrade(s);
     return s;
+  },
+
+  mergeStudentRecords(preferred, fallback) {
+    const base = { ...(fallback || {}), ...(preferred || {}) };
+    const rMap = new Map();
+    const putRedemption = (r) => {
+      if (!r || !r.id) return;
+      const cur = rMap.get(r.id);
+      if (!cur) {
+        rMap.set(r.id, { ...r });
+        return;
+      }
+      const curTime = Date.parse(cur.updatedAt || cur.createdAt || '') || 0;
+      const incTime = Date.parse(r.updatedAt || r.createdAt || '') || 0;
+      if (incTime > curTime || (cur.status === 'pending' && r.status && r.status !== 'pending')) {
+        rMap.set(r.id, { ...r });
+      }
+    };
+    (Array.isArray(fallback?.redemptions) ? fallback.redemptions : []).forEach(putRedemption);
+    (Array.isArray(preferred?.redemptions) ? preferred.redemptions : []).forEach(putRedemption);
+    base.redemptions = Array.from(rMap.values()).sort((a, b) =>
+      String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+    );
+    return this.normalizeStudentRecord(base);
   },
 
   normalizeExamRecord(ex) {
@@ -953,6 +1240,8 @@ const App = {
       anonymizeOtherStudents: true,
       allowStudentViewAnswers: true,
       warnOnExitExam: true,
+      warnOnScreenshot: true,
+      rewardCatalog: null,
       peerCompareDefaultLockedV1: true
     };
     const storedSettings = localStorage.getItem('thpt_settings');
@@ -970,6 +1259,9 @@ const App = {
     }
     if (typeof this.state.settings.warnOnExitExam === 'undefined') {
       this.state.settings.warnOnExitExam = true;
+    }
+    if (typeof this.state.settings.warnOnScreenshot === 'undefined') {
+      this.state.settings.warnOnScreenshot = true;
     }
 
     this.saveData({ markAdminDirty: false, skipAutoPush: true });
@@ -1250,8 +1542,8 @@ const App = {
         } else {
           const cTime = Date.parse(cs.updatedAt || '') || 0;
           const lTime = Date.parse(ls.updatedAt || '') || 0;
-          const chosen = (lTime > cTime || (lTime === cTime && preferLocalAdmin)) ? ls : cs;
-          nextStudents.push(this.normalizeStudentRecord({ ...chosen }));
+          const preferLocal = lTime > cTime || (lTime === cTime && preferLocalAdmin);
+          nextStudents.push(this.mergeStudentRecords(preferLocal ? ls : cs, preferLocal ? cs : ls));
         }
       });
 
@@ -1359,7 +1651,7 @@ const App = {
         if (!upd) return s;
         const uTime = Date.parse(upd.updatedAt || '') || 0;
         const sTime = Date.parse(s.updatedAt || '') || 0;
-        return uTime >= sTime ? { ...s, ...upd } : s;
+        return this.mergeStudentRecords(uTime >= sTime ? upd : s, uTime >= sTime ? s : upd);
       });
     }
 
@@ -1646,6 +1938,7 @@ const App = {
     onConfirm = null,
     onCancel = null
   } = {}) {
+    if (typeof document === 'undefined') return;
     const existing = document.getElementById('appSystemDialog');
     if (existing) existing.remove();
 
@@ -2943,12 +3236,352 @@ const App = {
     ].some(v => v && String(v).toLowerCase().includes(q));
   },
 
+  redeemReward(rewardId, skipConfirm = false) {
+    const u = this.state.currentUser;
+    if (!u || u.role !== 'student') return false;
+    const reward = this.getRewardCatalog().find(r => r.id === rewardId && r.active !== false);
+    if (!reward) {
+      this.notify('Phần thưởng này hiện không khả dụng!', 'warning', 'Không thể đổi thưởng');
+      return false;
+    }
+    const stats = this.getStudentRewardStats(u.studentId);
+    if (stats.availablePoints < reward.cost) {
+      this.notify(`Bạn hiện có ${stats.availablePoints} điểm, cần thêm ${reward.cost - stats.availablePoints} điểm nữa để đổi "${reward.title}".`, 'warning', 'Chưa đủ điểm tích lũy');
+      return false;
+    }
+    if (skipConfirm || typeof document === 'undefined') {
+      return this.executeRedeemReward(rewardId);
+    }
+    this.confirmDialog(
+      `Bạn muốn dùng ${reward.cost} điểm tích lũy để đổi phần thưởng "${reward.title}"? Yêu cầu sẽ được gửi tới Giáo viên để trao thưởng.`,
+      () => this.executeRedeemReward(rewardId),
+      {
+        type: 'info',
+        title: 'Xác nhận đổi phần thưởng',
+        icon: 'fa-gift',
+        confirmText: `Đổi ngay (${reward.cost}⭐)`,
+        cancelText: 'Để sau'
+      }
+    );
+    return true;
+  },
+
+  executeRedeemReward(rewardId) {
+    const u = this.state.currentUser;
+    if (!u || u.role !== 'student') return false;
+    const reward = this.getRewardCatalog().find(r => r.id === rewardId && r.active !== false);
+    if (!reward) return false;
+    const stats = this.getStudentRewardStats(u.studentId);
+    if (stats.availablePoints < reward.cost) return false;
+
+    const nowIso = new Date().toISOString();
+    const redemption = {
+      id: `RDM-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+      rewardId: reward.id,
+      rewardTitle: reward.title,
+      cost: reward.cost,
+      status: 'pending',
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+
+    let student = (this.state.students || []).find(s => s.studentId === u.studentId);
+    if (!student) {
+      student = this.normalizeStudentRecord({ ...u });
+      this.state.students.push(student);
+    }
+    if (!Array.isArray(student.redemptions)) student.redemptions = [];
+    student.redemptions.unshift(redemption);
+    student.updatedAt = nowIso;
+
+    this.state.currentUser = { ...student, role: 'student' };
+    if (typeof sessionStorage !== 'undefined') {
+      try { sessionStorage.setItem('thpt_current_user', JSON.stringify(this.state.currentUser)); } catch (_) {}
+    }
+
+    this.saveData();
+    this.pushStudentSubmissionToCloud(null, student);
+
+    if (typeof confetti === 'function') {
+      try { confetti({ particleCount: 90, spread: 65, origin: { y: 0.65 } }); } catch (_) {}
+    }
+    if (typeof document !== 'undefined') {
+      this.render();
+    }
+    this.notify(`Đã đổi thành công "${reward.title}" (-${reward.cost}⭐)! Giáo viên đã nhận được yêu cầu trao thưởng của bạn.`, 'success', 'Đổi phần thưởng thành công');
+    return true;
+  },
+
+  fulfillRewardRedemption(studentId, redemptionId) {
+    const student = (this.state.students || []).find(s => s.studentId === studentId);
+    if (!student || !Array.isArray(student.redemptions)) return false;
+    const item = student.redemptions.find(r => r && r.id === redemptionId);
+    if (!item) return false;
+    const nowIso = new Date().toISOString();
+    item.status = 'fulfilled';
+    item.updatedAt = nowIso;
+    student.updatedAt = nowIso;
+    this.saveData({ markAdminDirty: true });
+    this.pushStudentSubmissionToCloud(null, student);
+    if (typeof document !== 'undefined') this.render();
+    this.notify(`Đã xác nhận trao phần thưởng "${item.rewardTitle}" cho học sinh ${student.fullName}.`, 'success', 'Đã trao thưởng');
+    return true;
+  },
+
+  rejectRewardRedemption(studentId, redemptionId) {
+    const student = (this.state.students || []).find(s => s.studentId === studentId);
+    if (!student || !Array.isArray(student.redemptions)) return false;
+    const item = student.redemptions.find(r => r && r.id === redemptionId);
+    if (!item) return false;
+    const nowIso = new Date().toISOString();
+    item.status = 'rejected';
+    item.updatedAt = nowIso;
+    student.updatedAt = nowIso;
+    this.saveData({ markAdminDirty: true });
+    this.pushStudentSubmissionToCloud(null, student);
+    if (typeof document !== 'undefined') this.render();
+    this.notify(`Đã hủy yêu cầu và hoàn lại +${item.cost}⭐ cho học sinh ${student.fullName}.`, 'info', 'Đã hoàn điểm');
+    return true;
+  },
+
+  adjustStudentBonusPoints(studentId, delta) {
+    const student = (this.state.students || []).find(s => s.studentId === studentId);
+    const numDelta = Math.round(Number(delta) || 0);
+    if (!student || !numDelta) return false;
+    const nowIso = new Date().toISOString();
+    student.bonusPoints = (Number(student.bonusPoints || 0) || 0) + numDelta;
+    student.updatedAt = nowIso;
+    if (this.state.currentUser && this.state.currentUser.studentId === studentId) {
+      this.state.currentUser = { ...student, role: this.state.currentUser.role };
+    }
+    this.saveData({ markAdminDirty: true });
+    this.pushStudentSubmissionToCloud(null, student);
+    if (typeof document !== 'undefined') this.render();
+    this.notify(`${numDelta > 0 ? `Đã cộng +${numDelta}⭐` : `Đã trừ ${numDelta}⭐`} điểm thưởng cho ${student.fullName}.`, 'success', 'Cập nhật điểm thưởng');
+    return true;
+  },
+
+  handleAddRewardCatalogItem() {
+    const titleEl = typeof document !== 'undefined' ? document.getElementById('newRewardTitle') : null;
+    const costEl = typeof document !== 'undefined' ? document.getElementById('newRewardCost') : null;
+    const descEl = typeof document !== 'undefined' ? document.getElementById('newRewardDesc') : null;
+    const title = String(titleEl?.value || '').trim();
+    const cost = Math.round(Number(costEl?.value || 0));
+    const desc = String(descEl?.value || '').trim();
+    if (!title || cost < 5) {
+      this.notify('Vui lòng nhập tên phần thưởng và mức điểm đổi từ 5 điểm trở lên!', 'warning', 'Thiếu thông tin phần thưởng');
+      return false;
+    }
+    const list = this.getRewardCatalog();
+    list.push({
+      id: `RW-${Date.now().toString(36).toUpperCase()}`,
+      title,
+      cost,
+      icon: 'fa-gift',
+      desc: desc || 'Phần thưởng khuyến khích học tập từ Giáo viên.',
+      active: true
+    });
+    if (!this.state.settings) this.state.settings = {};
+    this.state.settings.rewardCatalog = list;
+    this.saveData({ markAdminDirty: true });
+    if (typeof document !== 'undefined') this.render();
+    this.notify(`Đã thêm phần thưởng "${title}" (${cost}⭐) vào cửa hàng đổi thưởng!`, 'success', 'Thêm phần thưởng thành công');
+    return true;
+  },
+
+  toggleRewardCatalogItem(rewardId) {
+    const list = this.getRewardCatalog().map(r => r.id === rewardId ? { ...r, active: !r.active } : r);
+    if (!this.state.settings) this.state.settings = {};
+    this.state.settings.rewardCatalog = list;
+    this.saveData({ markAdminDirty: true });
+    if (typeof document !== 'undefined') this.render();
+  },
+
+  deleteRewardCatalogItem(rewardId) {
+    const list = this.getRewardCatalog().filter(r => r.id !== rewardId);
+    if (!list.length) {
+      this.notify('Cần giữ lại ít nhất 1 phần thưởng trong danh mục!', 'warning', 'Không thể xóa hết');
+      return false;
+    }
+    if (!this.state.settings) this.state.settings = {};
+    this.state.settings.rewardCatalog = list;
+    this.saveData({ markAdminDirty: true });
+    if (typeof document !== 'undefined') this.render();
+    return true;
+  },
+
+  renderStudentRewardsSectionHtml(u, stats) {
+    const catalog = this.getRewardCatalog().filter(r => r.active !== false).sort((a, b) => a.cost - b.cost);
+    const nextGoal = stats.nextReward;
+    const goalPct = nextGoal ? Math.min(100, Math.round((stats.availablePoints / Math.max(1, nextGoal.cost)) * 100)) : 100;
+
+    return `
+      <section class="space-y-5" id="studentRewardsSection">
+        <!-- Thẻ tổng quan điểm tích lũy & tiến độ -->
+        <div class="bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500 rounded-2xl p-4 sm:p-6 text-white shadow-lg">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div class="space-y-1.5">
+              <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-xs text-xs font-extrabold">
+                <i class="fa-solid ${stats.tier.icon}"></i>
+                <span>Danh hiệu: ${stats.tier.name}</span>
+              </div>
+              <h3 class="text-xl sm:text-2xl font-extrabold flex items-center gap-2">
+                <span>Kho Điểm Tích Lũy &amp; Đổi Phần Thưởng</span>
+              </h3>
+              <p class="text-xs sm:text-sm text-white/90">
+                Làm đề đạt từ 5,0đ trở lên và giữ kỷ luật phòng thi (0 rời màn hình, 0 chụp màn hình) để tích sao đổi quà!
+              </p>
+            </div>
+            <div class="grid grid-cols-3 gap-2 sm:gap-3 shrink-0">
+              <div class="bg-white/15 backdrop-blur-xs rounded-xl p-2.5 sm:p-3 text-center border border-white/20">
+                <div class="text-[11px] text-white/85 font-semibold">Khả dụng</div>
+                <div id="studentAvailablePointsVal" class="text-xl sm:text-2xl font-extrabold font-mono">${stats.availablePoints}⭐</div>
+              </div>
+              <div class="bg-white/15 backdrop-blur-xs rounded-xl p-2.5 sm:p-3 text-center border border-white/20">
+                <div class="text-[11px] text-white/85 font-semibold">Tổng tích lũy</div>
+                <div class="text-xl sm:text-2xl font-extrabold font-mono">${stats.totalAccumulated}</div>
+              </div>
+              <div class="bg-white/15 backdrop-blur-xs rounded-xl p-2.5 sm:p-3 text-center border border-white/20">
+                <div class="text-[11px] text-white/85 font-semibold">Đã đổi quà</div>
+                <div class="text-xl sm:text-2xl font-extrabold font-mono">${stats.spentPoints}</div>
+              </div>
+            </div>
+          </div>
+
+          ${nextGoal ? `
+            <div class="mt-4 pt-3.5 border-t border-white/20 space-y-1.5">
+              <div class="flex items-center justify-between gap-2 text-xs font-bold">
+                <span class="truncate">Mục tiêu tiếp theo: ${nextGoal.title} (${nextGoal.cost}⭐)</span>
+                <span class="font-mono shrink-0">${stats.availablePoints >= nextGoal.cost ? 'Đủ điểm đổi!' : `Còn thiếu ${nextGoal.cost - stats.availablePoints}⭐`}</span>
+              </div>
+              <div class="w-full h-2.5 rounded-full bg-black/20 overflow-hidden">
+                <div class="h-full rounded-full bg-white transition-all duration-300" style="width:${goalPct}%"></div>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+
+        <!-- Quy tắc cộng điểm minh bạch -->
+        <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-2.5">
+          <div class="text-xs font-extrabold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5">
+            <i class="fa-solid fa-star text-amber-500"></i>
+            <span>Bảng Quy Đổi Điểm Thưởng (Tính lượt điểm cao nhất của mỗi đề)</span>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+            <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+              <div class="font-bold text-slate-700">Đạt &ge; 5,0đ</div>
+              <div class="font-extrabold text-indigo-600 font-mono mt-0.5">+10 ⭐</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-blue-50/60 border border-blue-200">
+              <div class="font-bold text-blue-800">Khá &ge; 7,0đ</div>
+              <div class="font-extrabold text-blue-700 font-mono mt-0.5">+20 ⭐</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200">
+              <div class="font-bold text-emerald-800">Giỏi &ge; 8,0đ</div>
+              <div class="font-extrabold text-emerald-700 font-mono mt-0.5">+30 ⭐</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200">
+              <div class="font-bold text-amber-900">Xuất sắc &ge; 9,0đ</div>
+              <div class="font-extrabold text-amber-700 font-mono mt-0.5">+45–50 ⭐</div>
+            </div>
+            <div class="col-span-2 sm:col-span-1 p-2.5 rounded-xl bg-purple-50/70 border border-purple-200">
+              <div class="font-bold text-purple-900">0 Vi phạm / Chụp MH</div>
+              <div class="font-extrabold text-purple-700 font-mono mt-0.5">+5 ⭐ kỷ luật</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Danh sách Phần Thưởng -->
+        <div class="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200 shadow-sm space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 class="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <i class="fa-solid fa-gift text-rose-500"></i>
+                <span>Cửa Hàng Phần Thưởng (${catalog.length})</span>
+              </h4>
+              <p class="text-xs text-slate-500">Chọn phần thưởng khi đủ điểm tích lũy — Giáo viên sẽ xác nhận và trao thưởng trên lớp</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            ${catalog.map(rw => {
+              const canRedeem = stats.availablePoints >= rw.cost;
+              const pct = Math.min(100, Math.round((stats.availablePoints / Math.max(1, rw.cost)) * 100));
+              return `
+                <div class="rounded-2xl border ${canRedeem ? 'border-amber-300 bg-amber-50/30 shadow-xs' : 'border-slate-200 bg-slate-50/40'} p-4 flex flex-col justify-between gap-3">
+                  <div class="space-y-2">
+                    <div class="flex items-start justify-between gap-2">
+                      <div class="w-10 h-10 rounded-xl ${canRedeem ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-600'} flex items-center justify-center text-base shrink-0 shadow-xs">
+                        <i class="fa-solid ${rw.icon}"></i>
+                      </div>
+                      <span class="px-2.5 py-1 rounded-full text-xs font-extrabold font-mono ${canRedeem ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-white text-slate-700 border border-slate-200'} shrink-0">
+                        ${rw.cost} ⭐
+                      </span>
+                    </div>
+                    <h5 class="text-sm font-extrabold text-slate-900 leading-snug">${rw.title}</h5>
+                    <p class="text-xs text-slate-500 leading-relaxed">${rw.desc || ''}</p>
+                  </div>
+                  <div class="space-y-2 pt-1">
+                    <div class="w-full h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                      <div class="h-full rounded-full ${canRedeem ? 'bg-emerald-500' : 'bg-indigo-500'}" style="width:${pct}%"></div>
+                    </div>
+                    <button
+                      type="button"
+                      id="redeemBtn_${rw.id}"
+                      onclick="App.redeemReward('${rw.id}')"
+                      ${canRedeem ? '' : 'disabled'}
+                      class="ui-btn w-full ${canRedeem ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}"
+                    >
+                      <i class="fa-solid ${canRedeem ? 'fa-gift' : 'fa-lock'} shrink-0"></i>
+                      <span>${canRedeem ? `Đổi Thưởng Ngay (-${rw.cost}⭐)` : `Cần thêm ${rw.cost - stats.availablePoints}⭐`}</span>
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Lịch sử đổi thưởng của học sinh -->
+        <div class="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200 shadow-sm space-y-3">
+          <h4 class="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
+            <i class="fa-solid fa-clock-rotate-left text-indigo-600"></i>
+            <span>Lịch Sử Đổi Phần Thưởng Của Bạn (${stats.redemptions.length})</span>
+          </h4>
+          ${stats.redemptions.length === 0 ? `
+            <div class="p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              Bạn chưa đổi phần thưởng nào. Hãy hoàn thành các đề thi thật tốt để nhận phần thưởng đầu tiên!
+            </div>
+          ` : `
+            <div class="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+              ${stats.redemptions.map(r => {
+                let badge = '<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200">Chờ GV trao thưởng</span>';
+                if (r.status === 'fulfilled') badge = '<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"><i class="fa-solid fa-check mr-1"></i>Đã nhận thưởng</span>';
+                else if (r.status === 'rejected') badge = '<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">Đã hoàn điểm</span>';
+                return `
+                  <div class="p-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-white">
+                    <div class="min-w-0">
+                      <div class="font-bold text-xs sm:text-sm text-slate-900">${r.rewardTitle}</div>
+                      <div class="text-[11px] text-slate-500 mt-0.5">${new Date(r.createdAt).toLocaleString('vi-VN')} • Mức đổi: <strong class="font-mono text-amber-700">${r.cost}⭐</strong></div>
+                    </div>
+                    <div class="shrink-0">${badge}</div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+      </section>
+    `;
+  },
+
   // --- VIEW: TRANG HỌC SINH (STUDENT PORTAL) ---
   renderStudentPortal(container) {
     const u = this.state.currentUser;
     const allowedExams = this.state.exams.filter(e => this.isStudentAllowedExam(e, u));
     const allowedHomeworks = this.state.homeworks.filter(h => this.isStudentAllowedHomework(h, u));
     const mySubmissions = this.state.submissions.filter(s => s.studentId === u.studentId);
+    const rewardStats = this.getStudentRewardStats(u.studentId);
     if (!this.state.studentMainTab) this.state.studentMainTab = 'exams';
     const thMeta = this.getThemeMeta();
     const swatchHex = (this._lastAccentMeta && this._lastAccentMeta.primaryHex) || this.state.accentHex || '#4f46e5';
@@ -3048,15 +3681,19 @@ const App = {
                   </button>
                 </div>
               </div>
-              <div class="grid grid-cols-2 sm:flex gap-2.5 sm:gap-3">
-                <div class="bg-white/10 backdrop-blur-md rounded-xl p-3 text-center min-w-[96px]">
-                  <div class="text-xs text-indigo-200">Đề được mở</div>
-                  <div class="text-2xl font-bold font-mono">${allowedExams.length}</div>
+              <div class="grid grid-cols-3 sm:flex gap-2 sm:gap-3">
+                <div class="bg-white/10 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[92px]">
+                  <div class="text-[11px] sm:text-xs text-indigo-200 truncate">Đề mở</div>
+                  <div class="text-xl sm:text-2xl font-bold font-mono">${allowedExams.length}</div>
                 </div>
-                <div class="bg-white/10 backdrop-blur-md rounded-xl p-3 text-center min-w-[96px]">
-                  <div class="text-xs text-indigo-200">Lượt đã nộp</div>
-                  <div class="text-2xl font-bold font-mono">${mySubmissions.length}</div>
+                <div class="bg-white/10 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[92px]">
+                  <div class="text-[11px] sm:text-xs text-indigo-200 truncate">Đã nộp</div>
+                  <div class="text-xl sm:text-2xl font-bold font-mono">${mySubmissions.length}</div>
                 </div>
+                <button type="button" onclick="App.setStudentMainTab('rewards')" class="bg-amber-400/20 hover:bg-amber-400/30 border border-amber-300/40 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[100px] transition cursor-pointer" title="Xem điểm tích lũy & đổi phần thưởng">
+                  <div class="text-[11px] sm:text-xs text-amber-200 font-semibold truncate">Điểm thưởng</div>
+                  <div class="text-xl sm:text-2xl font-extrabold font-mono text-amber-300">${rewardStats.availablePoints}⭐</div>
+                </button>
               </div>
             </div>
           </div>
@@ -3064,12 +3701,12 @@ const App = {
           <!-- Thanh Điều Hướng Cổng Học Sinh -->
           <div class="bg-white rounded-2xl p-2 sm:p-2.5 border border-slate-200 shadow-sm">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <nav class="grid grid-cols-3 sm:flex sm:flex-wrap items-stretch sm:items-center gap-1 sm:gap-2 w-full">
+              <nav class="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-1.5 sm:gap-2 w-full">
                 <button
                   type="button"
                   id="studentTabExamsBtn"
                   onclick="App.setStudentMainTab('exams')"
-                  class="ui-btn h-10 !px-1.5 sm:!px-3.5 !gap-1 sm:!gap-1.5 min-w-0 ${this.state.studentMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-file-pen shrink-0"></i>
                   <span class="sm:hidden">Đề Thi</span>
@@ -3083,7 +3720,7 @@ const App = {
                   type="button"
                   id="studentTabHomeworksBtn"
                   onclick="App.setStudentMainTab('homeworks')"
-                  class="ui-btn h-10 !px-1.5 sm:!px-3.5 !gap-1 sm:!gap-1.5 min-w-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-book-open shrink-0"></i>
                   <span class="sm:hidden">Tài Liệu</span>
@@ -3097,13 +3734,27 @@ const App = {
                   type="button"
                   id="studentTabGradesBtn"
                   onclick="App.setStudentMainTab('grades')"
-                  class="ui-btn h-10 !px-1.5 sm:!px-3.5 !gap-1 sm:!gap-1.5 min-w-0 ${this.state.studentMainTab === 'grades' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'grades' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-chart-simple shrink-0"></i>
                   <span class="sm:hidden">Kết Quả</span>
                   <span class="hidden sm:inline">Kết Quả &amp; Xếp Hạng</span>
                   <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.studentMainTab === 'grades' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
                     ${mySubmissions.length}<span class="hidden sm:inline"> lượt</span>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  id="studentTabRewardsBtn"
+                  onclick="App.setStudentMainTab('rewards')"
+                  class="ui-btn h-10 px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'rewards' ? 'bg-amber-500 text-white shadow-md shadow-amber-200 ring-2 ring-amber-400/30' : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'}"
+                >
+                  <i class="fa-solid fa-gift shrink-0"></i>
+                  <span class="sm:hidden">Đổi Thưởng</span>
+                  <span class="hidden sm:inline">Tích Điểm &amp; Đổi Thưởng</span>
+                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold shrink-0 ${this.state.studentMainTab === 'rewards' ? 'bg-amber-700 text-white' : 'bg-white text-amber-800 shadow-2xs'}">
+                    ${rewardStats.availablePoints}⭐
                   </span>
                 </button>
               </nav>
@@ -3116,6 +3767,7 @@ const App = {
                   ${this.state.studentMainTab === 'exams' ? 'Chọn đề thi theo Khối 6 – 12 và phân loại (GK1, CK1, GK2, CK2, Đề thi vào 10, Thi thử THPT QG) để vào làm bài trực tuyến.' : ''}
                   ${this.state.studentMainTab === 'homeworks' ? 'Chọn tài liệu & chuyên đề theo Khối 6 – 12 để xem trực tiếp hoặc tải file PDF về máy.' : ''}
                   ${this.state.studentMainTab === 'grades' ? 'Tra cứu kết quả các lượt nộp bài, đối chiếu đáp án chi tiết và xem vị trí trên bảng xếp hạng lớp.' : ''}
+                  ${this.state.studentMainTab === 'rewards' ? 'Tích lũy điểm sao qua từng đề thi đạt kết quả tốt và đổi các phần thưởng khuyến khích từ Giáo viên.' : ''}
                 </span>
               </div>
               <div class="text-[11px] text-slate-400 hidden lg:block">
@@ -3501,9 +4153,9 @@ const App = {
                               <td class="px-5 py-4 font-bold text-slate-900">${sub.examTitle}</td>
                               <td class="px-3 py-4 text-center font-bold text-xs text-indigo-700">Lần ${sub.attemptNumber || 1}</td>
                               <td class="px-3 py-4 text-center">
-                                ${(sub.tabSwitches || 0) > 0 ? `
-                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-red-100 text-red-700 border border-red-200" title="Đã chuyển tab hoặc rời giao diện">
-                                    <i class="fa-solid fa-triangle-exclamation mr-1"></i>${sub.tabSwitches} lần
+                                ${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? `
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-red-100 text-red-700 border border-red-200" title="Đã ghi nhận rời màn hình hoặc chụp màn hình">
+                                    <i class="fa-solid ${(sub.screenshotCount || 0) > 0 ? 'fa-camera' : 'fa-triangle-exclamation'} mr-1"></i>${sub.tabSwitches || sub.screenshotCount} lần${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} chụp)` : ''}
                                   </span>
                                 ` : `
                                   <span class="text-emerald-600 text-xs font-medium inline-flex items-center gap-1">
@@ -3543,6 +4195,8 @@ const App = {
               </div>
             </section>
             ` : ''}
+
+            ${this.state.studentMainTab === 'rewards' ? this.renderStudentRewardsSectionHtml(u, rewardStats) : ''}
           </div>
         </main>
 
@@ -3919,6 +4573,7 @@ const App = {
     this.state.examStartTime = new Date();
     this.state.secondsLeft = (exam.time_minutes || 90) * 60;
     this.state.tabSwitchesCount = 0;
+    this.state.screenshotCount = 0;
     this.state.violationLogs = [];
     this.resetExamMonitorState();
     this.state.activeSectionTab = exam.part1.length ? 'p1' : (exam.part2.length ? 'p2' : (exam.part3.length ? 'p3' : 'p4'));
@@ -4180,14 +4835,16 @@ const App = {
     const u = this.state.currentUser;
     const progress = this.calculateProgress();
     const pdfSrc = this.state.resolvedPdfUrl || ex.pdf_url || '';
-    const guardOn = this.isExamExitWarningEnabled();
+    const guardOn = this.isAnyExamGuardEnabled();
     const vCount = this.state.tabSwitchesCount || 0;
+    const shotCount = this.state.screenshotCount || 0;
     const paneCls = this.getExamPaneClasses(this.state.mobileExamPane);
     const pdfCollapsed = Boolean(this.state.examPdfCollapsed);
     const layoutMeta = this.getExamLayoutMeta();
 
     container.innerHTML = `
       <div class="fixed inset-0 flex flex-col bg-slate-100 overflow-hidden select-none z-10">
+        ${this.renderExamWatermarkHtml(u)}
         <!-- Top Sticky Header -->
         <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 px-2.5 sm:px-6 py-2 flex items-center justify-between gap-2 shrink-0 z-30 shadow-xs sticky top-0">
           <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
@@ -4208,11 +4865,11 @@ const App = {
                 <span class="hidden sm:inline truncate">Học sinh: <strong>${u.fullName}</strong> (${u.studentId})</span>
                 <span id="examHeaderMobStuCode" class="${guardOn && vCount > 0 ? 'hidden' : ''} sm:hidden font-mono font-bold text-slate-700 truncate">${u.studentId}</span>
                 <span class="text-indigo-600 font-bold shrink-0 whitespace-nowrap">${guardOn && vCount > 0 ? '' : '• '}Lần ${this.state.currentAttemptNumber || 1}</span>
-                <span id="examGuardActiveBadge" class="${guardOn && vCount === 0 ? 'inline-flex' : 'hidden'} items-center gap-1 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md text-emerald-700 font-bold text-[10px] shrink-0" title="Đang bật cảnh báo khi thoát ứng dụng / rời màn hình thi">
+                <span id="examGuardActiveBadge" class="${guardOn && vCount === 0 ? 'inline-flex' : 'hidden'} items-center gap-1 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md text-emerald-700 font-bold text-[10px] shrink-0" title="Đang bật cảnh báo chụp màn hình & thoát ứng dụng khi thi">
                   <i class="fa-solid fa-shield-halved"></i><span class="hidden sm:inline">Giám sát BẬT</span>
                 </span>
                 <span id="violationHeaderBadge" class="${guardOn && vCount > 0 ? 'inline-flex items-center gap-1 bg-red-100 border border-red-300 px-1.5 sm:px-2 py-0.5 rounded-md text-red-700 font-bold text-[10px] sm:text-[11px] animate-pulse shrink-0 whitespace-nowrap' : 'hidden'}">
-                  <i class="fa-solid fa-triangle-exclamation text-red-600"></i><span>Vi phạm: ${vCount}</span>
+                  <i class="fa-solid ${shotCount > 0 ? 'fa-camera' : 'fa-triangle-exclamation'} text-red-600"></i><span>Vi phạm: ${vCount}${shotCount > 0 ? ` (Chụp: ${shotCount})` : ''}</span>
                 </span>
               </div>
             </div>
@@ -5500,6 +6157,7 @@ const App = {
     const result = GradingSystem.grade(evaluatedAnswers, this.state.activeExam);
     const duration = Math.floor((new Date() - this.state.examStartTime) / 1000);
 
+    const prevEarnedPoints = this.getStudentRewardStats(this.state.currentUser.studentId).earnedPoints;
     const safeStuSuffix = String(this.state.currentUser.studentId || 'HS').replace(/[^A-Za-z0-9]/g, '');
     const nowIso = new Date().toISOString();
     const submission = {
@@ -5512,6 +6170,7 @@ const App = {
       updatedAt: nowIso,
       durationTakenSeconds: duration,
       tabSwitches: this.state.tabSwitchesCount,
+      screenshotCount: this.state.screenshotCount || 0,
       violationLogs: Array.isArray(this.state.violationLogs) ? [...this.state.violationLogs] : [],
       attemptNumber: this.state.currentAttemptNumber || 1,
       scoreResult: result,
@@ -5519,6 +6178,8 @@ const App = {
     };
 
     this.state.submissions.unshift(submission);
+    const updatedRewardStats = this.getStudentRewardStats(this.state.currentUser.studentId);
+    const gainedPoints = Math.max(0, updatedRewardStats.earnedPoints - prevEarnedPoints);
     this.saveData();
     this.pushStudentSubmissionToCloud(submission);
 
@@ -5533,16 +6194,17 @@ const App = {
       });
     }
 
-    this.showScoreModal(submission);
+    this.showScoreModal(submission, gainedPoints, updatedRewardStats.availablePoints);
   },
 
-  showScoreModal(sub) {
+  showScoreModal(sub, gainedPoints = 0, availablePoints = null) {
     const res = sub.scoreResult;
+    const availPts = availablePoints !== null ? availablePoints : this.getStudentRewardStats(sub.studentId).availablePoints;
     const modal = document.createElement('div');
     modal.id = 'scoreModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl text-center space-y-6">
+      <div class="bg-white rounded-3xl p-5 sm:p-8 max-w-md w-full shadow-2xl text-center space-y-5">
         <div class="w-20 h-20 mx-auto rounded-full ${(res.percentage ?? 0) >= 80 ? 'bg-emerald-100 text-emerald-600' : 'bg-indigo-100 text-indigo-600'} flex items-center justify-center text-4xl shadow-inner">
           <i class="fa-solid fa-trophy"></i>
         </div>
@@ -5550,12 +6212,26 @@ const App = {
         <div>
           <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Kết quả bài thi</span>
           <h3 class="text-xl font-extrabold text-slate-900">${sub.examTitle}</h3>
-          <p class="text-xs text-slate-500 mt-1">Giám sát thoát màn hình: <strong class="${(sub.tabSwitches || 0) > 0 ? 'text-red-600' : 'text-emerald-600'}">${sub.tabSwitches || 0} lần vi phạm</strong></p>
+          <p class="text-xs text-slate-500 mt-1">
+            Giám sát phòng thi:
+            <strong class="${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? 'text-red-600' : 'text-emerald-600'}">
+              ${sub.tabSwitches || 0} lần vi phạm${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} lần chụp màn hình)` : ''}
+            </strong>
+          </p>
         </div>
 
-        <div class="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+        <div class="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
           <div class="text-4xl font-extrabold text-indigo-600 font-mono">${res.totalScore} <span class="text-base text-slate-400 font-normal">/ ${res.maxTotal || 10}</span></div>
-          <div class="text-xs font-bold uppercase mt-1 ${(res.percentage ?? 0) >= 80 ? 'text-emerald-600' : 'text-indigo-600'}">Xếp loại: ${res.rank}</div>
+          <div class="text-xs font-bold uppercase ${(res.percentage ?? 0) >= 80 ? 'text-emerald-600' : 'text-indigo-600'}">Xếp loại: ${res.rank}</div>
+          <div class="pt-2 border-t border-slate-200/80 flex items-center justify-center gap-2 flex-wrap">
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold ${gainedPoints > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
+              <i class="fa-solid fa-star text-amber-500"></i>
+              <span>${gainedPoints > 0 ? `+${gainedPoints}⭐ Điểm thưởng mới` : `Tổng khả dụng: ${availPts}⭐`}</span>
+            </span>
+            <button type="button" onclick="document.getElementById('scoreModal')?.remove(); App.setStudentMainTab('rewards');" class="text-xs font-extrabold text-amber-700 hover:text-amber-900 underline cursor-pointer">
+              Đổi phần thưởng (${availPts}⭐)
+            </button>
+          </div>
         </div>
 
         <div class="grid ${res.part4 && res.part4.totalQuestions > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} gap-2 text-xs">
@@ -5988,7 +6664,7 @@ const App = {
                 <span>Học sinh: <strong>${sub.studentName}</strong> (${sub.studentId})</span>
                 <span>• <strong class="text-indigo-600">Lần thi: ${sub.attemptNumber || 1}</strong></span>
                 <span>• Nộp lúc: ${new Date(sub.submittedAt).toLocaleString('vi-VN')}</span>
-                <span>• Giám sát rời tab: <strong class="${(sub.tabSwitches || 0) > 0 ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold'}">${sub.tabSwitches || 0} lần</strong></span>
+                <span>• Giám sát phòng thi: <strong class="${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold'}">${sub.tabSwitches || 0} lần${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} lần chụp MH)` : ''}</strong></span>
               </div>
             </div>
             <div class="text-left sm:text-right bg-indigo-50 border border-indigo-100 px-4 py-3 rounded-xl shrink-0 w-full sm:w-auto flex sm:block items-center justify-between gap-2">
@@ -6126,9 +6802,185 @@ const App = {
     this.viewSubmissionDetail(subId);
   },
 
+  renderAdminRewardsSectionHtml() {
+    const catalog = this.getRewardCatalog();
+    const allRedemptions = [];
+    (this.state.students || []).forEach(s => {
+      (Array.isArray(s?.redemptions) ? s.redemptions : []).forEach(r => {
+        if (r && r.id) {
+          allRedemptions.push({
+            ...r,
+            studentId: s.studentId,
+            studentName: s.fullName,
+            className: s.className || '12',
+            grade: this.getStudentGrade(s)
+          });
+        }
+      });
+    });
+    allRedemptions.sort((a, b) => {
+      if (a.status === 'pending' && b.status !== 'pending') return -1;
+      if (a.status !== 'pending' && b.status === 'pending') return 1;
+      return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+    });
+
+    const studentRows = (this.state.students || []).map(s => ({
+      student: s,
+      stats: this.getStudentRewardStats(s.studentId)
+    })).sort((a, b) => b.stats.availablePoints - a.stats.availablePoints || b.stats.totalAccumulated - a.stats.totalAccumulated);
+
+    return `
+      <section class="space-y-5" id="sectionAdminRewards">
+        <!-- 1. Duyệt & Trao thưởng cho học sinh -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="p-4 sm:p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-amber-50/70 via-white to-orange-50/40">
+            <div>
+              <h3 class="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <i class="fa-solid fa-gift text-amber-600"></i>
+                <span>Yêu Cầu Đổi Phần Thưởng Từ Học Sinh (${allRedemptions.length})</span>
+              </h3>
+              <p class="text-xs text-slate-500 mt-0.5">Xác nhận khi đã trao quà trên lớp hoặc hoàn điểm lại cho học sinh</p>
+            </div>
+          </div>
+
+          <div class="p-4 sm:p-6">
+            ${allRedemptions.length === 0 ? `
+              <div class="p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                Hiện chưa có yêu cầu đổi phần thưởng nào từ học sinh.
+              </div>
+            ` : `
+              <div class="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+                ${allRedemptions.map(r => `
+                  <div class="p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white">
+                    <div class="min-w-0 space-y-0.5">
+                      <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="font-extrabold text-xs sm:text-sm text-slate-900">${r.studentName}</span>
+                        <span class="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[11px] font-bold">${r.studentId} • K${r.grade} (${r.className})</span>
+                        <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-mono text-[11px] font-extrabold">-${r.cost}⭐</span>
+                      </div>
+                      <div class="text-xs font-bold text-indigo-700">${r.rewardTitle}</div>
+                      <div class="text-[11px] text-slate-400">${new Date(r.createdAt).toLocaleString('vi-VN')}</div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 shrink-0">
+                      ${r.status === 'pending' ? `
+                        <button type="button" onclick="App.fulfillRewardRedemption('${r.studentId}', '${r.id}')" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs">
+                          <i class="fa-solid fa-check shrink-0"></i><span>Đã Trao Thưởng</span>
+                        </button>
+                        <button type="button" onclick="App.rejectRewardRedemption('${r.studentId}', '${r.id}')" class="ui-btn bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-600 border border-slate-200">
+                          <i class="fa-solid fa-rotate-left shrink-0"></i><span>Hoàn Điểm</span>
+                        </button>
+                      ` : r.status === 'fulfilled' ? `
+                        <span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          <i class="fa-solid fa-check mr-1"></i>Đã trao thưởng
+                        </span>
+                      ` : `
+                        <span class="px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                          Đã hoàn điểm
+                        </span>
+                      `}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+
+        <!-- 2. Cấu hình danh mục Phần thưởng -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 space-y-4">
+          <div>
+            <h4 class="text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <i class="fa-solid fa-store text-indigo-600"></i>
+              <span>Quản Lý Danh Mục Phần Thưởng (${catalog.length})</span>
+            </h4>
+            <p class="text-xs text-slate-500">Thêm phần thưởng mới hoặc bật/tắt các phần thưởng học sinh được đổi (tự động đồng bộ Server)</p>
+          </div>
+
+          <form onsubmit="event.preventDefault(); App.handleAddRewardCatalogItem();" class="grid grid-cols-1 sm:grid-cols-12 gap-2.5 p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+            <input type="text" id="newRewardTitle" required placeholder="Tên phần thưởng (VD: Miễn 1 bài tập về nhà)" class="sm:col-span-5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold outline-none focus:border-indigo-600 min-w-0">
+            <input type="number" id="newRewardCost" required min="5" step="5" value="80" placeholder="Điểm ⭐" class="sm:col-span-2 px-3 py-2 rounded-xl border border-slate-300 bg-white text-xs font-mono font-bold text-amber-700 outline-none focus:border-indigo-600 min-w-0">
+            <input type="text" id="newRewardDesc" placeholder="Mô tả ngắn (không bắt buộc)" class="sm:col-span-3 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs outline-none focus:border-indigo-600 min-w-0">
+            <button type="submit" class="sm:col-span-2 ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs">
+              <i class="fa-solid fa-plus shrink-0"></i><span>Thêm Quà</span>
+            </button>
+          </form>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            ${catalog.map(rw => `
+              <div class="p-3.5 rounded-xl border ${rw.active !== false ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-70'} flex flex-col justify-between gap-2.5">
+                <div>
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-xs font-extrabold font-mono">${rw.cost} ⭐</span>
+                    <span class="text-[11px] font-bold ${rw.active !== false ? 'text-emerald-600' : 'text-slate-400'}">${rw.active !== false ? 'Đang mở' : 'Đang ẩn'}</span>
+                  </div>
+                  <div class="font-bold text-xs sm:text-sm text-slate-900 mt-1.5">${rw.title}</div>
+                  <p class="text-[11px] text-slate-500 mt-0.5">${rw.desc || ''}</p>
+                </div>
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                  <button type="button" onclick="App.toggleRewardCatalogItem('${rw.id}')" class="ui-btn bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200">
+                    <i class="fa-solid ${rw.active !== false ? 'fa-eye-slash' : 'fa-eye'} shrink-0"></i>
+                    <span>${rw.active !== false ? 'Ẩn' : 'Hiện'}</span>
+                  </button>
+                  <button type="button" onclick="App.deleteRewardCatalogItem('${rw.id}')" class="ui-btn bg-red-50 hover:bg-red-100 text-red-600 border border-red-200">
+                    <i class="fa-solid fa-trash-can shrink-0"></i><span>Xóa</span>
+                  </button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- 3. Bảng điểm tích lũy học sinh & Thưởng nóng -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="p-4 sm:p-5 border-b border-slate-100">
+            <h4 class="text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <i class="fa-solid fa-ranking-star text-emerald-600"></i>
+              <span>Bảng Tích Điểm Học Sinh &amp; Cộng Điểm Khuyến Khích</span>
+            </h4>
+            <p class="text-xs text-slate-500 mt-0.5">Giáo viên có thể cộng/trừ nhanh điểm thưởng khuyến khích trực tiếp cho từng học sinh</p>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-200 text-left text-xs">
+              <thead class="bg-slate-50 text-slate-600 uppercase font-bold">
+                <tr>
+                  <th class="px-4 py-3">Mã HS</th>
+                  <th class="px-4 py-3">Họ và Tên</th>
+                  <th class="px-3 py-3 text-center">Từ Đề Thi</th>
+                  <th class="px-3 py-3 text-center">GV Thưởng</th>
+                  <th class="px-3 py-3 text-center">Đã Đổi</th>
+                  <th class="px-3 py-3 text-center">Khả Dụng</th>
+                  <th class="px-4 py-3 text-right">Thưởng / Trừ Nhanh</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                ${studentRows.map(({ student, stats }) => `
+                  <tr class="hover:bg-slate-50/80">
+                    <td class="px-4 py-3 font-mono font-bold text-indigo-700">${student.studentId}</td>
+                    <td class="px-4 py-3 font-bold text-slate-800">${student.fullName} <span class="text-slate-400 font-normal">(${student.className || '12'})</span></td>
+                    <td class="px-3 py-3 text-center font-mono font-semibold text-slate-700">${stats.earnedPoints}⭐</td>
+                    <td class="px-3 py-3 text-center font-mono font-semibold ${stats.bonusPoints >= 0 ? 'text-emerald-700' : 'text-red-600'}">${stats.bonusPoints > 0 ? `+${stats.bonusPoints}` : stats.bonusPoints}⭐</td>
+                    <td class="px-3 py-3 text-center font-mono text-slate-500">${stats.spentPoints}⭐</td>
+                    <td class="px-3 py-3 text-center">
+                      <span class="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 font-mono font-extrabold">${stats.availablePoints}⭐</span>
+                    </td>
+                    <td class="px-4 py-3 text-right whitespace-nowrap space-x-1">
+                      <button type="button" onclick="App.adjustStudentBonusPoints('${student.studentId}', 10)" class="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold cursor-pointer">+10⭐</button>
+                      <button type="button" onclick="App.adjustStudentBonusPoints('${student.studentId}', -10)" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 border border-slate-200 font-bold cursor-pointer">-10⭐</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
   // --- VIEW: TRANG QUẢN TRỊ VIÊN / GIÁO VIÊN (ADMIN DASHBOARD) ---
   renderAdminDashboard(container) {
     const u = this.state.currentUser;
+    const pendingRedemptions = this.getPendingRedemptionsCount();
     const allClasses = [...new Set(this.state.students.map(s => s.className || '12'))];
     const activeStudentGrades = [...new Set(this.state.students.map(s => this.getStudentGrade(s)))].sort((a, b) => a - b);
     const filteredStudents = this.state.students.filter(s => {
@@ -6268,12 +7120,29 @@ const App = {
 
                 <button
                   type="button"
+                  id="adminTabRewardsBtn"
+                  onclick="App.setAdminMainTab('rewards')"
+                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'rewards' ? 'bg-amber-500 text-white shadow-md shadow-amber-200 ring-2 ring-amber-400/30' : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'}"
+                >
+                  <i class="fa-solid fa-gift shrink-0"></i>
+                  <span class="sm:hidden">Đổi Thưởng</span>
+                  <span class="hidden sm:inline">Tích Điểm &amp; Thưởng</span>
+                  ${pendingRedemptions > 0 ? `
+                    <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold shrink-0 bg-red-600 text-white">
+                      ${pendingRedemptions}
+                    </span>
+                  ` : ''}
+                </button>
+
+                <button
+                  type="button"
                   id="adminTabSettingsBtn"
                   onclick="App.setAdminMainTab('settings')"
-                  class="col-span-2 sm:col-span-1 ui-btn h-10 px-3 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'settings' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'settings' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-sliders shrink-0"></i>
-                  <span>Cài Đặt &amp; Bảo Mật</span>
+                  <span class="sm:hidden">Cài Đặt</span>
+                  <span class="hidden sm:inline">Cài Đặt &amp; Bảo Mật</span>
                 </button>
               </nav>
             </div>
@@ -6286,6 +7155,7 @@ const App = {
                   ${this.state.adminMainTab === 'students' ? 'Quản lý hồ sơ học sinh, xếp khối (Khối 6 – 12), cấp tài khoản mới, tra cứu liên hệ và đồng bộ mật khẩu.' : ''}
                   ${this.state.adminMainTab === 'exams' ? 'Quản lý đề thi theo Khối 6 – 12 và phân loại (GK1, CK1, GK2, CK2, Đề thi vào 10, Thi thử THPT QG), tải lên file PDF đề thi, đáp án và phân quyền dự thi.' : ''}
                   ${this.state.adminMainTab === 'homeworks' ? 'Quản lý kho tài liệu & chuyên đề theo Khối 6 – 12, tải lên file PDF và phân quyền truy cập cho học sinh.' : ''}
+                  ${this.state.adminMainTab === 'rewards' ? 'Duyệt trao phần thưởng, quản lý kho quà đổi điểm và cộng điểm khuyến khích cho học sinh.' : ''}
                   ${this.state.adminMainTab === 'settings' ? 'Cập nhật hồ sơ & mật khẩu Giáo viên, khôi phục qua email, phân quyền xem điểm và quản trị dữ liệu.' : ''}
                 </span>
               </div>
@@ -6294,6 +7164,8 @@ const App = {
               </div>
             </div>
           </div>
+
+          ${this.state.adminMainTab === 'rewards' ? this.renderAdminRewardsSectionHtml() : ''}
 
           ${this.state.adminMainTab === 'students' ? `
           <!-- Section 1: Quản Lý Học Sinh -->
@@ -6658,6 +7530,27 @@ const App = {
                   <button type="button" id="toggleWarnOnExitExamBtn" onclick="App.toggleSetting('warnOnExitExam')" class="ui-btn px-3 sm:px-4 flex-1 sm:flex-initial min-w-0 ${this.isExamExitWarningEnabled() ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm' : 'bg-slate-800 hover:bg-slate-900 text-white shadow-sm'}">
                     <i class="fa-solid ${this.isExamExitWarningEnabled() ? 'fa-shield-halved' : 'fa-power-off'} shrink-0"></i>
                     <span>${this.isExamExitWarningEnabled() ? 'Tắt Cảnh Báo Thoát Màn Hình' : 'Bật Cảnh Báo Thoát Màn Hình'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="mt-3 p-4 sm:p-5 rounded-2xl border ${this.isScreenshotWarningEnabled() ? 'border-amber-200 bg-amber-50/50' : 'border-slate-200 bg-slate-50/60'} flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div class="space-y-1.5">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h5 class="text-sm font-extrabold text-slate-900">Phát Còi Cảnh Báo &amp; Che Đề Khi Học Sinh Chụp Màn Hình</h5>
+                    <span id="warnOnScreenshotStatusPill" class="px-2.5 py-0.5 rounded-full text-xs font-bold ${this.isScreenshotWarningEnabled() ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-200 text-slate-600'}">
+                      ${this.isScreenshotWarningEnabled() ? 'Đang Bật Chống Chụp' : 'Đang Tắt'}
+                    </span>
+                  </div>
+                  <p class="text-xs text-slate-600 leading-relaxed max-w-3xl">
+                    Khi bật: Phát hiện phím <strong>PrintScreen, Win/Cmd + Shift + S, Ctrl + Shift + S, Ctrl + P</strong> hoặc <strong>thao tác 3 ngón chụp màn hình cảm ứng</strong> sẽ phát <strong>âm thanh còi cảnh báo, làm mờ đề thi tức thì, đóng dấu chìm mã học sinh</strong> và lưu số lần chụp vào biên bản nộp bài.
+                  </p>
+                </div>
+                <div class="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
+                  <input type="checkbox" class="ui-switch switch-rose shrink-0" ${this.isScreenshotWarningEnabled() ? 'checked' : ''} onchange="App.toggleSetting('warnOnScreenshot')" aria-label="Bật tắt cảnh báo chụp màn hình">
+                  <button type="button" id="toggleWarnOnScreenshotBtn" onclick="App.toggleSetting('warnOnScreenshot')" class="ui-btn px-3 sm:px-4 flex-1 sm:flex-initial min-w-0 ${this.isScreenshotWarningEnabled() ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-sm' : 'bg-slate-800 hover:bg-slate-900 text-white shadow-sm'}">
+                    <i class="fa-solid ${this.isScreenshotWarningEnabled() ? 'fa-camera' : 'fa-power-off'} shrink-0"></i>
+                    <span>${this.isScreenshotWarningEnabled() ? 'Tắt Cảnh Báo Chụp Màn Hình' : 'Bật Cảnh Báo Chụp Màn Hình'}</span>
                   </button>
                 </div>
               </div>
@@ -7044,9 +7937,9 @@ const App = {
                           <td class="px-5 py-4 text-xs text-slate-600 truncate max-w-xs">${sub.examTitle}</td>
                           <td class="px-3 py-4 text-center font-bold text-xs text-indigo-700">Lần ${sub.attemptNumber || 1}</td>
                           <td class="px-3 py-4 text-center">
-                            ${(sub.tabSwitches || 0) > 0 ? `
-                              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-red-100 text-red-700 border border-red-200" title="Đã chuyển tab hoặc rời giao diện">
-                                <i class="fa-solid fa-triangle-exclamation mr-1"></i>${sub.tabSwitches} lần
+                            ${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? `
+                              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-red-100 text-red-700 border border-red-200" title="Đã ghi nhận rời màn hình hoặc chụp màn hình">
+                                <i class="fa-solid ${(sub.screenshotCount || 0) > 0 ? 'fa-camera' : 'fa-triangle-exclamation'} mr-1"></i>${sub.tabSwitches || sub.screenshotCount} lần${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} chụp)` : ''}
                               </span>
                             ` : `
                               <span class="text-emerald-600 text-xs font-medium inline-flex items-center gap-1">
@@ -10626,9 +11519,9 @@ const App = {
                         </td>
                         <td class="px-3 py-3.5 text-center font-bold text-indigo-700">Lần ${sub.attemptNumber || 1}</td>
                         <td class="px-3 py-3.5 text-center">
-                          ${(sub.tabSwitches || 0) > 0 ? `
+                          ${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? `
                             <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
-                              <i class="fa-solid fa-triangle-exclamation mr-1"></i>${sub.tabSwitches} lần
+                              <i class="fa-solid ${(sub.screenshotCount || 0) > 0 ? 'fa-camera' : 'fa-triangle-exclamation'} mr-1"></i>${sub.tabSwitches || sub.screenshotCount} lần${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} chụp)` : ''}
                             </span>
                           ` : `
                             <span class="text-emerald-600 font-medium inline-flex items-center gap-1">

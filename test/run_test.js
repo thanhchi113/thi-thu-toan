@@ -819,7 +819,115 @@ const PDFStorage = require('../js/pdf_storage.js');
 
   App.state.activeExam = null;
 
-  console.log('[OK] TẤT CẢ 19 BỘ TEST (TỐI ƯU ĐIỆN THOẠI, DẤU PHẨY TRẢ LỜI NGẮN, TẮT ĐÁNH DẤU TRẮC NGHIỆM & TỰ ĐỘNG HÓA SUPABASE) ĐÃ ĐẠT 100%!');
+  // =========================================================================
+  // TEST 20: Cảnh báo Chụp màn hình & Cơ chế Tích điểm Đổi phần thưởng
+  // =========================================================================
+  // 20.1 Nhận diện phím tắt chụp màn hình & chặn đếm trùng lỗi rời màn hình ngay sau đó
+  assert(App.isScreenshotShortcutEvent({ key: 'PrintScreen', code: 'PrintScreen' }).includes('PrintScreen'), 'Must detect PrintScreen');
+  assert(App.isScreenshotShortcutEvent({ key: 'S', metaKey: true, shiftKey: true }).length > 0, 'Must detect Win/Cmd+Shift+S');
+  assert(App.isScreenshotShortcutEvent({ key: 's', ctrlKey: true, shiftKey: true }).length > 0, 'Must detect Ctrl+Shift+S');
+  assert(App.isScreenshotShortcutEvent({ key: 'p', ctrlKey: true, shiftKey: false }).length > 0, 'Must detect Ctrl+P');
+  assert.strictEqual(App.isScreenshotShortcutEvent({ key: 'a', ctrlKey: false, shiftKey: false }), '', 'Normal typing must not trigger screenshot warning');
+
+  App.state.settings.warnOnScreenshot = true;
+  App.state.settings.warnOnExitExam = true;
+  App.state.activeExam = testExam19;
+  App.state.tabSwitchesCount = 0;
+  App.state.screenshotCount = 0;
+  App.state.violationLogs = [];
+  App.resetExamMonitorState();
+
+  const recordedShot1 = App.recordScreenshotViolation('Nhấn phím chụp màn hình (PrintScreen)');
+  assert.strictEqual(recordedShot1, true, 'First screenshot violation must be recorded');
+  assert.strictEqual(App.state.screenshotCount, 1, 'screenshotCount must increment to 1');
+  assert.strictEqual(App.state.tabSwitchesCount, 1, 'tabSwitchesCount must include screenshot violation');
+  assert.strictEqual(App.state.violationLogs[0].type, 'screenshot', 'Violation log entry must have type=screenshot');
+
+  // Ngay sau khi bấm Win+Shift+S, trình duyệt bị blur -> không được đếm trùng thêm 1 lỗi rời màn hình trong cửa sổ chống dội
+  const duplicateBlur = App.recordExamLeaveViolation('Mở đa nhiệm ngay sau phím chụp');
+  assert.strictEqual(duplicateBlur, false, 'Immediate blur right after screenshot shortcut must not double-count');
+  assert.strictEqual(App.state.tabSwitchesCount, 1, 'Total violations must remain 1');
+
+  // Khi Giáo viên tắt warnOnScreenshot -> không cảnh báo chụp màn hình
+  App.state.settings.warnOnScreenshot = false;
+  App._lastScreenshotWarnAt = 0;
+  assert.strictEqual(App.recordScreenshotViolation('PrintScreen'), false, 'Disabled warnOnScreenshot must ignore screenshot');
+  App.state.settings.warnOnScreenshot = true;
+  App.state.activeExam = null;
+
+  // 20.2 Tính điểm tích lũy theo mốc điểm + kỷ luật + chống spam nộp trùng đề + đổi thưởng & duyệt thưởng
+  App.state.students = [
+    App.normalizeStudentRecord({ studentId: 'HS20', fullName: 'Trần Minh Khôi', className: '12A1', grade: 12, status: 'active' })
+  ];
+  App.state.currentUser = { ...App.state.students[0], role: 'student' };
+  App.state.submissions = [
+    // Đề 1: 8.5/10 (85% -> +30⭐) + Nghiêm túc 0 vi phạm (+5⭐) = 35⭐
+    {
+      id: 'SUB-R1',
+      examId: 'EX-R1',
+      studentId: 'HS20',
+      tabSwitches: 0,
+      screenshotCount: 0,
+      scoreResult: { totalScore: 8.5, maxTotal: 10, percentage: 85 }
+    },
+    // Nộp lại trùng Đề 1 nhưng điểm thấp hơn (6.0/10) -> Chống spam: không được cộng dồn thêm điểm
+    {
+      id: 'SUB-R1-DUP',
+      examId: 'EX-R1',
+      studentId: 'HS20',
+      tabSwitches: 0,
+      screenshotCount: 0,
+      scoreResult: { totalScore: 6.0, maxTotal: 10, percentage: 60 }
+    },
+    // Đề 2: 9.2/10 (92% -> +45⭐) nhưng chụp màn hình 1 lần (mất +5⭐ kỷ luật và phạt -5⭐ chụp MH) = 40⭐
+    {
+      id: 'SUB-R2',
+      examId: 'EX-R2',
+      studentId: 'HS20',
+      tabSwitches: 1,
+      screenshotCount: 1,
+      scoreResult: { totalScore: 9.2, maxTotal: 10, percentage: 92 }
+    }
+  ];
+
+  let rwStats = App.getStudentRewardStats('HS20');
+  assert.strictEqual(rwStats.earnedPoints, 75, 'Earned points must equal 35 (EX-R1 best) + 40 (EX-R2 with 1 screenshot penalty) = 75');
+  assert.strictEqual(rwStats.availablePoints, 75, 'Initial available points must be 75');
+
+  // Chưa đủ 100⭐ để đổi RW-02 (100⭐)
+  assert.strictEqual(App.redeemReward('RW-02', true), false, 'Cannot redeem 100-point reward with 75 points');
+
+  // Đổi thành công RW-01 (60⭐)
+  assert.strictEqual(App.redeemReward('RW-01', true), true, 'Must redeem 60-point reward with 75 points');
+  rwStats = App.getStudentRewardStats('HS20');
+  assert.strictEqual(rwStats.spentPoints, 60, 'Spent points must be 60');
+  assert.strictEqual(rwStats.availablePoints, 15, 'Available points must be 15 after redeeming 60');
+  assert.strictEqual(App.getPendingRedemptionsCount(), 1, 'Pending redemptions count for Teacher must be 1');
+
+  const rdmId = rwStats.redemptions[0].id;
+  // Giáo viên xác nhận đã trao thưởng
+  assert.strictEqual(App.fulfillRewardRedemption('HS20', rdmId), true, 'Teacher must fulfill redemption');
+  assert.strictEqual(App.getPendingRedemptionsCount(), 0, 'Pending redemptions must drop to 0 after fulfillment');
+  assert.strictEqual(App.getStudentRewardStats('HS20').availablePoints, 15, 'Fulfilled redemption keeps points spent');
+
+  // Giáo viên cộng thêm +90⭐ khuyến khích -> HS có 105⭐ -> đổi RW-02 (100⭐), sau đó GV hoàn điểm
+  App.adjustStudentBonusPoints('HS20', 90);
+  assert.strictEqual(App.getStudentRewardStats('HS20').availablePoints, 105, 'Bonus +90 must raise availablePoints to 105');
+  assert.strictEqual(App.redeemReward('RW-02', true), true, 'Student can now redeem RW-02 (100 points)');
+  assert.strictEqual(App.getStudentRewardStats('HS20').availablePoints, 5, 'Available points drop to 5');
+
+  const rdm2Id = App.getStudentRewardStats('HS20').redemptions[0].id;
+  App.rejectRewardRedemption('HS20', rdm2Id);
+  assert.strictEqual(App.getStudentRewardStats('HS20').availablePoints, 105, 'Rejecting redemption must refund 100 points back to 105');
+
+  // Đồng bộ Cloud không làm mất lịch sử đổi thưởng
+  const mergedStu = App.mergeStudentRecords(
+    { studentId: 'HS20', fullName: 'Trần Minh Khôi', redemptions: [{ id: 'RDM-CLOUD-1', rewardTitle: 'Quà Cloud', cost: 60, status: 'pending', createdAt: '2026-10-30T09:00:00Z' }] },
+    App.state.students[0]
+  );
+  assert.strictEqual(mergedStu.redemptions.length, 3, 'mergeStudentRecords must union redemptions across devices without data loss');
+
+  console.log('[OK] TẤT CẢ 20 BỘ TEST (CHỐNG CHỤP MÀN HÌNH, TÍCH ĐIỂM ĐỔI THƯỞNG, ĐIỆN THOẠI & TỰ ĐỘNG HÓA SUPABASE) ĐÃ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

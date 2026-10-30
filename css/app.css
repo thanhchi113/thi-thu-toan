@@ -1097,8 +1097,45 @@ body[data-theme="dark"] .flag-star-btn.is-flagged {
   color: #fbbf24 !important;
 }
 
+/* Chống chụp màn hình: làm mờ tức thì nội dung phòng thi khi phát hiện chụp & đóng dấu mã HS */
+body.exam-screenshot-shield #app {
+  filter: blur(18px);
+  transition: filter 0.1s ease;
+  pointer-events: none;
+  user-select: none;
+}
+.exam-watermark-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  align-content: space-around;
+  gap: 36px 24px;
+  padding: 20px;
+  opacity: 0.055;
+}
+.exam-watermark-item {
+  transform: rotate(-22deg);
+  font-size: 11px;
+  font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: nowrap;
+  color: #0f172a;
+  text-align: center;
+}
+body[data-theme="dark"] .exam-watermark-item {
+  color: #f8fafc;
+}
+
 /* Print Stylesheet */
 @media print {
+  body.in-exam #app {
+    display: none !important;
+  }
   body {
     background: white !important;
     color: black !important;
