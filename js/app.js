@@ -117,6 +117,8 @@ const App = {
     adminViewTab: 'matrix',   // 'matrix' (Sổ điểm tổng hợp các đợt) | 'log' (Chi tiết từng lượt nộp)
     adminGradeFilter: 'ALL',  // 'ALL' hoặc 6..12
     adminClassFilter: 'ALL',  // 'ALL' hoặc tên lớp ('12A1', '12A2')
+    adminGradebookSearch: '', // Tìm nhanh học sinh ở Sổ điểm tổng hợp & Nhật ký nộp bài
+    adminRewardStudentSearch: '', // Tìm nhanh học sinh để cộng/trừ điểm thưởng
     studentGradeFilter: 'ALL', // 'ALL' hoặc 6..12
 
     // Bộ lọc & Tìm kiếm Đề thi (Giáo viên & Học sinh)
@@ -979,6 +981,46 @@ const App = {
     `;
   },
 
+  REWARD_ICON_OPTIONS: [
+    { value: 'fa-gift', label: 'Hộp quà thưởng' },
+    { value: 'fa-circle-plus', label: 'Cộng điểm kiểm tra' },
+    { value: 'fa-ticket', label: 'Phiếu miễn bài' },
+    { value: 'fa-book', label: 'Tài liệu / Sách' },
+    { value: 'fa-medal', label: 'Huy chương' },
+    { value: 'fa-trophy', label: 'Cúp vinh danh' },
+    { value: 'fa-crown', label: 'Vương miện xuất sắc' },
+    { value: 'fa-pen-ruler', label: 'Dụng cụ học tập' }
+  ],
+
+  normalizeSearchText(str) {
+    return String(str || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .toLowerCase()
+      .trim();
+  },
+
+  matchesStudentSearch(student, rawQuery) {
+    const q = this.normalizeSearchText(rawQuery);
+    if (!q) return true;
+    if (!student) return false;
+    const grade = this.getStudentGrade(student);
+    const haystack = this.normalizeSearchText(
+      `${student.studentId || ''} ${student.fullName || ''} ${student.className || ''} khoi ${grade} lop ${student.className || ''} k${grade}`
+    );
+    return haystack.includes(q);
+  },
+
+  escapeHtmlAttr(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  },
+
   DEFAULT_REWARD_CATALOG: [
     { id: 'RW-01', title: 'Cộng +0,5 điểm kiểm tra thường xuyên', cost: 60, icon: 'fa-circle-plus', desc: 'Áp dụng cộng điểm cho 1 bài kiểm tra miệng hoặc 15 phút trong học kì.', active: true },
     { id: 'RW-02', title: 'Phiếu miễn 1 bài tập về nhà', cost: 100, icon: 'fa-ticket', desc: 'Được miễn 1 lần bài tập về nhà tự chọn mà vẫn tính đủ chuyên cần.', active: true },
@@ -1316,6 +1358,10 @@ const App = {
 
   // --- LƯU TRỮ & ĐỒNG BỘ SERVER TỰ ĐỘNG 100% (SUPABASE POSTGRES + STORAGE CDN, 0 THAO TÁC) ---
   isServerSyncEnabled() {
+    if (typeof window !== 'undefined') {
+      if (window.__DISABLE_CLOUD_SYNC__ === true) return false;
+      if (window.location && /(?:[?&])nosync=1(?:&|$)/.test(window.location.search || '')) return false;
+    }
     return Boolean(
       this.SUPABASE_URL &&
       this.SUPABASE_PUBLISHABLE_KEY &&
@@ -1750,6 +1796,12 @@ const App = {
     this._pushCloudPromise = (async () => {
       let ok = false;
       try {
+        // Bảo vệ dữ liệu Server: nếu phiên hiện tại chưa tải trạng thái Server lần nào, gộp trước để không bao giờ ghi đè mất đề thi cũ
+        if (!this.state.cloudLastSyncedAt) {
+          const snap = await this.fetchSupabaseServerSnapshot().catch(() => null);
+          if (snap) this.mergeCloudState(snap);
+        }
+
         const uploadSlotIfNeeded = async (currentUrl, storageKey) => {
           const cur = String(currentUrl || '');
           if (!cur.startsWith('idb:')) return cur;
@@ -3259,7 +3311,7 @@ const App = {
         type: 'info',
         title: 'Xác nhận đổi phần thưởng',
         icon: 'fa-gift',
-        confirmText: `Đổi ngay (${reward.cost}⭐)`,
+        confirmText: `Đổi ngay (${reward.cost} điểm)`,
         cancelText: 'Để sau'
       }
     );
@@ -3308,7 +3360,7 @@ const App = {
     if (typeof document !== 'undefined') {
       this.render();
     }
-    this.notify(`Đã đổi thành công "${reward.title}" (-${reward.cost}⭐)! Giáo viên đã nhận được yêu cầu trao thưởng của bạn.`, 'success', 'Đổi phần thưởng thành công');
+    this.notify(`Đã đổi thành công "${reward.title}" (-${reward.cost} điểm)! Giáo viên đã nhận được yêu cầu trao thưởng của bạn.`, 'success', 'Đổi phần thưởng thành công');
     return true;
   },
 
@@ -3340,7 +3392,7 @@ const App = {
     this.saveData({ markAdminDirty: true });
     this.pushStudentSubmissionToCloud(null, student);
     if (typeof document !== 'undefined') this.render();
-    this.notify(`Đã hủy yêu cầu và hoàn lại +${item.cost}⭐ cho học sinh ${student.fullName}.`, 'info', 'Đã hoàn điểm');
+    this.notify(`Đã hủy yêu cầu và hoàn lại +${item.cost} điểm cho học sinh ${student.fullName}.`, 'info', 'Đã hoàn điểm');
     return true;
   },
 
@@ -3357,16 +3409,57 @@ const App = {
     this.saveData({ markAdminDirty: true });
     this.pushStudentSubmissionToCloud(null, student);
     if (typeof document !== 'undefined') this.render();
-    this.notify(`${numDelta > 0 ? `Đã cộng +${numDelta}⭐` : `Đã trừ ${numDelta}⭐`} điểm thưởng cho ${student.fullName}.`, 'success', 'Cập nhật điểm thưởng');
+    this.notify(`${numDelta > 0 ? `Đã cộng +${numDelta} điểm` : `Đã trừ ${Math.abs(numDelta)} điểm`} thưởng cho ${student.fullName}.`, 'success', 'Cập nhật điểm thưởng');
     return true;
+  },
+
+  applyCustomStudentBonus(studentId, sign = 1, explicitAmount = null) {
+    const inputEl = (explicitAmount === null && typeof document !== 'undefined')
+      ? document.getElementById(`bonusAmt_${studentId}`)
+      : null;
+    const raw = explicitAmount !== null ? explicitAmount : inputEl?.value;
+    const amount = Math.round(Math.abs(Number(raw) || 0));
+    if (!amount || amount < 1) {
+      this.notify('Vui lòng nhập số điểm hợp lệ (từ 1 điểm trở lên)!', 'warning', 'Số điểm chưa hợp lệ');
+      return false;
+    }
+    return this.adjustStudentBonusPoints(studentId, sign >= 0 ? amount : -amount);
+  },
+
+  onAdminRewardStudentSearch(val) {
+    this.state.adminRewardStudentSearch = String(val ?? '');
+    if (typeof document === 'undefined') return;
+    const tbody = document.getElementById('adminRewardStudentsTbody');
+    if (tbody) tbody.innerHTML = this.renderAdminRewardStudentRowsHtml();
+    const countEl = document.getElementById('adminRewardStudentCountBadge');
+    if (countEl) {
+      const matched = this.getFilteredRewardStudentRows().length;
+      countEl.textContent = `${matched} / ${(this.state.students || []).length} HS`;
+    }
+    const clearBtn = document.getElementById('clearAdminRewardSearchBtn');
+    if (clearBtn) clearBtn.classList.toggle('hidden', !this.state.adminRewardStudentSearch);
+  },
+
+  clearAdminRewardStudentSearch() {
+    this.state.adminRewardStudentSearch = '';
+    if (typeof document !== 'undefined') {
+      const inp = document.getElementById('adminRewardStudentSearchInput');
+      if (inp) {
+        inp.value = '';
+        inp.focus();
+      }
+      this.onAdminRewardStudentSearch('');
+    }
   },
 
   handleAddRewardCatalogItem() {
     const titleEl = typeof document !== 'undefined' ? document.getElementById('newRewardTitle') : null;
     const costEl = typeof document !== 'undefined' ? document.getElementById('newRewardCost') : null;
+    const iconEl = typeof document !== 'undefined' ? document.getElementById('newRewardIcon') : null;
     const descEl = typeof document !== 'undefined' ? document.getElementById('newRewardDesc') : null;
     const title = String(titleEl?.value || '').trim();
     const cost = Math.round(Number(costEl?.value || 0));
+    const icon = String(iconEl?.value || 'fa-gift').trim() || 'fa-gift';
     const desc = String(descEl?.value || '').trim();
     if (!title || cost < 5) {
       this.notify('Vui lòng nhập tên phần thưởng và mức điểm đổi từ 5 điểm trở lên!', 'warning', 'Thiếu thông tin phần thưởng');
@@ -3377,7 +3470,7 @@ const App = {
       id: `RW-${Date.now().toString(36).toUpperCase()}`,
       title,
       cost,
-      icon: 'fa-gift',
+      icon,
       desc: desc || 'Phần thưởng khuyến khích học tập từ Giáo viên.',
       active: true
     });
@@ -3385,7 +3478,109 @@ const App = {
     this.state.settings.rewardCatalog = list;
     this.saveData({ markAdminDirty: true });
     if (typeof document !== 'undefined') this.render();
-    this.notify(`Đã thêm phần thưởng "${title}" (${cost}⭐) vào cửa hàng đổi thưởng!`, 'success', 'Thêm phần thưởng thành công');
+    this.notify(`Đã thêm phần thưởng "${title}" (${cost} điểm) vào cửa hàng đổi thưởng!`, 'success', 'Thêm phần thưởng thành công');
+    return true;
+  },
+
+  showEditRewardModal(rewardId) {
+    if (typeof document === 'undefined') return;
+    const rw = this.getRewardCatalog().find(r => r.id === rewardId);
+    if (!rw) return;
+
+    document.getElementById('editRewardModal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'editRewardModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+              <i class="fa-solid fa-pen-to-square"></i>
+            </div>
+            <div>
+              <h3 class="text-sm sm:text-base font-extrabold text-slate-900">Chỉnh Sửa Phần Thưởng</h3>
+              <p class="text-[11px] text-slate-500">Cập nhật trực tiếp không cần xóa &amp; tạo lại</p>
+            </div>
+          </div>
+          <button type="button" onclick="document.getElementById('editRewardModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <form onsubmit="event.preventDefault(); App.handleEditRewardSubmit('${rw.id}');" class="space-y-3 text-xs">
+          <div>
+            <label for="editRewardTitle" class="block font-bold text-slate-700 mb-1">Tên phần thưởng *</label>
+            <input type="text" id="editRewardTitle" required value="${this.escapeHtmlAttr(rw.title)}" placeholder="VD: Phiếu miễn 1 bài tập về nhà" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white font-semibold text-slate-900 outline-none focus:border-indigo-600">
+          </div>
+
+          <div class="grid grid-cols-2 gap-2.5">
+            <div>
+              <label for="editRewardCost" class="block font-bold text-slate-700 mb-1">Mức điểm đổi *</label>
+              <input type="number" id="editRewardCost" required min="5" step="5" value="${rw.cost}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white font-mono font-bold text-amber-700 outline-none focus:border-indigo-600">
+            </div>
+            <div>
+              <label for="editRewardIcon" class="block font-bold text-slate-700 mb-1">Biểu tượng</label>
+              <select id="editRewardIcon" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 outline-none focus:border-indigo-600 cursor-pointer">
+                ${this.REWARD_ICON_OPTIONS.map(opt => `
+                  <option value="${opt.value}" ${rw.icon === opt.value ? 'selected' : ''}>${opt.label}</option>
+                `).join('')}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label for="editRewardDesc" class="block font-bold text-slate-700 mb-1">Mô tả chi tiết</label>
+            <textarea id="editRewardDesc" rows="2" placeholder="Mô tả quyền lợi phần thưởng cho học sinh..." class="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 outline-none focus:border-indigo-600 resize-none">${this.escapeHtmlAttr(rw.desc || '')}</textarea>
+          </div>
+
+          <div class="pt-2 flex items-center justify-end gap-2">
+            <button type="button" onclick="document.getElementById('editRewardModal')?.remove()" class="ui-btn px-4 bg-slate-100 hover:bg-slate-200 text-slate-700">
+              <span>Hủy</span>
+            </button>
+            <button type="submit" id="saveEditRewardBtn" class="ui-btn px-4 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
+              <i class="fa-solid fa-floppy-disk shrink-0"></i><span>Lưu Thay Đổi</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
+    });
+    document.body.appendChild(modal);
+  },
+
+  handleEditRewardSubmit(rewardId, customPayload = null) {
+    const catalog = this.getRewardCatalog();
+    const idx = catalog.findIndex(r => r.id === rewardId);
+    if (idx === -1) return false;
+
+    const title = String(customPayload ? customPayload.title : (typeof document !== 'undefined' ? document.getElementById('editRewardTitle')?.value : '') || '').trim();
+    const cost = Math.round(Number(customPayload ? customPayload.cost : (typeof document !== 'undefined' ? document.getElementById('editRewardCost')?.value : 0)) || 0);
+    const icon = String((customPayload ? customPayload.icon : (typeof document !== 'undefined' ? document.getElementById('editRewardIcon')?.value : '')) || catalog[idx].icon || 'fa-gift').trim();
+    const desc = String(customPayload && customPayload.desc !== undefined ? customPayload.desc : (typeof document !== 'undefined' ? document.getElementById('editRewardDesc')?.value : catalog[idx].desc) || '').trim();
+
+    if (!title || cost < 5) {
+      this.notify('Vui lòng nhập tên phần thưởng và mức điểm đổi từ 5 điểm trở lên!', 'warning', 'Thông tin chưa hợp lệ');
+      return false;
+    }
+
+    catalog[idx] = {
+      ...catalog[idx],
+      title,
+      cost,
+      icon,
+      desc
+    };
+    if (!this.state.settings) this.state.settings = {};
+    this.state.settings.rewardCatalog = catalog;
+    this.saveData({ markAdminDirty: true });
+    if (typeof document !== 'undefined') {
+      document.getElementById('editRewardModal')?.remove();
+      this.render();
+    }
+    this.notify(`Đã cập nhật phần thưởng "${title}" (${cost} điểm).`, 'success', 'Lưu phần thưởng thành công');
     return true;
   },
 
@@ -3435,7 +3630,10 @@ const App = {
             <div class="grid grid-cols-3 gap-2 sm:gap-3 shrink-0">
               <div class="bg-white/15 backdrop-blur-xs rounded-xl p-2.5 sm:p-3 text-center border border-white/20">
                 <div class="text-[11px] text-white/85 font-semibold">Khả dụng</div>
-                <div id="studentAvailablePointsVal" class="text-xl sm:text-2xl font-extrabold font-mono">${stats.availablePoints}⭐</div>
+                <div id="studentAvailablePointsVal" class="text-xl sm:text-2xl font-extrabold font-mono inline-flex items-center justify-center gap-1">
+                  <span>${stats.availablePoints}</span>
+                  <i class="fa-solid fa-star text-sm text-amber-200"></i>
+                </div>
               </div>
               <div class="bg-white/15 backdrop-blur-xs rounded-xl p-2.5 sm:p-3 text-center border border-white/20">
                 <div class="text-[11px] text-white/85 font-semibold">Tổng tích lũy</div>
@@ -3451,8 +3649,8 @@ const App = {
           ${nextGoal ? `
             <div class="mt-4 pt-3.5 border-t border-white/20 space-y-1.5">
               <div class="flex items-center justify-between gap-2 text-xs font-bold">
-                <span class="truncate">Mục tiêu tiếp theo: ${nextGoal.title} (${nextGoal.cost}⭐)</span>
-                <span class="font-mono shrink-0">${stats.availablePoints >= nextGoal.cost ? 'Đủ điểm đổi!' : `Còn thiếu ${nextGoal.cost - stats.availablePoints}⭐`}</span>
+                <span class="truncate">Mục tiêu tiếp theo: ${nextGoal.title} (${nextGoal.cost} điểm)</span>
+                <span class="font-mono shrink-0">${stats.availablePoints >= nextGoal.cost ? 'Đủ điểm đổi!' : `Còn thiếu ${nextGoal.cost - stats.availablePoints} điểm`}</span>
               </div>
               <div class="w-full h-2.5 rounded-full bg-black/20 overflow-hidden">
                 <div class="h-full rounded-full bg-white transition-all duration-300" style="width:${goalPct}%"></div>
@@ -3470,23 +3668,23 @@ const App = {
           <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
             <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
               <div class="font-bold text-slate-700">Đạt &ge; 5,0đ</div>
-              <div class="font-extrabold text-indigo-600 font-mono mt-0.5">+10 ⭐</div>
+              <div class="font-extrabold text-indigo-600 font-mono mt-0.5 inline-flex items-center gap-1"><i class="fa-solid fa-star text-amber-500 text-[10px]"></i><span>+10 điểm</span></div>
             </div>
             <div class="p-2.5 rounded-xl bg-blue-50/60 border border-blue-200">
               <div class="font-bold text-blue-800">Khá &ge; 7,0đ</div>
-              <div class="font-extrabold text-blue-700 font-mono mt-0.5">+20 ⭐</div>
+              <div class="font-extrabold text-blue-700 font-mono mt-0.5 inline-flex items-center gap-1"><i class="fa-solid fa-star text-amber-500 text-[10px]"></i><span>+20 điểm</span></div>
             </div>
             <div class="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200">
               <div class="font-bold text-emerald-800">Giỏi &ge; 8,0đ</div>
-              <div class="font-extrabold text-emerald-700 font-mono mt-0.5">+30 ⭐</div>
+              <div class="font-extrabold text-emerald-700 font-mono mt-0.5 inline-flex items-center gap-1"><i class="fa-solid fa-star text-amber-500 text-[10px]"></i><span>+30 điểm</span></div>
             </div>
             <div class="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200">
               <div class="font-bold text-amber-900">Xuất sắc &ge; 9,0đ</div>
-              <div class="font-extrabold text-amber-700 font-mono mt-0.5">+45–50 ⭐</div>
+              <div class="font-extrabold text-amber-700 font-mono mt-0.5 inline-flex items-center gap-1"><i class="fa-solid fa-star text-amber-500 text-[10px]"></i><span>+45–50 điểm</span></div>
             </div>
             <div class="col-span-2 sm:col-span-1 p-2.5 rounded-xl bg-purple-50/70 border border-purple-200">
               <div class="font-bold text-purple-900">0 Vi phạm / Chụp MH</div>
-              <div class="font-extrabold text-purple-700 font-mono mt-0.5">+5 ⭐ kỷ luật</div>
+              <div class="font-extrabold text-purple-700 font-mono mt-0.5 inline-flex items-center gap-1"><i class="fa-solid fa-shield-heart text-purple-600 text-[10px]"></i><span>+5 điểm kỷ luật</span></div>
             </div>
           </div>
         </div>
@@ -3514,8 +3712,9 @@ const App = {
                       <div class="w-10 h-10 rounded-xl ${canRedeem ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-600'} flex items-center justify-center text-base shrink-0 shadow-xs">
                         <i class="fa-solid ${rw.icon}"></i>
                       </div>
-                      <span class="px-2.5 py-1 rounded-full text-xs font-extrabold font-mono ${canRedeem ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-white text-slate-700 border border-slate-200'} shrink-0">
-                        ${rw.cost} ⭐
+                      <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold font-mono ${canRedeem ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-white text-slate-700 border border-slate-200'} shrink-0">
+                        <i class="fa-solid fa-star text-amber-500 text-[10px]"></i>
+                        <span>${rw.cost} điểm</span>
                       </span>
                     </div>
                     <h5 class="text-sm font-extrabold text-slate-900 leading-snug">${rw.title}</h5>
@@ -3533,7 +3732,7 @@ const App = {
                       class="ui-btn w-full ${canRedeem ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}"
                     >
                       <i class="fa-solid ${canRedeem ? 'fa-gift' : 'fa-lock'} shrink-0"></i>
-                      <span>${canRedeem ? `Đổi Thưởng Ngay (-${rw.cost}⭐)` : `Cần thêm ${rw.cost - stats.availablePoints}⭐`}</span>
+                      <span>${canRedeem ? `Đổi Thưởng Ngay (-${rw.cost} điểm)` : `Cần thêm ${rw.cost - stats.availablePoints} điểm`}</span>
                     </button>
                   </div>
                 </div>
@@ -3562,7 +3761,7 @@ const App = {
                   <div class="p-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-white">
                     <div class="min-w-0">
                       <div class="font-bold text-xs sm:text-sm text-slate-900">${r.rewardTitle}</div>
-                      <div class="text-[11px] text-slate-500 mt-0.5">${new Date(r.createdAt).toLocaleString('vi-VN')} • Mức đổi: <strong class="font-mono text-amber-700">${r.cost}⭐</strong></div>
+                      <div class="text-[11px] text-slate-500 mt-0.5">${new Date(r.createdAt).toLocaleString('vi-VN')} • Mức đổi: <strong class="font-mono text-amber-700">${r.cost} điểm</strong></div>
                     </div>
                     <div class="shrink-0">${badge}</div>
                   </div>
@@ -3692,7 +3891,10 @@ const App = {
                 </div>
                 <button type="button" onclick="App.setStudentMainTab('rewards')" class="bg-amber-400/20 hover:bg-amber-400/30 border border-amber-300/40 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[100px] transition cursor-pointer" title="Xem điểm tích lũy & đổi phần thưởng">
                   <div class="text-[11px] sm:text-xs text-amber-200 font-semibold truncate">Điểm thưởng</div>
-                  <div class="text-xl sm:text-2xl font-extrabold font-mono text-amber-300">${rewardStats.availablePoints}⭐</div>
+                  <div class="text-xl sm:text-2xl font-extrabold font-mono text-amber-300 inline-flex items-center justify-center gap-1">
+                    <span>${rewardStats.availablePoints}</span>
+                    <i class="fa-solid fa-star text-sm text-amber-300"></i>
+                  </div>
                 </button>
               </div>
             </div>
@@ -3753,8 +3955,9 @@ const App = {
                   <i class="fa-solid fa-gift shrink-0"></i>
                   <span class="sm:hidden">Đổi Thưởng</span>
                   <span class="hidden sm:inline">Tích Điểm &amp; Đổi Thưởng</span>
-                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold shrink-0 ${this.state.studentMainTab === 'rewards' ? 'bg-amber-700 text-white' : 'bg-white text-amber-800 shadow-2xs'}">
-                    ${rewardStats.availablePoints}⭐
+                  <span class="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold shrink-0 ${this.state.studentMainTab === 'rewards' ? 'bg-amber-700 text-white' : 'bg-white text-amber-800 shadow-2xs'}">
+                    <span>${rewardStats.availablePoints}</span>
+                    <i class="fa-solid fa-star text-[9px]"></i>
                   </span>
                 </button>
               </nav>
@@ -6226,10 +6429,11 @@ const App = {
           <div class="pt-2 border-t border-slate-200/80 flex items-center justify-center gap-2 flex-wrap">
             <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold ${gainedPoints > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
               <i class="fa-solid fa-star text-amber-500"></i>
-              <span>${gainedPoints > 0 ? `+${gainedPoints}⭐ Điểm thưởng mới` : `Tổng khả dụng: ${availPts}⭐`}</span>
+              <span>${gainedPoints > 0 ? `+${gainedPoints} điểm thưởng mới` : `Tổng khả dụng: ${availPts} điểm`}</span>
             </span>
-            <button type="button" onclick="document.getElementById('scoreModal')?.remove(); App.setStudentMainTab('rewards');" class="text-xs font-extrabold text-amber-700 hover:text-amber-900 underline cursor-pointer">
-              Đổi phần thưởng (${availPts}⭐)
+            <button type="button" onclick="document.getElementById('scoreModal')?.remove(); App.setStudentMainTab('rewards');" class="text-xs font-extrabold text-amber-700 hover:text-amber-900 underline inline-flex items-center gap-1 cursor-pointer">
+              <i class="fa-solid fa-gift text-[11px]"></i>
+              <span>Đổi phần thưởng (${availPts} điểm)</span>
             </button>
           </div>
         </div>
@@ -6802,6 +7006,72 @@ const App = {
     this.viewSubmissionDetail(subId);
   },
 
+  getFilteredRewardStudentRows() {
+    const q = this.state.adminRewardStudentSearch || '';
+    return (this.state.students || [])
+      .filter(s => this.matchesStudentSearch(s, q))
+      .map(s => ({
+        student: s,
+        stats: this.getStudentRewardStats(s.studentId)
+      }))
+      .sort((a, b) => b.stats.availablePoints - a.stats.availablePoints || b.stats.totalAccumulated - a.stats.totalAccumulated);
+  },
+
+  renderAdminRewardStudentRowsHtml(precomputedRows = null) {
+    const rows = Array.isArray(precomputedRows) ? precomputedRows : this.getFilteredRewardStudentRows();
+    if (rows.length === 0) {
+      return `
+        <tr>
+          <td colspan="7" class="px-4 py-8 text-center text-xs text-slate-400">
+            <i class="fa-solid fa-magnifying-glass mr-1.5"></i>Không tìm thấy học sinh nào khớp với từ khóa tìm kiếm.
+          </td>
+        </tr>
+      `;
+    }
+    return rows.map(({ student, stats }) => `
+      <tr class="hover:bg-slate-50/80">
+        <td class="px-4 py-3 font-mono font-bold text-indigo-700 whitespace-nowrap">${student.studentId}</td>
+        <td class="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">
+          ${student.fullName}
+          <span class="text-slate-400 font-normal ml-1">(K${this.getStudentGrade(student)} • ${student.className || '12'})</span>
+        </td>
+        <td class="px-3 py-3 text-center font-mono font-semibold text-slate-700 whitespace-nowrap">
+          <span class="inline-flex items-center gap-1"><span>${stats.earnedPoints}</span><i class="fa-solid fa-star text-[10px] text-amber-500"></i></span>
+        </td>
+        <td class="px-3 py-3 text-center font-mono font-semibold whitespace-nowrap ${stats.bonusPoints >= 0 ? 'text-emerald-700' : 'text-red-600'}">
+          ${stats.bonusPoints > 0 ? `+${stats.bonusPoints}` : stats.bonusPoints}
+        </td>
+        <td class="px-3 py-3 text-center font-mono text-slate-500 whitespace-nowrap">${stats.spentPoints}</td>
+        <td class="px-3 py-3 text-center whitespace-nowrap">
+          <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 font-mono font-extrabold">
+            <span>${stats.availablePoints}</span>
+            <i class="fa-solid fa-star text-[10px] text-amber-600"></i>
+          </span>
+        </td>
+        <td class="px-4 py-2.5 text-right whitespace-nowrap">
+          <div class="inline-flex items-center justify-end gap-1.5">
+            <input
+              type="number"
+              id="bonusAmt_${student.studentId}"
+              min="1"
+              max="1000"
+              step="5"
+              value="10"
+              aria-label="Số điểm cộng trừ cho ${this.escapeHtmlAttr(student.fullName)}"
+              class="w-14 h-8 px-1.5 rounded-lg border border-slate-300 bg-white text-center font-mono font-bold text-xs text-slate-800 outline-none focus:border-indigo-600"
+            >
+            <button type="button" onclick="App.applyCustomStudentBonus('${student.studentId}', 1)" class="h-8 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs inline-flex items-center gap-1 cursor-pointer shadow-2xs" title="Cộng điểm thưởng theo ô nhập">
+              <i class="fa-solid fa-plus text-[10px]"></i><span>Cộng</span>
+            </button>
+            <button type="button" onclick="App.applyCustomStudentBonus('${student.studentId}', -1)" class="h-8 px-2.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs inline-flex items-center gap-1 cursor-pointer" title="Trừ điểm thưởng theo ô nhập">
+              <i class="fa-solid fa-minus text-[10px]"></i><span>Trừ</span>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  },
+
   renderAdminRewardsSectionHtml() {
     const catalog = this.getRewardCatalog();
     const allRedemptions = [];
@@ -6824,10 +7094,7 @@ const App = {
       return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
     });
 
-    const studentRows = (this.state.students || []).map(s => ({
-      student: s,
-      stats: this.getStudentRewardStats(s.studentId)
-    })).sort((a, b) => b.stats.availablePoints - a.stats.availablePoints || b.stats.totalAccumulated - a.stats.totalAccumulated);
+    const studentRows = this.getFilteredRewardStudentRows();
 
     return `
       <section class="space-y-5" id="sectionAdminRewards">
@@ -6856,7 +7123,10 @@ const App = {
                       <div class="flex flex-wrap items-center gap-1.5">
                         <span class="font-extrabold text-xs sm:text-sm text-slate-900">${r.studentName}</span>
                         <span class="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[11px] font-bold">${r.studentId} • K${r.grade} (${r.className})</span>
-                        <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-mono text-[11px] font-extrabold">-${r.cost}⭐</span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-mono text-[11px] font-extrabold">
+                          <span>-${r.cost}</span>
+                          <i class="fa-solid fa-star text-[9px] text-amber-600"></i>
+                        </span>
                       </div>
                       <div class="text-xs font-bold text-indigo-700">${r.rewardTitle}</div>
                       <div class="text-[11px] text-slate-400">${new Date(r.createdAt).toLocaleString('vi-VN')}</div>
@@ -6893,13 +7163,16 @@ const App = {
               <i class="fa-solid fa-store text-indigo-600"></i>
               <span>Quản Lý Danh Mục Phần Thưởng (${catalog.length})</span>
             </h4>
-            <p class="text-xs text-slate-500">Thêm phần thưởng mới hoặc bật/tắt các phần thưởng học sinh được đổi (tự động đồng bộ Server)</p>
+            <p class="text-xs text-slate-500">Thêm phần thưởng mới, chỉnh sửa trực tiếp hoặc ẩn/hiện phần thưởng học sinh được đổi (tự động đồng bộ Server)</p>
           </div>
 
           <form onsubmit="event.preventDefault(); App.handleAddRewardCatalogItem();" class="grid grid-cols-1 sm:grid-cols-12 gap-2.5 p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
-            <input type="text" id="newRewardTitle" required placeholder="Tên phần thưởng (VD: Miễn 1 bài tập về nhà)" class="sm:col-span-5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold outline-none focus:border-indigo-600 min-w-0">
-            <input type="number" id="newRewardCost" required min="5" step="5" value="80" placeholder="Điểm ⭐" class="sm:col-span-2 px-3 py-2 rounded-xl border border-slate-300 bg-white text-xs font-mono font-bold text-amber-700 outline-none focus:border-indigo-600 min-w-0">
-            <input type="text" id="newRewardDesc" placeholder="Mô tả ngắn (không bắt buộc)" class="sm:col-span-3 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs outline-none focus:border-indigo-600 min-w-0">
+            <input type="text" id="newRewardTitle" required placeholder="Tên phần thưởng (VD: Miễn 1 bài tập về nhà)" class="sm:col-span-4 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold outline-none focus:border-indigo-600 min-w-0">
+            <input type="number" id="newRewardCost" required min="5" step="5" value="80" placeholder="Số điểm" class="sm:col-span-2 px-3 py-2 rounded-xl border border-slate-300 bg-white text-xs font-mono font-bold text-amber-700 outline-none focus:border-indigo-600 min-w-0">
+            <select id="newRewardIcon" aria-label="Biểu tượng phần thưởng" class="sm:col-span-2 px-2.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-700 outline-none focus:border-indigo-600 min-w-0 cursor-pointer">
+              ${this.REWARD_ICON_OPTIONS.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join('')}
+            </select>
+            <input type="text" id="newRewardDesc" placeholder="Mô tả ngắn (không bắt buộc)" class="sm:col-span-2 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs outline-none focus:border-indigo-600 min-w-0">
             <button type="submit" class="sm:col-span-2 ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs">
               <i class="fa-solid fa-plus shrink-0"></i><span>Thêm Quà</span>
             </button>
@@ -6910,18 +7183,29 @@ const App = {
               <div class="p-3.5 rounded-xl border ${rw.active !== false ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-70'} flex flex-col justify-between gap-2.5">
                 <div>
                   <div class="flex items-center justify-between gap-2">
-                    <span class="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-xs font-extrabold font-mono">${rw.cost} ⭐</span>
+                    <div class="inline-flex items-center gap-1.5">
+                      <span class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs border border-indigo-100 shrink-0">
+                        <i class="fa-solid ${rw.icon}"></i>
+                      </span>
+                      <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-xs font-extrabold font-mono">
+                        <i class="fa-solid fa-star text-[10px] text-amber-600"></i>
+                        <span>${rw.cost} điểm</span>
+                      </span>
+                    </div>
                     <span class="text-[11px] font-bold ${rw.active !== false ? 'text-emerald-600' : 'text-slate-400'}">${rw.active !== false ? 'Đang mở' : 'Đang ẩn'}</span>
                   </div>
-                  <div class="font-bold text-xs sm:text-sm text-slate-900 mt-1.5">${rw.title}</div>
+                  <div class="font-bold text-xs sm:text-sm text-slate-900 mt-2">${rw.title}</div>
                   <p class="text-[11px] text-slate-500 mt-0.5">${rw.desc || ''}</p>
                 </div>
-                <div class="grid grid-cols-2 gap-2 pt-1">
-                  <button type="button" onclick="App.toggleRewardCatalogItem('${rw.id}')" class="ui-btn bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200">
+                <div class="grid grid-cols-3 gap-1.5 pt-1">
+                  <button type="button" id="editRewardBtn_${rw.id}" onclick="App.showEditRewardModal('${rw.id}')" class="ui-btn px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200">
+                    <i class="fa-solid fa-pen-to-square shrink-0"></i><span>Sửa</span>
+                  </button>
+                  <button type="button" onclick="App.toggleRewardCatalogItem('${rw.id}')" class="ui-btn px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200">
                     <i class="fa-solid ${rw.active !== false ? 'fa-eye-slash' : 'fa-eye'} shrink-0"></i>
                     <span>${rw.active !== false ? 'Ẩn' : 'Hiện'}</span>
                   </button>
-                  <button type="button" onclick="App.deleteRewardCatalogItem('${rw.id}')" class="ui-btn bg-red-50 hover:bg-red-100 text-red-600 border border-red-200">
+                  <button type="button" onclick="App.deleteRewardCatalogItem('${rw.id}')" class="ui-btn px-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200">
                     <i class="fa-solid fa-trash-can shrink-0"></i><span>Xóa</span>
                   </button>
                 </div>
@@ -6932,48 +7216,334 @@ const App = {
 
         <!-- 3. Bảng điểm tích lũy học sinh & Thưởng nóng -->
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div class="p-4 sm:p-5 border-b border-slate-100">
-            <h4 class="text-base font-extrabold text-slate-900 flex items-center gap-2">
-              <i class="fa-solid fa-ranking-star text-emerald-600"></i>
-              <span>Bảng Tích Điểm Học Sinh &amp; Cộng Điểm Khuyến Khích</span>
-            </h4>
-            <p class="text-xs text-slate-500 mt-0.5">Giáo viên có thể cộng/trừ nhanh điểm thưởng khuyến khích trực tiếp cho từng học sinh</p>
+          <div class="p-4 sm:p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h4 class="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <i class="fa-solid fa-ranking-star text-emerald-600"></i>
+                  <span>Bảng Tích Điểm Học Sinh &amp; Cộng / Trừ Điểm Nhanh</span>
+                </h4>
+                <span id="adminRewardStudentCountBadge" class="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold font-mono">
+                  ${studentRows.length} / ${(this.state.students || []).length} HS
+                </span>
+              </div>
+              <p class="text-xs text-slate-500 mt-0.5">Tìm nhanh học sinh theo tên, mã HS hoặc lớp để cộng / trừ số điểm tùy chỉnh</p>
+            </div>
+
+            <div class="relative w-full md:w-80 shrink-0">
+              <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-2.5 text-slate-400 text-xs pointer-events-none"></i>
+              <input
+                type="text"
+                id="adminRewardStudentSearchInput"
+                value="${this.escapeHtmlAttr(this.state.adminRewardStudentSearch || '')}"
+                oninput="App.onAdminRewardStudentSearch(this.value)"
+                placeholder="Tìm tên, mã HS (VD: HS001), lớp..."
+                class="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:border-indigo-500 outline-none transition"
+              >
+              <button
+                type="button"
+                id="clearAdminRewardSearchBtn"
+                onclick="App.clearAdminRewardStudentSearch()"
+                class="${this.state.adminRewardStudentSearch ? '' : 'hidden'} absolute right-2 top-1.5 w-6 h-6 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
+                title="Xóa tìm kiếm"
+              >
+                <i class="fa-solid fa-xmark text-xs"></i>
+              </button>
+            </div>
           </div>
-          <div class="overflow-x-auto">
+
+          <div class="overflow-x-auto max-h-[65vh] overflow-y-auto">
             <table class="min-w-full divide-y divide-slate-200 text-left text-xs">
-              <thead class="bg-slate-50 text-slate-600 uppercase font-bold">
+              <thead class="bg-slate-50 text-slate-600 uppercase font-bold sticky top-0 z-10">
                 <tr>
-                  <th class="px-4 py-3">Mã HS</th>
-                  <th class="px-4 py-3">Họ và Tên</th>
-                  <th class="px-3 py-3 text-center">Từ Đề Thi</th>
-                  <th class="px-3 py-3 text-center">GV Thưởng</th>
-                  <th class="px-3 py-3 text-center">Đã Đổi</th>
-                  <th class="px-3 py-3 text-center">Khả Dụng</th>
-                  <th class="px-4 py-3 text-right">Thưởng / Trừ Nhanh</th>
+                  <th class="px-4 py-3 bg-slate-50">Mã HS</th>
+                  <th class="px-4 py-3 bg-slate-50">Họ và Tên</th>
+                  <th class="px-3 py-3 text-center bg-slate-50">Từ Đề Thi</th>
+                  <th class="px-3 py-3 text-center bg-slate-50">GV Cộng/Trừ</th>
+                  <th class="px-3 py-3 text-center bg-slate-50">Đã Đổi</th>
+                  <th class="px-3 py-3 text-center bg-slate-50">Khả Dụng</th>
+                  <th class="px-4 py-3 text-right bg-slate-50">Số Điểm Cộng / Trừ</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-slate-100">
-                ${studentRows.map(({ student, stats }) => `
-                  <tr class="hover:bg-slate-50/80">
-                    <td class="px-4 py-3 font-mono font-bold text-indigo-700">${student.studentId}</td>
-                    <td class="px-4 py-3 font-bold text-slate-800">${student.fullName} <span class="text-slate-400 font-normal">(${student.className || '12'})</span></td>
-                    <td class="px-3 py-3 text-center font-mono font-semibold text-slate-700">${stats.earnedPoints}⭐</td>
-                    <td class="px-3 py-3 text-center font-mono font-semibold ${stats.bonusPoints >= 0 ? 'text-emerald-700' : 'text-red-600'}">${stats.bonusPoints > 0 ? `+${stats.bonusPoints}` : stats.bonusPoints}⭐</td>
-                    <td class="px-3 py-3 text-center font-mono text-slate-500">${stats.spentPoints}⭐</td>
-                    <td class="px-3 py-3 text-center">
-                      <span class="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 font-mono font-extrabold">${stats.availablePoints}⭐</span>
-                    </td>
-                    <td class="px-4 py-3 text-right whitespace-nowrap space-x-1">
-                      <button type="button" onclick="App.adjustStudentBonusPoints('${student.studentId}', 10)" class="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold cursor-pointer">+10⭐</button>
-                      <button type="button" onclick="App.adjustStudentBonusPoints('${student.studentId}', -10)" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 border border-slate-200 font-bold cursor-pointer">-10⭐</button>
-                    </td>
-                  </tr>
-                `).join('')}
+              <tbody id="adminRewardStudentsTbody" class="divide-y divide-slate-100 bg-white">
+                ${this.renderAdminRewardStudentRowsHtml(studentRows)}
               </tbody>
             </table>
           </div>
         </div>
       </section>
+    `;
+  },
+
+  getFilteredGradebookStudents() {
+    return (this.state.students || []).filter(s => {
+      if (this.state.adminGradeFilter && this.state.adminGradeFilter !== 'ALL' && String(this.getStudentGrade(s)) !== String(this.state.adminGradeFilter)) return false;
+      if (this.state.adminClassFilter && this.state.adminClassFilter !== 'ALL' && (s.className || '12') !== this.state.adminClassFilter) return false;
+      if (this.state.adminGradebookSearch && !this.matchesStudentSearch(s, this.state.adminGradebookSearch)) return false;
+      return true;
+    });
+  },
+
+  onAdminGradebookSearch(val) {
+    this.state.adminGradebookSearch = String(val ?? '');
+    if (typeof document === 'undefined') return;
+    const filteredStudents = this.getFilteredGradebookStudents();
+    const examsList = this.state.exams || [];
+    const contentEl = document.getElementById('adminGradebookContentContainer');
+    if (contentEl) {
+      contentEl.innerHTML = this.renderAdminGradebookContentHtml(filteredStudents, examsList);
+    }
+    const badgeEl = document.getElementById('adminGradebookSummaryBadge');
+    if (badgeEl) {
+      badgeEl.textContent = `${examsList.length} đề thi • ${filteredStudents.length} học sinh`;
+    }
+    const clearBtn = document.getElementById('clearAdminGradebookSearchBtn');
+    if (clearBtn) {
+      clearBtn.classList.toggle('hidden', !this.state.adminGradebookSearch);
+    }
+  },
+
+  clearAdminGradebookSearch() {
+    this.state.adminGradebookSearch = '';
+    if (typeof document !== 'undefined') {
+      const inp = document.getElementById('adminGradebookSearchInput');
+      if (inp) {
+        inp.value = '';
+        inp.focus();
+      }
+      this.onAdminGradebookSearch('');
+    }
+  },
+
+  renderAdminGradebookContentHtml(filteredStudents = null, examsList = null) {
+    const stuList = Array.isArray(filteredStudents) ? filteredStudents : this.getFilteredGradebookStudents();
+    const exList = Array.isArray(examsList) ? examsList : (this.state.exams || []);
+
+    if (this.state.adminViewTab === 'matrix') {
+      return `
+        <!-- CHẾ ĐỘ 1: BẢNG ĐIỂM MA TRẬN TỔNG HỢP (THEO ĐỢT 1, ĐỢT 2, ĐỢT 3...) -->
+        <div class="matrix-scroll-container overflow-x-auto max-h-[72vh] overflow-y-auto border-t border-slate-200">
+          <table class="min-w-full text-left text-sm border-separate border-spacing-0">
+            <thead class="sticky top-0 z-30 shadow-xs">
+              <tr class="bg-slate-100 text-xs uppercase tracking-wider text-slate-600 font-bold">
+                <th class="px-4 py-3 text-center font-bold w-12 bg-slate-100 border-b border-slate-200">STT</th>
+                <th class="px-4 py-3 font-bold font-mono bg-slate-100 border-b border-slate-200">Mã HS</th>
+                <th class="px-5 py-3 font-bold bg-slate-100 border-b border-slate-200">Họ và Tên</th>
+                <th class="px-4 py-3 text-center font-bold bg-slate-100 border-b border-slate-200">Khối / Lớp</th>
+                ${exList.map((ex) => `
+                  <th class="px-4 py-3 text-center font-bold min-w-[125px] bg-slate-100 border-b border-slate-200">
+                    <div class="text-indigo-900 font-extrabold">K${ex.grade || 12} • ${this.getExamCategoryMeta(this.inferExamCategory(ex)).short}</div>
+                    <div class="text-[10px] text-slate-500 font-normal truncate max-w-[130px] mx-auto" title="${this.escapeHtmlAttr(ex.title)}">${ex.title}</div>
+                  </th>
+                `).join('')}
+                <th class="px-4 py-3 text-center font-bold bg-indigo-100/70 text-indigo-900 border-b border-slate-200">Điểm TB</th>
+                <th class="px-4 py-3 text-center font-bold bg-slate-100 border-b border-slate-200">Số Đề</th>
+                <th class="px-4 py-3 text-center font-bold bg-slate-100 border-b border-slate-200">Xếp Loại</th>
+              </tr>
+
+              <tr class="bg-indigo-50/95 text-xs font-bold text-slate-700 shadow-2xs">
+                <td colspan="4" class="px-5 py-2.5 text-right uppercase tracking-wider text-indigo-900 bg-indigo-50/95 border-b-2 border-indigo-200">
+                  <i class="fa-solid fa-chart-column mr-1.5 text-indigo-600"></i>Điểm TB Nhóm Đang Xem:
+                </td>
+                ${exList.map(ex => {
+                  const subs = stuList.map(s => this.state.submissions.find(x => x.studentId === s.studentId && x.examId === ex.id)).filter(Boolean);
+                  const avg = subs.length > 0 ? (subs.reduce((a, b) => a + Number(b.scoreResult.totalScore), 0) / subs.length).toFixed(2) : '--';
+                  const pct = Math.round((subs.length / (stuList.length || 1)) * 100);
+                  return `
+                    <td class="px-4 py-2.5 text-center font-mono bg-indigo-50/95 border-b-2 border-indigo-200">
+                      <div class="text-indigo-900 font-extrabold text-sm">${avg}đ</div>
+                      <div class="text-[10px] text-slate-500 font-normal">${subs.length}/${stuList.length} HS (${pct}%)</div>
+                    </td>
+                  `;
+                }).join('')}
+                <td class="px-4 py-2.5 text-center font-mono font-extrabold text-sm text-indigo-950 bg-indigo-100/80 border-b-2 border-indigo-200">
+                  ${(() => {
+                    const allAvgs = stuList.map(s => {
+                      const subs = this.state.submissions.filter(x => x.studentId === s.studentId);
+                      return subs.length > 0 ? (subs.reduce((a, b) => a + Number(b.scoreResult.totalScore), 0) / subs.length) : null;
+                    }).filter(x => x !== null);
+                    return allAvgs.length > 0 ? (allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length).toFixed(2) + 'đ' : '--';
+                  })()}
+                </td>
+                <td colspan="2" class="px-4 py-2.5 text-center text-indigo-800 bg-indigo-50/95 border-b-2 border-indigo-200 text-xs">
+                  ${exList.length > 0
+                    ? `Hoàn thành: ${Math.round((stuList.filter(s => exList.every(ex => this.state.submissions.some(sub => sub.studentId === s.studentId && sub.examId === ex.id))).length / (stuList.length || 1)) * 100)}% đủ đợt`
+                    : 'Chưa có đề thi'}
+                </td>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 bg-white">
+              ${stuList.length === 0 ? `
+                <tr>
+                  <td colspan="${7 + exList.length}" class="px-5 py-10 text-center text-xs text-slate-400">
+                    <i class="fa-solid fa-magnifying-glass mr-1.5"></i>Không tìm thấy học sinh phù hợp với bộ lọc / từ khóa tìm kiếm.
+                  </td>
+                </tr>
+              ` : stuList.map((s, stt) => {
+                const examScores = exList.map(ex => {
+                  const sub = this.state.submissions.find(x => x.studentId === s.studentId && x.examId === ex.id);
+                  return sub ? { hasSub: true, score: Number(sub.scoreResult.totalScore), subId: sub.id, subDate: sub.submittedAt } : { hasSub: false };
+                });
+                const validScores = examScores.filter(x => x.hasSub).map(x => x.score);
+                const avg = validScores.length > 0 ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2) : null;
+
+                let rankBadge = '<span class="text-xs text-slate-400">Chưa thi</span>';
+                if (avg !== null) {
+                  const num = Number(avg);
+                  if (num >= 9.0) rankBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">Xuất sắc</span>';
+                  else if (num >= 8.0) rankBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">Giỏi</span>';
+                  else if (num >= 6.5) rankBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">Khá</span>';
+                  else if (num >= 5.0) rankBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">Trung bình</span>';
+                  else rankBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">Yếu</span>';
+                }
+
+                return `
+                  <tr class="hover:bg-slate-50/80 transition">
+                    <td class="px-4 py-3.5 text-center text-xs text-slate-400 font-semibold">${stt + 1}</td>
+                    <td class="px-4 py-3.5 font-mono font-bold text-indigo-700 text-xs">${s.studentId}</td>
+                    <td class="px-5 py-3.5 font-bold text-slate-800 text-sm whitespace-nowrap">
+                      <button onclick="App.showStudentDetailModal('${s.studentId}')" class="hover:text-indigo-600 text-left transition inline-flex items-center space-x-1.5 font-bold cursor-pointer" title="Bấm để xem chi tiết học sinh">
+                        <span>${s.fullName}</span>
+                        <i class="fa-solid fa-chart-line text-[10px] text-indigo-400"></i>
+                      </button>
+                    </td>
+                    <td class="px-4 py-3.5 text-center whitespace-nowrap">
+                      <span class="px-2 py-0.5 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">K${this.getStudentGrade(s)}</span>
+                      <span class="px-2 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-slate-600 ml-1">${s.className || '12'}</span>
+                    </td>
+                    ${examScores.map(es => {
+                      if (!es.hasSub) {
+                        return `
+                          <td class="px-4 py-3.5 text-center">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold text-slate-400 bg-slate-50 border border-dashed border-slate-200" title="Chưa nộp bài">--</span>
+                          </td>
+                        `;
+                      }
+                      const sc = es.score;
+                      let colorClass = 'bg-rose-50 text-rose-700 border-rose-200';
+                      if (sc >= 9.0) colorClass = 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs';
+                      else if (sc >= 8.0) colorClass = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                      else if (sc >= 6.5) colorClass = 'bg-blue-50 text-blue-700 border-blue-200';
+                      else if (sc >= 5.0) colorClass = 'bg-amber-50 text-amber-700 border-amber-200';
+
+                      return `
+                        <td class="px-4 py-3.5 text-center">
+                          <button onclick="App.viewSubmissionDetail('${es.subId}')"
+                            class="px-2.5 py-1 rounded-lg border font-mono font-extrabold text-xs ${colorClass} hover:scale-105 transition"
+                            title="Bấm để xem bài làm chi tiết (Nộp: ${new Date(es.subDate).toLocaleDateString('vi-VN')})">
+                            ${sc.toFixed(2)}
+                          </button>
+                        </td>
+                      `;
+                    }).join('')}
+                    <td class="px-4 py-3.5 text-center bg-indigo-50/30">
+                      ${avg !== null ? `
+                        <span class="font-mono font-extrabold text-sm text-indigo-900">${avg}</span>
+                      ` : `<span class="text-slate-300 font-mono">--</span>`}
+                    </td>
+                    <td class="px-4 py-3.5 text-center text-xs font-semibold text-slate-600">
+                      ${validScores.length}/${exList.length}
+                    </td>
+                    <td class="px-4 py-3.5 text-center">
+                      ${rankBadge}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    const logSubs = (this.state.submissions || []).filter(sub => {
+      const st = (this.state.students || []).find(x => x.studentId === sub.studentId);
+      if (this.state.adminGradeFilter && this.state.adminGradeFilter !== 'ALL') {
+        if (!st || String(this.getStudentGrade(st)) !== String(this.state.adminGradeFilter)) return false;
+      }
+      if (this.state.adminClassFilter && this.state.adminClassFilter !== 'ALL') {
+        if (!st || (st.className || '12') !== this.state.adminClassFilter) return false;
+      }
+      if (this.state.adminGradebookSearch) {
+        if (st) return this.matchesStudentSearch(st, this.state.adminGradebookSearch);
+        const fallbackHaystack = this.normalizeSearchText(`${sub.studentId || ''} ${sub.studentName || ''} ${sub.examTitle || ''}`);
+        return fallbackHaystack.includes(this.normalizeSearchText(this.state.adminGradebookSearch));
+      }
+      return true;
+    });
+
+    return `
+      <!-- CHẾ ĐỘ 2: NHẬT KÝ LƯỢT NỘP CHI TIẾT TỪNG PHẦN (LOG VIEW) -->
+      <div class="overflow-x-auto max-h-[72vh] overflow-y-auto border-t border-slate-200">
+        <table class="min-w-full text-left text-sm border-separate border-spacing-0">
+          <thead class="sticky top-0 z-20 bg-slate-100 text-xs uppercase tracking-wider text-slate-600 font-bold shadow-xs">
+            <tr>
+              <th class="px-5 py-3.5 font-bold bg-slate-100 border-b border-slate-200">Mã HS</th>
+              <th class="px-5 py-3.5 font-bold bg-slate-100 border-b border-slate-200">Học Sinh</th>
+              <th class="px-5 py-3.5 font-bold bg-slate-100 border-b border-slate-200">Đề Thi</th>
+              <th class="px-3 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Lần Thi</th>
+              <th class="px-3 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Giám Sát</th>
+              <th class="px-4 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Phần I</th>
+              <th class="px-4 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Phần II</th>
+              <th class="px-4 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Phần III</th>
+              <th class="px-4 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Phần IV</th>
+              <th class="px-4 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Tổng Điểm</th>
+              <th class="px-5 py-3.5 font-bold text-right bg-slate-100 border-b border-slate-200">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 bg-white">
+            ${logSubs.length === 0 ? `
+              <tr>
+                <td colspan="11" class="px-5 py-10 text-center text-xs text-slate-400">
+                  <i class="fa-solid fa-magnifying-glass mr-1.5"></i>Chưa có lượt nộp bài nào khớp với bộ lọc / từ khóa tìm kiếm.
+                </td>
+              </tr>
+            ` : logSubs.map(sub => `
+              <tr class="hover:bg-slate-50/80 transition">
+                <td class="px-5 py-4 font-mono font-bold text-indigo-700">${sub.studentId}</td>
+                <td class="px-5 py-4 font-bold text-slate-800">
+                  <button onclick="App.showStudentDetailModal('${sub.studentId}')" class="hover:text-indigo-600 text-left transition font-bold cursor-pointer">
+                    ${sub.studentName}
+                  </button>
+                </td>
+                <td class="px-5 py-4 text-xs text-slate-600 truncate max-w-xs">${sub.examTitle}</td>
+                <td class="px-3 py-4 text-center font-bold text-xs text-indigo-700">Lần ${sub.attemptNumber || 1}</td>
+                <td class="px-3 py-4 text-center">
+                  ${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? `
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-red-100 text-red-700 border border-red-200" title="Đã ghi nhận rời màn hình hoặc chụp màn hình">
+                      <i class="fa-solid ${(sub.screenshotCount || 0) > 0 ? 'fa-camera' : 'fa-triangle-exclamation'} mr-1"></i>${sub.tabSwitches || sub.screenshotCount} lần${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} chụp)` : ''}
+                    </span>
+                  ` : `
+                    <span class="text-emerald-600 text-xs font-medium inline-flex items-center gap-1">
+                      <i class="fa-solid fa-check"></i>Nghiêm túc
+                    </span>
+                  `}
+                </td>
+                <td class="px-4 py-4 text-center font-mono text-xs font-semibold">${sub.scoreResult.part1.score}đ</td>
+                <td class="px-4 py-4 text-center font-mono text-xs font-semibold">${sub.scoreResult.part2.score}đ</td>
+                <td class="px-4 py-4 text-center font-mono text-xs font-semibold">${sub.scoreResult.part3.score}đ</td>
+                <td class="px-4 py-4 text-center font-mono text-xs font-semibold">
+                  ${sub.scoreResult.part4 && sub.scoreResult.part4.totalQuestions > 0
+                    ? (sub.scoreResult.part4.pendingManual
+                      ? '<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-sans font-bold">Chờ chấm</span>'
+                      : `${sub.scoreResult.part4.score}đ`)
+                    : '<span class="text-slate-300">—</span>'}
+                </td>
+                <td class="px-4 py-4 text-center">
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-extrabold ${sub.scoreResult.totalScore >= 8 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">
+                    ${sub.scoreResult.totalScore}đ
+                  </span>
+                </td>
+                <td class="px-5 py-4 text-right">
+                  <button onclick="App.viewSubmissionDetail('${sub.id}')" class="px-3 py-1.5 ${sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'} rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer">
+                    <i class="fa-solid ${sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual ? 'fa-pen-nib' : 'fa-eye'}"></i><span>${sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual ? 'Chấm TL' : 'Chi tiết'}</span>
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
     `;
   },
 
@@ -6983,11 +7553,7 @@ const App = {
     const pendingRedemptions = this.getPendingRedemptionsCount();
     const allClasses = [...new Set(this.state.students.map(s => s.className || '12'))];
     const activeStudentGrades = [...new Set(this.state.students.map(s => this.getStudentGrade(s)))].sort((a, b) => a - b);
-    const filteredStudents = this.state.students.filter(s => {
-      if (this.state.adminGradeFilter && this.state.adminGradeFilter !== 'ALL' && String(this.getStudentGrade(s)) !== String(this.state.adminGradeFilter)) return false;
-      if (this.state.adminClassFilter === 'ALL') return true;
-      return (s.className || '12') === this.state.adminClassFilter;
-    });
+    const filteredStudents = this.getFilteredGradebookStudents();
     const examsList = this.state.exams;
     if (!this.state.adminMainTab) this.state.adminMainTab = 'main';
     const thMeta = this.getThemeMeta();
@@ -7720,7 +8286,7 @@ const App = {
                     <i class="fa-solid fa-table-cells text-indigo-600 mr-2"></i>
                     Sổ Điểm Tổng Hợp &amp; Nhật Ký Nộp Bài
                   </h3>
-                  <span class="text-xs bg-indigo-50 text-indigo-700 font-bold px-2.5 py-0.5 rounded-full border border-indigo-100">
+                  <span id="adminGradebookSummaryBadge" class="text-xs bg-indigo-50 text-indigo-700 font-bold px-2.5 py-0.5 rounded-full border border-indigo-100">
                     ${examsList.length} đề thi • ${filteredStudents.length} học sinh
                   </span>
                 </div>
@@ -7768,211 +8334,37 @@ const App = {
               </div>
             </div>
 
-            ${this.state.adminViewTab === 'matrix' ? `
-              <!-- CHẾ ĐỘ 1: BẢNG ĐIỂM MA TRẬN TỔNG HỢP (THEO ĐỢT 1, ĐỢT 2, ĐỢT 3...) -->
-              <div class="matrix-scroll-container overflow-x-auto max-h-[72vh] overflow-y-auto border border-slate-200 rounded-2xl shadow-xs">
-                <table class="min-w-full text-left text-sm border-separate border-spacing-0">
-                  <thead class="sticky top-0 z-30 shadow-xs">
-                    <!-- Hàng 1: Tiêu đề cột cố định khi cuộn danh sách học sinh -->
-                    <tr class="bg-slate-100 text-xs uppercase tracking-wider text-slate-600 font-bold">
-                      <th class="px-4 py-3 text-center font-bold w-12 bg-slate-100 border-b border-slate-200">STT</th>
-                      <th class="px-4 py-3 font-bold font-mono bg-slate-100 border-b border-slate-200">Mã HS</th>
-                      <th class="px-5 py-3 font-bold bg-slate-100 border-b border-slate-200">Họ và Tên</th>
-                      <th class="px-4 py-3 text-center font-bold bg-slate-100 border-b border-slate-200">Khối / Lớp</th>
-                      ${examsList.map((ex) => `
-                        <th class="px-4 py-3 text-center font-bold min-w-[125px] bg-slate-100 border-b border-slate-200">
-                          <div class="text-indigo-900 font-extrabold">K${ex.grade || 12} • ${this.getExamCategoryMeta(this.inferExamCategory(ex)).short}</div>
-                          <div class="text-[10px] text-slate-500 font-normal truncate max-w-[130px] mx-auto" title="${ex.title}">${ex.title}</div>
-                        </th>
-                      `).join('')}
-                      <th class="px-4 py-3 text-center font-bold bg-indigo-100/70 text-indigo-900 border-b border-slate-200">Điểm TB</th>
-                      <th class="px-4 py-3 text-center font-bold bg-slate-100 border-b border-slate-200">Số Đề</th>
-                      <th class="px-4 py-3 text-center font-bold bg-slate-100 border-b border-slate-200">Xếp Loại</th>
-                    </tr>
-
-                    <!-- Hàng 2: ĐIỂM TRUNG BÌNH TOÀN LỚP NẰM Ở TRÊN CÙNG CỦA BẢNG -->
-                    <tr class="bg-indigo-50/95 text-xs font-bold text-slate-700 shadow-2xs">
-                      <td colspan="4" class="px-5 py-2.5 text-right uppercase tracking-wider text-indigo-900 bg-indigo-50/95 border-b-2 border-indigo-200">
-                        <i class="fa-solid fa-chart-column mr-1.5 text-indigo-600"></i>Điểm TB Toàn Lớp:
-                      </td>
-                      ${examsList.map(ex => {
-                        const subs = filteredStudents.map(s => this.state.submissions.find(x => x.studentId === s.studentId && x.examId === ex.id)).filter(Boolean);
-                        const avg = subs.length > 0 ? (subs.reduce((a, b) => a + Number(b.scoreResult.totalScore), 0) / subs.length).toFixed(2) : '--';
-                        const pct = Math.round((subs.length / (filteredStudents.length || 1)) * 100);
-                        return `
-                          <td class="px-4 py-2.5 text-center font-mono bg-indigo-50/95 border-b-2 border-indigo-200">
-                            <div class="text-indigo-900 font-extrabold text-sm">${avg}đ</div>
-                            <div class="text-[10px] text-slate-500 font-normal">${subs.length}/${filteredStudents.length} HS (${pct}%)</div>
-                          </td>
-                        `;
-                      }).join('')}
-                      <td class="px-4 py-2.5 text-center font-mono font-extrabold text-sm text-indigo-950 bg-indigo-100/80 border-b-2 border-indigo-200">
-                        ${(() => {
-                          const allAvgs = filteredStudents.map(s => {
-                            const subs = this.state.submissions.filter(x => x.studentId === s.studentId);
-                            return subs.length > 0 ? (subs.reduce((a, b) => a + Number(b.scoreResult.totalScore), 0) / subs.length) : null;
-                          }).filter(x => x !== null);
-                          return allAvgs.length > 0 ? (allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length).toFixed(2) + 'đ' : '--';
-                        })()}
-                      </td>
-                      <td colspan="2" class="px-4 py-2.5 text-center text-indigo-800 bg-indigo-50/95 border-b-2 border-indigo-200 text-xs">
-                        ${examsList.length > 0
-                          ? `Hoàn thành: ${Math.round((filteredStudents.filter(s => examsList.every(ex => this.state.submissions.some(sub => sub.studentId === s.studentId && sub.examId === ex.id))).length / (filteredStudents.length || 1)) * 100)}% đủ đợt`
-                          : 'Chưa có đề thi'}
-                      </td>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-slate-100 bg-white">
-                    ${filteredStudents.map((s, stt) => {
-                      const examScores = examsList.map(ex => {
-                        const sub = this.state.submissions.find(x => x.studentId === s.studentId && x.examId === ex.id);
-                        return sub ? { hasSub: true, score: Number(sub.scoreResult.totalScore), subId: sub.id, subDate: sub.submittedAt } : { hasSub: false };
-                      });
-                      const validScores = examScores.filter(x => x.hasSub).map(x => x.score);
-                      const avg = validScores.length > 0 ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2) : null;
-                      
-                      let rankBadge = '<span class="text-xs text-slate-400">Chưa thi</span>';
-                      if (avg !== null) {
-                        const num = Number(avg);
-                        if (num >= 9.0) rankBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">Xuất sắc</span>';
-                        else if (num >= 8.0) rankBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">Giỏi</span>';
-                        else if (num >= 6.5) rankBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">Khá</span>';
-                        else if (num >= 5.0) rankBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">Trung bình</span>';
-                        else rankBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">Yếu</span>';
-                      }
-
-                      return `
-                        <tr class="hover:bg-slate-50/80 transition">
-                          <td class="px-4 py-3.5 text-center text-xs text-slate-400 font-semibold">${stt + 1}</td>
-                          <td class="px-4 py-3.5 font-mono font-bold text-indigo-700 text-xs">${s.studentId}</td>
-                          <td class="px-5 py-3.5 font-bold text-slate-800 text-sm whitespace-nowrap">
-                            <button onclick="App.showStudentDetailModal('${s.studentId}')" class="hover:text-indigo-600 text-left transition inline-flex items-center space-x-1.5 font-bold cursor-pointer" title="Bấm để xem chi tiết học sinh">
-                              <span>${s.fullName}</span>
-                              <i class="fa-solid fa-chart-line text-[10px] text-indigo-400"></i>
-                            </button>
-                          </td>
-                          <td class="px-4 py-3.5 text-center whitespace-nowrap">
-                            <span class="px-2 py-0.5 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">K${this.getStudentGrade(s)}</span>
-                            <span class="px-2 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-slate-600 ml-1">${s.className || '12'}</span>
-                          </td>
-                          ${examScores.map(es => {
-                            if (!es.hasSub) {
-                              return `
-                                <td class="px-4 py-3.5 text-center">
-                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold text-slate-400 bg-slate-50 border border-dashed border-slate-200" title="Chưa nộp bài">--</span>
-                                </td>
-                              `;
-                            }
-                            const sc = es.score;
-                            let colorClass = 'bg-rose-50 text-rose-700 border-rose-200';
-                            if (sc >= 9.0) colorClass = 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs';
-                            else if (sc >= 8.0) colorClass = 'bg-indigo-50 text-indigo-700 border-indigo-200';
-                            else if (sc >= 6.5) colorClass = 'bg-blue-50 text-blue-700 border-blue-200';
-                            else if (sc >= 5.0) colorClass = 'bg-amber-50 text-amber-700 border-amber-200';
-
-                            return `
-                              <td class="px-4 py-3.5 text-center">
-                                <button onclick="App.viewSubmissionDetail('${es.subId}')" 
-                                  class="px-2.5 py-1 rounded-lg border font-mono font-extrabold text-xs ${colorClass} hover:scale-105 transition" 
-                                  title="Bấm để xem bài làm chi tiết (Nộp: ${new Date(es.subDate).toLocaleDateString('vi-VN')})">
-                                  ${sc.toFixed(2)}
-                                </button>
-                              </td>
-                            `;
-                          }).join('')}
-                          <td class="px-4 py-3.5 text-center bg-indigo-50/30">
-                            ${avg !== null ? `
-                              <span class="font-mono font-extrabold text-sm text-indigo-900">${avg}</span>
-                            ` : `<span class="text-slate-300 font-mono">--</span>`}
-                          </td>
-                          <td class="px-4 py-3.5 text-center text-xs font-semibold text-slate-600">
-                            ${validScores.length}/${examsList.length}
-                          </td>
-                          <td class="px-4 py-3.5 text-center">
-                            ${rankBadge}
-                          </td>
-                        </tr>
-                      `;
-                    }).join('')}
-                  </tbody>
-                </table>
+            <!-- Thanh tìm kiếm học sinh ở Sổ Điểm Tổng Hợp & Nhật Ký Nộp Bài -->
+            <div class="px-4 sm:px-6 py-3 bg-slate-50/70 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+              <div class="relative flex-1 max-w-xl">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-2.5 text-slate-400 text-xs pointer-events-none"></i>
+                <input
+                  type="text"
+                  id="adminGradebookSearchInput"
+                  value="${this.escapeHtmlAttr(this.state.adminGradebookSearch || '')}"
+                  oninput="App.onAdminGradebookSearch(this.value)"
+                  placeholder="Tìm học sinh theo tên, mã HS (VD: HS001), lớp, khối..."
+                  class="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:border-indigo-500 outline-none transition"
+                >
+                <button
+                  type="button"
+                  id="clearAdminGradebookSearchBtn"
+                  onclick="App.clearAdminGradebookSearch()"
+                  class="${this.state.adminGradebookSearch ? '' : 'hidden'} absolute right-2 top-1.5 w-6 h-6 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
+                  title="Xóa từ khóa tìm kiếm"
+                >
+                  <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
               </div>
-            ` : `
-              <!-- CHẾ ĐỘ 2: NHẬT KÝ LƯỢT NỘP CHI TIẾT TỪNG PHẦN (LOG VIEW) -->
-              <div class="overflow-x-auto max-h-[72vh] overflow-y-auto border border-slate-200 rounded-2xl shadow-xs">
-                <table class="min-w-full text-left text-sm border-separate border-spacing-0">
-                  <thead class="sticky top-0 z-20 bg-slate-100 text-xs uppercase tracking-wider text-slate-600 font-bold shadow-xs">
-                    <tr>
-                      <th class="px-5 py-3.5 font-bold bg-slate-100 border-b border-slate-200">Mã HS</th>
-                      <th class="px-5 py-3.5 font-bold bg-slate-100 border-b border-slate-200">Học Sinh</th>
-                      <th class="px-5 py-3.5 font-bold bg-slate-100 border-b border-slate-200">Đề Thi</th>
-                      <th class="px-3 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Lần Thi</th>
-                      <th class="px-3 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Giám Sát</th>
-                      <th class="px-4 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Phần I</th>
-                      <th class="px-4 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Phần II</th>
-                      <th class="px-4 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Phần III</th>
-                      <th class="px-4 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Phần IV</th>
-                      <th class="px-4 py-3.5 font-bold text-center bg-slate-100 border-b border-slate-200">Tổng Điểm</th>
-                      <th class="px-5 py-3.5 font-bold text-right bg-slate-100 border-b border-slate-200">Thao tác</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-slate-100">
-                    ${this.state.submissions
-                      .filter(sub => {
-                        const st = this.state.students.find(x => x.studentId === sub.studentId);
-                        if (this.state.adminGradeFilter && this.state.adminGradeFilter !== 'ALL') {
-                          if (!st || String(this.getStudentGrade(st)) !== String(this.state.adminGradeFilter)) return false;
-                        }
-                        if (this.state.adminClassFilter === 'ALL') return true;
-                        return st && (st.className || '12') === this.state.adminClassFilter;
-                      })
-                      .map(sub => `
-                        <tr class="hover:bg-slate-50/80 transition">
-                          <td class="px-5 py-4 font-mono font-bold text-indigo-700">${sub.studentId}</td>
-                          <td class="px-5 py-4 font-bold text-slate-800">
-                            <button onclick="App.showStudentDetailModal('${sub.studentId}')" class="hover:text-indigo-600 text-left transition font-bold cursor-pointer">
-                              ${sub.studentName}
-                            </button>
-                          </td>
-                          <td class="px-5 py-4 text-xs text-slate-600 truncate max-w-xs">${sub.examTitle}</td>
-                          <td class="px-3 py-4 text-center font-bold text-xs text-indigo-700">Lần ${sub.attemptNumber || 1}</td>
-                          <td class="px-3 py-4 text-center">
-                            ${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? `
-                              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-red-100 text-red-700 border border-red-200" title="Đã ghi nhận rời màn hình hoặc chụp màn hình">
-                                <i class="fa-solid ${(sub.screenshotCount || 0) > 0 ? 'fa-camera' : 'fa-triangle-exclamation'} mr-1"></i>${sub.tabSwitches || sub.screenshotCount} lần${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} chụp)` : ''}
-                              </span>
-                            ` : `
-                              <span class="text-emerald-600 text-xs font-medium inline-flex items-center gap-1">
-                                <i class="fa-solid fa-check"></i>Nghiêm túc
-                              </span>
-                            `}
-                          </td>
-                          <td class="px-4 py-4 text-center font-mono text-xs font-semibold">${sub.scoreResult.part1.score}đ</td>
-                          <td class="px-4 py-4 text-center font-mono text-xs font-semibold">${sub.scoreResult.part2.score}đ</td>
-                          <td class="px-4 py-4 text-center font-mono text-xs font-semibold">${sub.scoreResult.part3.score}đ</td>
-                          <td class="px-4 py-4 text-center font-mono text-xs font-semibold">
-                            ${sub.scoreResult.part4 && sub.scoreResult.part4.totalQuestions > 0
-                              ? (sub.scoreResult.part4.pendingManual
-                                ? '<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-sans font-bold">Chờ chấm</span>'
-                                : `${sub.scoreResult.part4.score}đ`)
-                              : '<span class="text-slate-300">—</span>'}
-                          </td>
-                          <td class="px-4 py-4 text-center">
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-extrabold ${sub.scoreResult.totalScore >= 8 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">
-                              ${sub.scoreResult.totalScore}đ
-                            </span>
-                          </td>
-                          <td class="px-5 py-4 text-right">
-                            <button onclick="App.viewSubmissionDetail('${sub.id}')" class="px-3 py-1.5 ${sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'} rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer">
-                              <i class="fa-solid ${sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual ? 'fa-pen-nib' : 'fa-eye'}"></i><span>${sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual ? 'Chấm TL' : 'Chi tiết'}</span>
-                            </button>
-                          </td>
-                        </tr>
-                      `).join('')}
-                  </tbody>
-                </table>
+              <div class="text-[11px] text-slate-500 hidden md:flex items-center gap-1.5">
+                <i class="fa-solid fa-lightbulb text-amber-500"></i>
+                <span>Hỗ trợ tìm có dấu hoặc không dấu (VD: gõ "quoc viet" hoặc "HS001")</span>
               </div>
-            `}
+            </div>
+
+            <div id="adminGradebookContentContainer">
+              ${this.renderAdminGradebookContentHtml(filteredStudents, examsList)}
+            </div>
           </section>
           ` : ''}
         </main>
@@ -11086,11 +11478,7 @@ const App = {
 
   exportMatrixCSV() {
     const exams = this.state.exams;
-    const students = this.state.students.filter(s => {
-      if (this.state.adminGradeFilter && this.state.adminGradeFilter !== 'ALL' && String(this.getStudentGrade(s)) !== String(this.state.adminGradeFilter)) return false;
-      if (this.state.adminClassFilter === 'ALL') return true;
-      return (s.className || '12') === this.state.adminClassFilter;
-    });
+    const students = this.getFilteredGradebookStudents();
 
     let header = ["STT", "Mã Học Sinh", "Họ và Tên", "Khối", "Lớp"];
     exams.forEach((ex, idx) => {

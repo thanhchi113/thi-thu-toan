@@ -927,7 +927,98 @@ const PDFStorage = require('../js/pdf_storage.js');
   );
   assert.strictEqual(mergedStu.redemptions.length, 3, 'mergeStudentRecords must union redemptions across devices without data loss');
 
-  console.log('[OK] TẤT CẢ 20 BỘ TEST (CHỐNG CHỤP MÀN HÌNH, TÍCH ĐIỂM ĐỔI THƯỞNG, ĐIỆN THOẠI & TỰ ĐỘNG HÓA SUPABASE) ĐÃ ĐẠT 100%!');
+  // Test 21: Không dùng Emoji trong UI, Chỉnh sửa phần thưởng tại chỗ, Tìm kiếm học sinh (Sổ điểm tổng hợp & Thưởng/Trừ nhanh) và Chống ghi đè mất đề Server
+  const fs = require('fs');
+  const path = require('path');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
+  const emojiMatches = appSrc.match(/[\p{Extended_Pictographic}\u2B50\u2728\u2705\u274C\u26A0]/gu) || [];
+  assert.strictEqual(emojiMatches.length, 0, `UI code must use synchronized FontAwesome icons with 0 emojis, found: ${emojiMatches.join('')}`);
+
+  // 21.1 Chỉnh sửa phần thưởng trực tiếp không cần xóa & tạo mới
+  App.state.settings.rewardCatalog = null;
+  const beforeLen = App.getRewardCatalog().length;
+  const editOk = App.handleEditRewardSubmit('RW-01', {
+    title: 'Cộng +0,75 điểm kiểm tra miệng',
+    cost: 75,
+    icon: 'fa-medal',
+    desc: 'Đã chỉnh sửa trực tiếp phần thưởng'
+  });
+  assert.strictEqual(editOk, true, 'handleEditRewardSubmit must succeed');
+  const editedCatalog = App.getRewardCatalog();
+  assert.strictEqual(editedCatalog.length, beforeLen, 'Editing reward must keep catalog length unchanged');
+  assert.strictEqual(editedCatalog[0].id, 'RW-01', 'Editing reward must preserve original reward id');
+  assert.strictEqual(editedCatalog[0].title, 'Cộng +0,75 điểm kiểm tra miệng', 'Edited title mismatch');
+  assert.strictEqual(editedCatalog[0].cost, 75, 'Edited cost mismatch');
+  assert.strictEqual(editedCatalog[0].icon, 'fa-medal', 'Edited icon mismatch');
+
+  // 21.2 Tìm kiếm nhanh học sinh có dấu / không dấu / mã HS ở cả Bảng Tích Điểm và Sổ Điểm Tổng Hợp + Cộng/Trừ điểm tùy chỉnh
+  App.state.students = [
+    App.normalizeStudentRecord({ studentId: 'HS001', fullName: 'Quốc Việt', className: '12B 2K9', grade: 12 }),
+    App.normalizeStudentRecord({ studentId: 'HS055', fullName: 'Hồ Kiên', className: '10A 2K11', grade: 10 }),
+    App.normalizeStudentRecord({ studentId: 'HS080', fullName: 'Vy Nhã', className: '11A1', grade: 11 })
+  ];
+  App.state.adminRewardStudentSearch = 'quoc viet';
+  const rwFiltered = App.getFilteredRewardStudentRows();
+  assert.strictEqual(rwFiltered.length, 1, 'Accent-insensitive reward student search must find 1 match');
+  assert.strictEqual(rwFiltered[0].student.studentId, 'HS001', 'Accent-insensitive reward student search must find Quốc Việt');
+
+  assert.strictEqual(App.applyCustomStudentBonus('HS001', 1, 25), true, 'Custom +25 bonus must succeed');
+  assert.strictEqual(App.getStudentRewardStats('HS001').bonusPoints, 25, 'HS001 bonusPoints must be 25');
+  assert.strictEqual(App.applyCustomStudentBonus('HS001', -1, 10), true, 'Custom -10 deduction must succeed');
+  assert.strictEqual(App.getStudentRewardStats('HS001').bonusPoints, 15, 'HS001 bonusPoints must be 15 after -10');
+  App.state.adminRewardStudentSearch = '';
+
+  App.state.adminGradeFilter = 'ALL';
+  App.state.adminClassFilter = 'ALL';
+  App.state.adminGradebookSearch = 'ho kien';
+  const gbByNoAccent = App.getFilteredGradebookStudents();
+  assert.strictEqual(gbByNoAccent.length, 1, 'Gradebook search without accents must find 1 match');
+  assert.strictEqual(gbByNoAccent[0].studentId, 'HS055', 'Gradebook search without accents must find Hồ Kiên');
+
+  App.state.adminGradebookSearch = 'hs080';
+  const gbById = App.getFilteredGradebookStudents();
+  assert.strictEqual(gbById.length, 1, 'Gradebook search by studentId must find 1 match');
+  assert.strictEqual(gbById[0].fullName, 'Vy Nhã', 'Gradebook search by studentId must find HS080');
+  App.state.adminGradebookSearch = '';
+
+  // 21.3 Bảo vệ chống ghi đè mất đề thi trên Server khi tab chưa sync lần đầu (!cloudLastSyncedAt)
+  let pushedStateBody = null;
+  const prevFetch = global.fetch;
+  global.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (opts.method === 'POST' && u.includes('/khao_thi_state')) {
+      pushedStateBody = JSON.parse(opts.body);
+      return { ok: true, status: 201, text: async () => '' };
+    }
+    if (u.includes('/khao_thi_state?id=eq.main')) {
+      return {
+        ok: true,
+        json: async () => [{
+          updated_at: 1000,
+          deleted_ids: [],
+          exams: [{ id: 'EXAM-SERVER-EXISTING', title: 'ÔN TẬP GK1 11 ĐỀ 5', grade: 11, category: 'GK1', is_active: true, part1: [], part2: [], part3: [], part4: [] }],
+          homeworks: [],
+          students: [],
+          settings: {}
+        }]
+      };
+    }
+    return { ok: true, json: async () => [] };
+  };
+  App._enableNodeCloudTest = true;
+  App.state.cloudLastSyncedAt = 0;
+  App.state.deletedIds = [];
+  App.state.unsyncedAdminChanges = true;
+  App.state.localStateUpdatedAt = 2000;
+  App.state.exams = [{ id: 'EXAM-NEW-LOCAL', title: 'ÔN TẬP GK1 11 ĐỀ 4', grade: 11, category: 'GK1', is_active: true, part1: [], part2: [], part3: [], part4: [] }];
+  await App.pushAdminStateToCloud({ manual: false });
+  assert.ok(pushedStateBody && Array.isArray(pushedStateBody.exams), 'Must push merged state');
+  const pushedExamIds = pushedStateBody.exams.map(e => e.id);
+  assert.ok(pushedExamIds.includes('EXAM-NEW-LOCAL') && pushedExamIds.includes('EXAM-SERVER-EXISTING'), 'pushAdminStateToCloud must preserve existing server exams when !cloudLastSyncedAt');
+  App._enableNodeCloudTest = false;
+  global.fetch = prevFetch;
+
+  console.log('[OK] TẤT CẢ 21 BỘ TEST (ICON ĐỒNG BỘ, SỬA PHẦN THƯỞNG, TÌM NHANH HS, BẢO VỆ ĐỀ SERVER & CHỐNG CHỤP MÀN HÌNH) ĐÃ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);
