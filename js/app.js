@@ -1315,12 +1315,31 @@ const App = {
 
     const storedAdmin = localStorage.getItem('thpt_admin_account');
     const parsedAdmin = storedAdmin ? JSON.parse(storedAdmin) : {};
-    this.state.admin = {
+    const baseMasterAdmin = {
       ...INITIAL_SEED_DATA.admin,
       ...parsedAdmin,
       role: 'admin',
       email: this.ADMIN_RECOVERY_EMAIL
     };
+
+    let parsedAdmins = [];
+    try {
+      const storedAdmins = localStorage.getItem('thpt_admin_accounts');
+      parsedAdmins = storedAdmins ? JSON.parse(storedAdmins) : [];
+    } catch (_) {
+      parsedAdmins = [];
+    }
+    if (!Array.isArray(parsedAdmins) || parsedAdmins.length === 0) {
+      parsedAdmins = [baseMasterAdmin];
+    } else {
+      const masterUser = String(baseMasterAdmin.username || 'ADMIN').toUpperCase();
+      const hasMaster = parsedAdmins.some(a => String(a.username || '').toUpperCase() === masterUser);
+      if (!hasMaster) {
+        parsedAdmins.unshift(baseMasterAdmin);
+      }
+    }
+    this.state.admins = parsedAdmins;
+    this.state.admin = this.state.admins[0] || baseMasterAdmin;
 
     try {
       this.state.deletedIds = JSON.parse(localStorage.getItem('thpt_deleted_ids') || '[]') || [];
@@ -1409,6 +1428,11 @@ const App = {
             role: 'admin',
             email: this.ADMIN_RECOVERY_EMAIL
           }));
+        }
+        if (Array.isArray(this.state.admins) && this.state.admins.length > 0) {
+          localStorage.setItem('thpt_admin_accounts', JSON.stringify(this.state.admins));
+          if (!this.state.settings) this.state.settings = {};
+          this.state.settings.admins = this.state.admins;
         }
         localStorage.setItem('thpt_students', JSON.stringify(this.state.students));
         const safeExams = (this.state.exams || []).map(e => ({
@@ -1724,6 +1748,44 @@ const App = {
     }));
   },
 
+  syncAdminsFromCloud(cloudAdmins) {
+    if (!Array.isArray(cloudAdmins) || cloudAdmins.length === 0) return;
+    const adminMap = new Map();
+    (this.state.admins || []).forEach(a => {
+      if (a && a.username) adminMap.set(String(a.username).toUpperCase(), a);
+    });
+    cloudAdmins.forEach(ca => {
+      if (!ca || !ca.username) return;
+      const uKey = String(ca.username).toUpperCase();
+      const existing = adminMap.get(uKey);
+      if (!existing) {
+        adminMap.set(uKey, { ...ca, role: 'admin' });
+      } else {
+        const caPassTime = Date.parse(ca.passwordChangedAt || '') || 0;
+        const exPassTime = Date.parse(existing.passwordChangedAt || '') || 0;
+        if (caPassTime > exPassTime) {
+          adminMap.set(uKey, { ...existing, ...ca, role: 'admin' });
+        }
+      }
+    });
+    this.state.admins = Array.from(adminMap.values());
+    if (this.state.admins.length > 0) {
+      this.state.admin = this.state.admins[0];
+    }
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('thpt_admin_accounts', JSON.stringify(this.state.admins));
+      } catch (_) {}
+    }
+    if (this.state.currentUser && this.state.currentUser.role === 'admin') {
+      const freshMe = this.state.admins.find(a => String(a.username || '').toUpperCase() === String(this.state.currentUser.username || '').toUpperCase());
+      if (freshMe) {
+        this.state.currentUser = { ...freshMe, role: 'admin' };
+        this.saveSessionUser(this.state.currentUser);
+      }
+    }
+  },
+
   mergeCloudState(cloud) {
     if (!cloud || typeof cloud !== 'object') return { changed: false };
 
@@ -1830,6 +1892,9 @@ const App = {
     // 4. Gộp Cài đặt quyền xem điểm & giám sát
     if (cloud.settings && typeof cloud.settings === 'object' && !preferLocalAdmin && cloudUpdated > 0) {
       this.state.settings = { ...this.state.settings, ...cloud.settings };
+      if (Array.isArray(cloud.settings.admins) && cloud.settings.admins.length > 0) {
+        this.syncAdminsFromCloud(cloud.settings.admins);
+      }
     }
 
     // 5. Gộp Lượt nộp bài (Union theo id, ưu tiên bản có updatedAt mới hơn hoặc đã chấm điểm Tự luận)
@@ -2458,11 +2523,13 @@ const App = {
   },
 
   loginAdmin(username, password) {
-    const adminAcc = this.state.admin || INITIAL_SEED_DATA.admin;
     const inputUser = String(username || '').trim().toUpperCase();
-    const targetUser = String(adminAcc.username || 'ADMIN').trim().toUpperCase();
-    if (inputUser === targetUser && password === adminAcc.password) {
-      this.state.currentUser = { ...adminAcc, role: 'admin', email: this.ADMIN_RECOVERY_EMAIL };
+    const admins = Array.isArray(this.state.admins) && this.state.admins.length > 0
+      ? this.state.admins
+      : [this.state.admin || INITIAL_SEED_DATA.admin];
+    const found = admins.find(a => String(a.username || '').trim().toUpperCase() === inputUser && a.password === password);
+    if (found) {
+      this.state.currentUser = { ...found, role: 'admin', email: found.email || this.ADMIN_RECOVERY_EMAIL };
       this.saveSessionUser(this.state.currentUser);
       this.render();
       this.syncFromCloud({ silent: true });
@@ -2475,6 +2542,10 @@ const App = {
   logout() {
     this.clearIntervalTimer();
     this.resetExamMonitorState();
+    if (typeof document !== 'undefined') {
+      document.body.classList.remove('in-exam');
+      document.querySelectorAll('[id$="Modal"], #appSystemDialog, #selfEditStudentModal, #adminProfileModal, #addAdminModal, #changeAdminPassModal').forEach(el => el.remove());
+    }
     this.state.currentUser = null;
     this.state.activeExam = null;
     this.state.activeSubmissionDetailId = null;
@@ -4135,8 +4206,8 @@ const App = {
                 <span class="hidden sm:inline">Tải đề mới</span>
               </button>
 
-              <!-- Nút Xem trước & Chọn Bố cục Đề PDF + Ô điền đáp án ngay trên Trang Chủ -->
-              <button type="button" id="studentLayoutBtn" onclick="App.showExamLayoutModal()" class="ui-btn-icon md:w-auto md:px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold border border-indigo-200 shadow-xs md:gap-1.5" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án (${this.getExamLayoutMeta().shortLabel})">
+              <!-- Nút Xem trước & Chọn Bố cục Đề PDF + Ô điền đáp án ngay trên Trang Chủ (máy tính & tablet) -->
+              <button type="button" id="studentLayoutBtn" onclick="App.showExamLayoutModal()" class="hidden md:inline-flex ui-btn-icon md:w-auto md:px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold border border-indigo-200 shadow-xs md:gap-1.5" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án (${this.getExamLayoutMeta().shortLabel})">
                 <i class="fa-solid ${this.getExamLayoutMeta().icon} text-indigo-600"></i>
                 <span class="hidden md:inline">Bố cục: ${this.getExamLayoutMeta().shortLabel}</span>
               </button>
@@ -4151,7 +4222,7 @@ const App = {
               <button type="button" id="studentQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-xs" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
                 <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
               </button>
-              <button type="button" id="studentThemeBtn" onclick="App.showThemeModal()" class="ui-btn-icon md:w-auto md:px-3 bg-white hover:bg-indigo-50 text-slate-700 text-xs font-bold border border-slate-200 shadow-xs md:gap-1.5" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
+              <button type="button" id="studentThemeBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex ui-btn-icon md:w-auto md:px-3 bg-white hover:bg-indigo-50 text-slate-700 text-xs font-bold border border-slate-200 shadow-xs md:gap-1.5" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
                 <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-black/15 shrink-0" style="background:${swatchHex};"></span>
                 <span class="hidden md:inline">Giao diện</span>
               </button>
@@ -4168,8 +4239,9 @@ const App = {
                 <div class="text-sm font-bold text-slate-800">${u.fullName}</div>
                 <div class="text-xs text-slate-500">Mã HS: <span class="font-mono font-semibold text-indigo-600">${u.studentId}</span> • Khối ${this.getStudentGrade(u)} • Lớp ${u.className || '12'}</div>
               </div>
-              <button type="button" onclick="App.logout()" class="ui-btn-icon bg-white hover:bg-red-50 text-slate-500 hover:text-red-600 border border-slate-200 shadow-xs" title="Đăng xuất">
+              <button type="button" onclick="App.logout()" class="ui-btn px-2.5 sm:px-3 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 shadow-xs text-xs font-bold" title="Đăng xuất khỏi hệ thống">
                 <i class="fa-solid fa-right-from-bracket"></i>
+                <span class="hidden sm:inline">Đăng xuất</span>
               </button>
             </div>
           </div>
@@ -4199,6 +4271,9 @@ const App = {
                   </button>
                   <button type="button" id="studentBannerIosBtn" onclick="App.showIosAppModal(false, 'ios')" class="ui-btn bg-white text-indigo-700 hover:bg-indigo-50 font-extrabold shadow-sm">
                     <i class="fa-brands fa-apple text-sm shrink-0"></i><span>Cài App iOS</span>
+                  </button>
+                  <button type="button" onclick="App.logout()" class="col-span-2 sm:col-span-1 ui-btn bg-rose-600 hover:bg-rose-700 text-white font-extrabold shadow-sm">
+                    <i class="fa-solid fa-right-from-bracket shrink-0"></i><span>Đăng xuất</span>
                   </button>
                 </div>
               </div>
@@ -4925,24 +5000,24 @@ const App = {
               <div class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 ${attemptsCount > 0 ? `
                   <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
-                    <button type="button" onclick="App.viewSubmissionDetail('${latestSub.id}')" class="ui-btn bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
+                    <button type="button" onclick="App.viewSubmissionDetail('${latestSub.id}')" class="min-w-0 ui-btn bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
                       <i class="fa-solid fa-eye shrink-0"></i><span>Xem lại (${latestSub.scoreResult.totalScore}đ)</span>
                     </button>
-                    <button type="button" onclick="App.confirmRetakeExam('${ex.id}')" class="ui-btn text-white bg-amber-600 hover:bg-amber-700 shadow-xs">
+                    <button type="button" onclick="App.confirmRetakeExam('${ex.id}')" class="min-w-0 ui-btn text-white bg-amber-600 hover:bg-amber-700 shadow-xs">
                       <i class="fa-solid fa-rotate-right shrink-0"></i><span>Thi Lại (Lần ${attemptsCount + 1})</span>
                     </button>
-                    <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="col-span-2 sm:col-span-1 ui-btn bg-slate-50 hover:bg-indigo-50 text-indigo-700 border border-slate-200" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
+                    <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="col-span-2 sm:col-span-1 min-w-0 ui-btn bg-slate-50 hover:bg-indigo-50 text-indigo-700 border border-slate-200" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
                       <i class="fa-solid fa-table-columns shrink-0"></i><span>Bố cục thi</span>
                     </button>
                   </div>
                   <span class="text-[11px] text-slate-400 text-center sm:text-right">Gần nhất: ${new Date(latestSub.submittedAt).toLocaleDateString('vi-VN')}</span>
                 ` : `
                   <div class="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
-                    <button type="button" onclick="App.startExam('${ex.id}')" class="ui-btn px-3 sm:px-4 text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs">
+                    <button type="button" onclick="App.startExam('${ex.id}')" class="min-w-0 ui-btn px-3 sm:px-4 text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs">
                       <i class="fa-solid fa-play text-[10px] shrink-0"></i>
                       <span>Vào Làm Bài</span>
                     </button>
-                    <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3" title="Xem trước & chọn bố cục Đề PDF và Ô đáp án trước khi thi">
+                    <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="min-w-0 ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3" title="Xem trước & chọn bố cục Đề PDF và Ô đáp án trước khi thi">
                       <i class="fa-solid fa-table-columns shrink-0"></i>
                       <span class="sm:hidden">Bố cục thi</span>
                       <span class="hidden sm:inline">Xem trước bố cục</span>
@@ -5412,8 +5487,8 @@ const App = {
             <span class="hidden sm:flex w-9 h-9 rounded-xl bg-indigo-600 text-white items-center justify-center font-bold text-sm shadow-sm shrink-0">
               <i class="fa-solid fa-pen-ruler text-xs"></i>
             </span>
-            <div class="min-w-0 flex-1">
-              <h2 class="text-xs sm:text-sm font-bold text-slate-800 truncate">${ex.title}</h2>
+            <div class="min-w-0 flex-1 overflow-hidden">
+              <h2 class="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[120px] xs:max-w-[180px] sm:max-w-none">${ex.title}</h2>
               <div class="text-[11px] text-slate-500 flex items-center gap-x-1.5 overflow-hidden mt-0.5">
                 <span class="hidden sm:inline truncate">Học sinh: <strong>${u.fullName}</strong> (${u.studentId})</span>
                 <span id="examHeaderMobStuCode" class="${guardOn && vCount > 0 ? 'hidden' : ''} sm:hidden font-mono font-bold text-slate-700 truncate">${u.studentId}</span>
@@ -5429,7 +5504,7 @@ const App = {
           </div>
 
           <!-- Controls & Actions -->
-          <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div class="flex items-center gap-1 sm:gap-2 shrink-0">
             <!-- Nút Thu gọn đề để điền đáp án nhanh -->
             <button type="button" id="examCollapsePdfBtn" onclick="App.toggleExamPdfCollapse()" class="hidden md:inline-flex ui-btn ${pdfCollapsed ? 'bg-amber-500 hover:bg-amber-600 text-white border border-amber-600' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'} shadow-xs toggle-exam-pdf-btn" title="Thu gọn khung đề PDF để mở rộng ô điền đáp án nhanh toàn màn hình">
               <i class="fa-solid ${pdfCollapsed ? 'fa-expand' : 'fa-compress'}"></i>
@@ -5462,7 +5537,7 @@ const App = {
             </div>
 
             <!-- Nút đổi theme: Sáng / Dịu mắt / Tối & Bộ màu -->
-            <button type="button" id="examQuickThemeBtn" onclick="App.cycleTheme()" class="hidden min-[390px]:inline-flex ui-btn-icon bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
+            <button type="button" id="examQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
               <i class="fa-solid fa-circle-half-stroke"></i>
             </button>
             <button type="button" id="examThemeBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex ui-btn-icon bg-slate-100 hover:bg-slate-200 text-indigo-600 border border-slate-200" title="Tùy chỉnh bộ màu & độ tương phản">
@@ -5470,15 +5545,16 @@ const App = {
             </button>
 
             <!-- Timer Badge -->
-            <div class="inline-flex items-center gap-1 h-[38px] bg-amber-50 border border-amber-200 px-2 sm:px-3 rounded-xl text-amber-900 font-mono font-bold text-xs sm:text-sm whitespace-nowrap">
+            <div class="inline-flex items-center gap-1 h-[38px] bg-amber-50 border border-amber-200 px-1.5 sm:px-3 rounded-xl text-amber-900 font-mono font-bold text-xs sm:text-sm whitespace-nowrap">
               <i class="fa-regular fa-clock text-amber-600"></i>
               <span id="examTimer">--:--</span>
             </div>
 
             <!-- Nộp bài Button -->
-            <button type="button" id="examTopSubmitBtn" onclick="App.confirmSubmitExam()" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-2.5 sm:px-4 shrink-0">
+            <button type="button" id="examTopSubmitBtn" onclick="App.confirmSubmitExam()" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-2 sm:px-4 shrink-0">
               <i class="fa-solid fa-paper-plane shrink-0"></i>
-              <span>Nộp Bài</span>
+              <span class="hidden xs:inline">Nộp</span><span class="hidden sm:inline"> Bài</span>
+            </button>
             </button>
           </div>
         </header>
@@ -5823,7 +5899,7 @@ const App = {
                 <span class="text-[11px] font-semibold ${remainCount > 0 ? 'text-amber-700' : 'text-emerald-700'} ml-1 exam-sheet-remain-text">• ${remainCount > 0 ? `Chưa xong: ${remainCount}` : 'Đã chọn đủ!'}</span>
               </div>
             </div>
-            <div class="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+            <div class="hidden sm:flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
               <button type="button" id="sheetJumpToPdfBtn" onclick="App.scrollExamWorkspaceTo('pdf')" class="${isStacked && isTopSheet ? 'inline-flex' : 'hidden'} flex-1 sm:flex-initial justify-center px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold cursor-pointer items-center gap-1 whitespace-nowrap" title="Kéo xuống mục xem Đề PDF bên dưới">
                 <i class="fa-solid fa-angles-down"></i><span>Xem Đề PDF</span>
               </button>
@@ -7999,7 +8075,7 @@ const App = {
               </button>
 
               <!-- Nút Quét QR Tạo App Điện Thoại (Android & iOS) cho Học Sinh -->
-              <button type="button" id="adminIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold border border-indigo-500 shadow-xs md:gap-1.5" title="Hiển thị mã QR để học sinh quét tạo App trên điện thoại Android & iOS">
+              <button type="button" id="adminIosAppBtn" onclick="App.showIosAppModal()" class="hidden sm:inline-flex ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold border border-indigo-500 shadow-xs md:gap-1.5" title="Hiển thị mã QR để học sinh quét tạo App trên điện thoại Android & iOS">
                 <i class="fa-solid fa-qrcode"></i>
                 <span class="hidden md:inline">App ĐT / QR</span>
               </button>
@@ -8008,7 +8084,7 @@ const App = {
               <button type="button" id="adminQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
                 <i class="fa-solid ${thMeta.icon} text-indigo-400"></i>
               </button>
-              <button type="button" id="adminThemeHeaderBtn" onclick="App.showThemeModal()" class="ui-btn-icon lg:w-auto lg:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 lg:gap-1.5" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
+              <button type="button" id="adminThemeHeaderBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex ui-btn-icon lg:w-auto lg:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 lg:gap-1.5" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
                 <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-white/25 shrink-0" style="background:${swatchHex};"></span>
                 <span class="hidden lg:inline">Giao diện</span>
               </button>
@@ -8019,8 +8095,9 @@ const App = {
                 <i class="fa-solid fa-user-gear text-emerald-400"></i>
                 <span class="hidden sm:inline">${u.fullName}</span>
               </button>
-              <button type="button" onclick="App.logout()" class="ui-btn-icon bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-400 border border-slate-700" title="Đăng xuất">
+              <button type="button" onclick="App.logout()" class="ui-btn px-2.5 sm:px-3 bg-slate-800 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 border border-slate-700 text-xs font-bold" title="Đăng xuất khỏi hệ thống">
                 <i class="fa-solid fa-right-from-bracket"></i>
+                <span class="hidden sm:inline">Đăng xuất</span>
               </button>
             </div>
           </div>
@@ -8463,6 +8540,66 @@ const App = {
                   </button>
                 </div>
               </form>
+            </div>
+
+            <!-- Khối Quản Lý Tài Khoản Quản Trị / Giáo Viên Khác -->
+            <div class="pb-6 border-b border-slate-200">
+              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3.5">
+                <div>
+                  <h4 class="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="fa-solid fa-users-gear text-indigo-600"></i>
+                    <span>Danh Sách Tài Khoản Quản Trị / Giáo Viên (${(this.getAdminAccounts()).length})</span>
+                  </h4>
+                  <p class="text-xs text-slate-500 mt-0.5">Thêm tài khoản cho các Thầy/Cô khác cùng quản lý đề thi, chấm điểm và xem kết quả</p>
+                </div>
+                <button type="button" onclick="App.showAddAdminModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs shrink-0 self-start sm:self-auto">
+                  <i class="fa-solid fa-user-plus"></i>
+                  <span>Thêm Tài Khoản Quản Trị</span>
+                </button>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                ${(this.getAdminAccounts()).map(acc => {
+                  const isMaster = String(acc.username || '').toUpperCase() === 'ADMIN';
+                  const isCurrent = String(acc.username || '').toUpperCase() === String(u.username || '').toUpperCase();
+                  return `
+                    <div class="p-4 rounded-2xl border ${isCurrent ? 'border-indigo-300 bg-indigo-50/40 ring-1 ring-indigo-200' : 'border-slate-200 bg-slate-50/60'} flex flex-col justify-between space-y-3">
+                      <div class="flex items-start justify-between gap-2">
+                        <div class="flex items-center space-x-2.5 min-w-0">
+                          <div class="w-9 h-9 rounded-xl ${isMaster ? 'bg-amber-600' : 'bg-indigo-600'} text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                            <i class="fa-solid ${isMaster ? 'fa-crown' : 'fa-chalkboard-user'}"></i>
+                          </div>
+                          <div class="min-w-0">
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                              <h5 class="text-xs font-bold text-slate-900 truncate" title="${acc.fullName || acc.username}">${acc.fullName || acc.username}</h5>
+                              ${isCurrent ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-indigo-600 text-white">Bạn</span>' : ''}
+                            </div>
+                            <div class="text-[11px] font-mono text-indigo-700 font-bold">${acc.username}</div>
+                          </div>
+                        </div>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${isMaster ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-slate-200 text-slate-700'}">
+                          ${isMaster ? 'Admin gốc' : 'Giáo viên'}
+                        </span>
+                      </div>
+
+                      <div class="text-[11px] text-slate-500 truncate" title="${acc.email || this.ADMIN_RECOVERY_EMAIL}">
+                        <i class="fa-regular fa-envelope text-slate-400 mr-1"></i>${acc.email || this.ADMIN_RECOVERY_EMAIL}
+                      </div>
+
+                      <div class="pt-2 border-t border-slate-200/70 flex items-center justify-between gap-2">
+                        <button type="button" onclick="App.showChangeAdminPassModal('${acc.username}')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-50 text-indigo-700 border border-slate-200 text-xs font-bold transition cursor-pointer flex items-center gap-1">
+                          <i class="fa-solid fa-key text-[10px]"></i><span>Đổi MK</span>
+                        </button>
+                        ${(!isMaster && !isCurrent) ? `
+                          <button type="button" onclick="App.deleteAdminAccount('${acc.username}')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 text-xs font-bold transition cursor-pointer flex items-center gap-1" title="Xóa tài khoản này">
+                            <i class="fa-solid fa-trash text-[10px]"></i><span>Xóa</span>
+                          </button>
+                        ` : ''}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
             </div>
 
             <!-- Khối Giao Diện, Bộ Màu Tùy Ý & Độ Tương Phản -->
@@ -10067,13 +10204,18 @@ const App = {
             <input type="text" id="selfEditPass" required value="${currentStudent.password || '123'}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
           </div>
 
-          <div class="pt-3 border-t border-slate-200 flex justify-end space-x-2.5">
-            <button type="button" onclick="document.getElementById('selfEditStudentModal').remove()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition cursor-pointer">
-              Hủy
+          <div class="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <button type="button" onclick="document.getElementById('selfEditStudentModal').remove(); App.logout();" class="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 border border-rose-200">
+              <i class="fa-solid fa-right-from-bracket"></i><span>Đăng xuất</span>
             </button>
-            <button type="submit" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition flex items-center gap-1.5 cursor-pointer">
-              <i class="fa-solid fa-floppy-disk"></i>Lưu Thay Đổi
-            </button>
+            <div class="flex space-x-2.5">
+              <button type="button" onclick="document.getElementById('selfEditStudentModal').remove()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition cursor-pointer">
+                Hủy
+              </button>
+              <button type="submit" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition flex items-center gap-1.5 cursor-pointer">
+                <i class="fa-solid fa-floppy-disk"></i>Lưu Thay Đổi
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -12797,7 +12939,7 @@ const App = {
     document.body.removeChild(link);
   },
 
-  // --- CÀI ĐẶT HỒ SƠ GIÁO VIÊN, ĐỔI MẬT KHẨU & KHÔI PHỤC QUA EMAIL ---
+  // --- CÀI ĐẶT HỒ SƠ GIÁO VIÊN, ĐỔI MẬT KHẨU & QUẢN LÝ NHIỀU TÀI KHOẢN QUẢN TRỊ ---
   handleAdminProfileSave(prefix = 'inline') {
     const fullName = (document.getElementById(`${prefix}AdminFullName`)?.value || '').trim();
     const username = (document.getElementById(`${prefix}AdminUsername`)?.value || '').trim().toUpperCase();
@@ -12806,7 +12948,20 @@ const App = {
       return false;
     }
 
-    this.state.admin = {
+    const currentLoggedUser = (this.state.currentUser && this.state.currentUser.role === 'admin')
+      ? String(this.state.currentUser.username || '').toUpperCase()
+      : String((this.state.admin && this.state.admin.username) || 'ADMIN').toUpperCase();
+
+    // Kiểm tra trùng username với admin khác
+    if (username !== currentLoggedUser) {
+      const collision = (this.state.admins || []).some(a => String(a.username || '').toUpperCase() === username && String(a.username || '').toUpperCase() !== currentLoggedUser);
+      if (collision) {
+        this.notify(`Tên đăng nhập ${username} đã tồn tại trong hệ thống. Vui lòng chọn tên khác!`, 'error', 'Trùng tên đăng nhập');
+        return false;
+      }
+    }
+
+    const updatedAdmin = {
       ...(this.state.admin || INITIAL_SEED_DATA.admin),
       fullName,
       username,
@@ -12814,12 +12969,27 @@ const App = {
       email: this.ADMIN_RECOVERY_EMAIL
     };
 
+    this.state.admin = updatedAdmin;
+    if (Array.isArray(this.state.admins)) {
+      const idx = this.state.admins.findIndex(a => String(a.username || '').toUpperCase() === currentLoggedUser);
+      if (idx !== -1) {
+        this.state.admins[idx] = { ...this.state.admins[idx], ...updatedAdmin };
+      } else {
+        this.state.admins.push(updatedAdmin);
+      }
+    } else {
+      this.state.admins = [updatedAdmin];
+    }
+
     if (this.state.currentUser && this.state.currentUser.role === 'admin') {
-      this.state.currentUser = { ...this.state.admin };
+      this.state.currentUser = { ...this.state.currentUser, ...updatedAdmin };
       this.saveSessionUser(this.state.currentUser);
     }
 
-    this.saveData();
+    if (!this.state.settings) this.state.settings = {};
+    this.state.settings.admins = this.state.admins;
+
+    this.saveData({ markAdminDirty: true });
     this.render();
     this.notify(`Đã cập nhật hồ sơ Giáo viên: ${fullName} (Tài khoản: ${username}).`, 'success', 'Cập nhật hồ sơ thành công');
     return true;
@@ -12829,7 +12999,13 @@ const App = {
     const oldPass = document.getElementById(`${prefix}AdminOldPass`)?.value || '';
     const newPass = document.getElementById(`${prefix}AdminNewPass`)?.value || '';
     const confirmPass = document.getElementById(`${prefix}AdminConfirmPass`)?.value || '';
-    const currentPass = (this.state.admin && this.state.admin.password) || INITIAL_SEED_DATA.admin.password;
+
+    const currentLoggedUser = (this.state.currentUser && this.state.currentUser.role === 'admin')
+      ? String(this.state.currentUser.username || '').toUpperCase()
+      : String((this.state.admin && this.state.admin.username) || 'ADMIN').toUpperCase();
+
+    const currentAdminAcc = (this.state.admins || []).find(a => String(a.username || '').toUpperCase() === currentLoggedUser) || this.state.admin || INITIAL_SEED_DATA.admin;
+    const currentPass = currentAdminAcc.password || INITIAL_SEED_DATA.admin.password;
 
     if (oldPass !== currentPass) {
       this.notify('Mật khẩu hiện tại không chính xác! Nếu quên mật khẩu, hãy dùng nút gửi link đặt lại mật khẩu về email.', 'error', 'Sai mật khẩu hiện tại');
@@ -12844,22 +13020,279 @@ const App = {
       return false;
     }
 
-    this.state.admin = {
-      ...(this.state.admin || INITIAL_SEED_DATA.admin),
+    const updated = {
+      ...currentAdminAcc,
       password: newPass,
       passwordChangedAt: new Date().toISOString(),
       role: 'admin',
-      email: this.ADMIN_RECOVERY_EMAIL
+      email: currentAdminAcc.email || this.ADMIN_RECOVERY_EMAIL
     };
 
+    if (Array.isArray(this.state.admins)) {
+      const idx = this.state.admins.findIndex(a => String(a.username || '').toUpperCase() === currentLoggedUser);
+      if (idx !== -1) {
+        this.state.admins[idx] = updated;
+      }
+      if (idx === 0 || !this.state.admin || String(this.state.admin.username || '').toUpperCase() === currentLoggedUser) {
+        this.state.admin = updated;
+      }
+    } else {
+      this.state.admin = updated;
+      this.state.admins = [updated];
+    }
+
     if (this.state.currentUser && this.state.currentUser.role === 'admin') {
-      this.state.currentUser = { ...this.state.admin };
+      this.state.currentUser = { ...this.state.currentUser, ...updated };
       this.saveSessionUser(this.state.currentUser);
     }
 
-    this.saveData();
+    if (!this.state.settings) this.state.settings = {};
+    this.state.settings.admins = this.state.admins;
+
+    this.saveData({ markAdminDirty: true });
     this.render();
     this.notify('Đã đổi mật khẩu Giáo viên thành công! Vui lòng sử dụng mật khẩu mới cho lần đăng nhập tiếp theo.', 'success', 'Đổi mật khẩu thành công');
+    return true;
+  },
+
+  getAdminAccounts() {
+    if (Array.isArray(this.state.admins) && this.state.admins.length > 0) {
+      return this.state.admins;
+    }
+    return [this.state.admin || INITIAL_SEED_DATA.admin];
+  },
+
+  showAddAdminModal() {
+    const existing = document.getElementById('addAdminModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'addAdminModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden my-2 sm:my-8">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between gap-2">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
+              <i class="fa-solid fa-user-shield text-base"></i>
+            </div>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900">Thêm Tài Khoản Quản Trị / Giáo Viên</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Cấp quyền quản trị đề thi, sổ điểm và tài liệu</p>
+            </div>
+          </div>
+          <button onclick="document.getElementById('addAdminModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition shrink-0">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        <form onsubmit="event.preventDefault(); App.handleAddAdminSubmit();" class="p-4 sm:p-6 space-y-4 text-sm">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Họ và Tên Giáo Viên *</label>
+            <input type="text" id="newAdminFullName" required placeholder="VD: Cô Nguyễn Thị Mai" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-800 text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Tên đăng nhập (IN HOA) *</label>
+              <input type="text" id="newAdminUsername" required placeholder="VD: GIAOVIEN1" autocapitalize="characters" spellcheck="false" oninput="App.forceUppercaseInput(this)" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold text-indigo-700 text-xs input-uppercase focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Mật khẩu cấp *</label>
+              <input type="text" id="newAdminPassword" required value="123456" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono text-slate-800 text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Email / Số điện thoại liên hệ (Tùy chọn)</label>
+            <input type="text" id="newAdminEmail" placeholder="VD: giaovien@truong.edu.vn" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+          </div>
+
+          <div class="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs leading-relaxed">
+            <i class="fa-solid fa-circle-info mr-1 text-indigo-600"></i>Tài khoản Quản trị mới sẽ có toàn quyền xem sổ điểm, quản lý đề thi và tài liệu, được đồng bộ tự động lên máy chủ.
+          </div>
+
+          <div class="pt-3 border-t border-slate-200 flex justify-end space-x-2.5">
+            <button type="button" onclick="document.getElementById('addAdminModal').remove()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition cursor-pointer">
+              Hủy
+            </button>
+            <button type="submit" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition flex items-center gap-1.5 cursor-pointer">
+              <i class="fa-solid fa-user-plus"></i><span>Tạo Tài Khoản</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+    this.openModalElement(modal);
+  },
+
+  handleAddAdminSubmit() {
+    const fullName = (document.getElementById('newAdminFullName')?.value || '').trim();
+    const rawUser = (document.getElementById('newAdminUsername')?.value || '').trim().toUpperCase();
+    const password = (document.getElementById('newAdminPassword')?.value || '').trim();
+    const email = (document.getElementById('newAdminEmail')?.value || '').trim();
+
+    if (!fullName || !rawUser || !password) {
+      this.notify('Vui lòng điền đầy đủ Họ tên, Tên đăng nhập và Mật khẩu!', 'warning', 'Thiếu thông tin');
+      return false;
+    }
+    if (rawUser.length < 3) {
+      this.notify('Tên đăng nhập phải có ít nhất 3 ký tự!', 'warning', 'Tên đăng nhập quá ngắn');
+      return false;
+    }
+    if (password.length < 3) {
+      this.notify('Mật khẩu phải có ít nhất 3 ký tự!', 'warning', 'Mật khẩu quá ngắn');
+      return false;
+    }
+
+    const admins = this.getAdminAccounts();
+    const duplicate = admins.some(a => String(a.username || '').toUpperCase() === rawUser);
+    if (duplicate) {
+      this.notify(`Tài khoản "${rawUser}" đã tồn tại trên hệ thống! Vui lòng chọn tên đăng nhập khác.`, 'error', 'Trùng tài khoản');
+      return false;
+    }
+
+    const newAcc = {
+      id: 'admin_' + Date.now(),
+      fullName,
+      username: rawUser,
+      password,
+      email: email || this.ADMIN_RECOVERY_EMAIL,
+      role: 'admin',
+      createdAt: new Date().toISOString()
+    };
+
+    if (!Array.isArray(this.state.admins)) {
+      this.state.admins = [this.state.admin || INITIAL_SEED_DATA.admin];
+    }
+    this.state.admins.push(newAcc);
+    if (!this.state.settings) this.state.settings = {};
+    this.state.settings.admins = this.state.admins;
+
+    this.saveData({ markAdminDirty: true });
+    document.getElementById('addAdminModal')?.remove();
+    this.render();
+    this.notify(`Đã thêm tài khoản Quản trị mới: ${fullName} (${rawUser})!`, 'success', 'Thêm quản trị viên thành công');
+    return true;
+  },
+
+  deleteAdminAccount(username) {
+    const targetUser = String(username || '').trim().toUpperCase();
+    const currentLoggedUser = String(this.state.currentUser?.username || '').trim().toUpperCase();
+
+    if (targetUser === 'ADMIN') {
+      this.notify('Không thể xóa tài khoản Quản trị viên gốc (ADMIN)!', 'error', 'Thao tác bị từ chối');
+      return;
+    }
+    if (targetUser === currentLoggedUser) {
+      this.notify('Bạn không thể tự xóa tài khoản Quản trị đang đăng nhập!', 'error', 'Thao tác bị từ chối');
+      return;
+    }
+
+    const target = (this.state.admins || []).find(a => String(a.username || '').toUpperCase() === targetUser);
+    const displayName = target?.fullName || targetUser;
+
+    this.confirmDialog(
+      `Bạn có chắc chắn muốn xóa tài khoản Quản trị "${displayName}" (${targetUser})? Người này sẽ không thể đăng nhập quản trị nữa.`,
+      () => {
+        this.state.admins = (this.state.admins || []).filter(a => String(a.username || '').toUpperCase() !== targetUser);
+        if (!this.state.settings) this.state.settings = {};
+        this.state.settings.admins = this.state.admins;
+        this.saveData({ markAdminDirty: true });
+        this.render();
+        this.notify(`Đã xóa tài khoản Quản trị "${targetUser}" thành công!`, 'success', 'Đã xóa quản trị viên');
+      },
+      {
+        type: 'danger',
+        title: 'Xóa Tài Khoản Quản Trị?',
+        confirmText: 'Xóa tài khoản',
+        cancelText: 'Hủy'
+      }
+    );
+  },
+
+  showChangeAdminPassModal(username) {
+    const targetUser = String(username || '').trim().toUpperCase();
+    const target = (this.state.admins || []).find(a => String(a.username || '').toUpperCase() === targetUser) || (targetUser === 'ADMIN' ? this.state.admin : null);
+    if (!target) return;
+
+    const existing = document.getElementById('changeAdminPassModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'changeAdminPassModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden my-2 sm:my-8">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-amber-50/70 via-white to-slate-50 flex items-center justify-between gap-2">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-amber-600 flex items-center justify-center text-white shadow-sm shrink-0">
+              <i class="fa-solid fa-key text-base"></i>
+            </div>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900">Đổi Mật Khẩu Quản Trị</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Tài khoản: <strong class="font-mono text-indigo-600">${targetUser}</strong> (${target.fullName})</p>
+            </div>
+          </div>
+          <button onclick="document.getElementById('changeAdminPassModal').remove()" class="text-slate-400 hover:text-slate-600 cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 transition shrink-0">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        <form onsubmit="event.preventDefault(); App.handleChangeAdminPassSubmit('${targetUser}');" class="p-4 sm:p-6 space-y-4 text-sm">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Mật khẩu mới *</label>
+            <input type="text" id="targetAdminNewPass" required placeholder="Nhập ít nhất 3 ký tự" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+          </div>
+
+          <div class="pt-3 border-t border-slate-200 flex justify-end space-x-2.5">
+            <button type="button" onclick="document.getElementById('changeAdminPassModal').remove()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition cursor-pointer">
+              Hủy
+            </button>
+            <button type="submit" class="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs shadow-md shadow-amber-200 transition flex items-center gap-1.5 cursor-pointer">
+              <i class="fa-solid fa-check"></i><span>Lưu Mật Khẩu</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+    this.openModalElement(modal);
+  },
+
+  handleChangeAdminPassSubmit(username) {
+    const targetUser = String(username || '').trim().toUpperCase();
+    const newPass = (document.getElementById('targetAdminNewPass')?.value || '').trim();
+    if (!newPass || newPass.length < 3) {
+      this.notify('Mật khẩu mới phải có ít nhất 3 ký tự!', 'warning', 'Mật khẩu không hợp lệ');
+      return false;
+    }
+
+    const idx = (this.state.admins || []).findIndex(a => String(a.username || '').toUpperCase() === targetUser);
+    if (idx !== -1) {
+      this.state.admins[idx].password = newPass;
+      this.state.admins[idx].passwordChangedAt = new Date().toISOString();
+      if (idx === 0 || String(this.state.admin?.username || '').toUpperCase() === targetUser) {
+        this.state.admin.password = newPass;
+        this.state.admin.passwordChangedAt = new Date().toISOString();
+      }
+    } else if (targetUser === 'ADMIN' && this.state.admin) {
+      this.state.admin.password = newPass;
+      this.state.admin.passwordChangedAt = new Date().toISOString();
+      if (!this.state.admins) this.state.admins = [this.state.admin];
+    }
+
+    if (String(this.state.currentUser?.username || '').toUpperCase() === targetUser) {
+      this.state.currentUser.password = newPass;
+      this.saveSessionUser(this.state.currentUser);
+    }
+
+    if (!this.state.settings) this.state.settings = {};
+    this.state.settings.admins = this.state.admins;
+
+    this.saveData({ markAdminDirty: true });
+    document.getElementById('changeAdminPassModal')?.remove();
+    this.render();
+    this.notify(`Đã cập nhật mật khẩu mới cho tài khoản ${targetUser}!`, 'success', 'Đổi mật khẩu thành công');
     return true;
   },
 
@@ -12928,13 +13361,18 @@ const App = {
             </div>
           </div>
 
-          <div class="pt-3 border-t border-slate-100 flex justify-end space-x-2.5">
-            <button type="button" onclick="document.getElementById('adminProfileModal').remove()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition cursor-pointer">
-              Hủy
+          <div class="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            <button type="button" onclick="document.getElementById('adminProfileModal').remove(); App.logout();" class="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 border border-rose-200">
+              <i class="fa-solid fa-right-from-bracket"></i><span>Đăng xuất</span>
             </button>
-            <button type="submit" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-200 transition inline-flex items-center gap-1.5 cursor-pointer">
-              <i class="fa-solid fa-floppy-disk"></i><span>Lưu Thay Đổi</span>
-            </button>
+            <div class="flex space-x-2.5">
+              <button type="button" onclick="document.getElementById('adminProfileModal').remove()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition cursor-pointer">
+                Hủy
+              </button>
+              <button type="submit" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-200 transition inline-flex items-center gap-1.5 cursor-pointer">
+                <i class="fa-solid fa-floppy-disk"></i><span>Lưu Thay Đổi</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

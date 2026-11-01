@@ -46,12 +46,12 @@ body.in-exam {
 }
 
 /* Hỗ trợ App iOS toàn màn hình (Safe Area) & Trình xem PDF đa trang trên iPhone/iPad */
+.ios-safe-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}
 @media all and (display-mode: standalone) {
   header.sticky.top-0 {
     padding-top: env(safe-area-inset-top, 0px);
-  }
-  .ios-safe-bottom {
-    padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
   }
 }
 @media (max-width: 640px) {
@@ -100,9 +100,14 @@ body.in-exam {
 }
 @media (max-width: 639px) {
   .ui-btn {
-    padding: 0.4rem 0.65rem;
+    padding: 0.4rem 0.55rem;
     font-size: 0.72rem;
-    gap: 0.3rem;
+    gap: 0.25rem;
+  }
+  .ui-btn > span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 .ui-btn:active,
@@ -1134,6 +1139,7 @@ body[data-theme="dark"] .exam-watermark-item {
 /* Chống đè nút trên điện thoại: vùng tai thỏ, hộp thoại cuộn an toàn (không bao giờ âm tọa độ top) & nút cuộn đầu trang */
 header.sticky.top-0 {
   padding-top: env(safe-area-inset-top, 0px);
+  box-sizing: border-box;
 }
 
 [id$="Modal"].fixed.inset-0:not(#previewPdfModal),

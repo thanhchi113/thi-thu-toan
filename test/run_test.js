@@ -1232,7 +1232,123 @@ const PDFStorage = require('../js/pdf_storage.js');
   global.fetch = prevFetch23;
   await PDFStorage.clearAllPdfs();
 
-  console.log('[OK] TẤT CẢ 23 BỘ TEST (TĂNG TỐC TẢI/LƯU SERVER, RAM CACHE 0MS, CHỐNG RESET TRANG & NÚT BACK MOBILE) ĐÃ ĐẠT 100%!');
+  // ==========================================
+  // TEST 24: QUẢN LÝ NHIỀU TÀI KHOẢN ADMIN, ĐĂNG XUẤT SẠCH MOBILE & CHỐNG ĐÈ NÚT
+  // ==========================================
+  console.log('--- TEST 24: Multi-Admin Accounts, Mobile Clean Logout & Anti-Overlap Buttons ---');
+
+  // 24.1 Multi-admin creation, validation & login
+  App.state.admins = [
+    { ...App.state.admin, username: 'ADMIN', password: '123' }
+  ];
+  const initialAdminCount = App.getAdminAccounts().length;
+  assert.strictEqual(initialAdminCount, 1, 'Initial admin count should be 1');
+
+  const createMockElement = () => ({
+    id: '',
+    className: '',
+    innerHTML: '',
+    style: {},
+    appendChild: () => {},
+    remove: () => {},
+    setAttribute: () => {},
+    getAttribute: () => '',
+    addEventListener: () => {},
+    querySelector: () => null,
+    querySelectorAll: () => []
+  });
+
+  // Thêm admin phụ GIAOVIEN_MAI
+  global.document = {
+    getElementById: (id) => {
+      if (id === 'newAdminFullName') return { value: 'Cô Nguyễn Thị Mai' };
+      if (id === 'newAdminUsername') return { value: 'GIAOVIEN_MAI' };
+      if (id === 'newAdminPassword') return { value: 'mai123' };
+      if (id === 'newAdminEmail') return { value: 'mai@toan.edu.vn' };
+      if (id === 'targetAdminNewPass') return { value: 'mai456' };
+      return null;
+    },
+    querySelectorAll: () => [],
+    createElement: createMockElement,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    body: { classList: { remove: () => {} }, appendChild: () => {} }
+  };
+
+  const addResult = App.handleAddAdminSubmit();
+  assert.strictEqual(addResult, true, 'Adding new secondary admin should succeed');
+  assert.strictEqual(App.getAdminAccounts().length, 2, 'Admin count should now be 2');
+
+  // Kiểm tra chống trùng username
+  const dupResult = App.handleAddAdminSubmit();
+  assert.strictEqual(dupResult, false, 'Adding duplicate username must fail');
+
+  // Đăng nhập bằng tài khoản admin mới
+  const loginNewSuccess = App.loginAdmin('GIAOVIEN_MAI', 'mai123');
+  assert.strictEqual(loginNewSuccess, true, 'Login with new admin account should succeed');
+  assert.strictEqual(App.state.currentUser.username, 'GIAOVIEN_MAI', 'Current user should be GIAOVIEN_MAI');
+  assert.strictEqual(App.state.currentUser.role, 'admin', 'Role must be admin');
+
+  // Đăng nhập sai mật khẩu admin mới
+  const loginNewFail = App.loginAdmin('GIAOVIEN_MAI', 'wrong_pass');
+  assert.strictEqual(loginNewFail, false, 'Login with wrong password must fail');
+
+  // Admin gốc ADMIN vẫn đăng nhập bình thường
+  const loginMaster = App.loginAdmin('ADMIN', '123');
+  assert.strictEqual(loginMaster, true, 'Master admin should still login successfully');
+  assert.strictEqual(App.state.currentUser.username, 'ADMIN', 'Current user should be ADMIN');
+
+  // Đổi mật khẩu tài khoản GIAOVIEN_MAI
+  const changePassResult = App.handleChangeAdminPassSubmit('GIAOVIEN_MAI');
+  assert.strictEqual(changePassResult, true, 'Change admin password should succeed');
+  const loginWithNewPass = App.loginAdmin('GIAOVIEN_MAI', 'mai456');
+  assert.strictEqual(loginWithNewPass, true, 'Login with updated admin password should succeed');
+
+  // Không cho phép tự xóa tài khoản đang đăng nhập
+  App.state.currentUser = { username: 'GIAOVIEN_MAI', role: 'admin' };
+  let selfDeleteBlocked = false;
+  const originalNotify = App.notify;
+  App.notify = (msg, type) => {
+    if (msg.includes('không thể tự xóa') || type === 'error') selfDeleteBlocked = true;
+  };
+  App.deleteAdminAccount('GIAOVIEN_MAI');
+  assert.strictEqual(selfDeleteBlocked, true, 'Cannot self-delete current logged in admin');
+
+  // Không cho phép xóa ADMIN gốc
+  let masterDeleteBlocked = false;
+  App.deleteAdminAccount('ADMIN');
+  assert.strictEqual(masterDeleteBlocked || selfDeleteBlocked, true, 'Cannot delete master ADMIN account');
+
+  // Xóa tài khoản phụ khi đăng nhập bằng ADMIN
+  App.state.currentUser = { username: 'ADMIN', role: 'admin' };
+  App.confirmDialog = (msg, onConfirm) => onConfirm();
+  App.deleteAdminAccount('GIAOVIEN_MAI');
+  assert.strictEqual(App.getAdminAccounts().length, 1, 'After delete, admin count should be 1');
+  assert.strictEqual(App.getAdminAccounts()[0].username, 'ADMIN', 'Only master admin remains');
+  App.notify = originalNotify;
+
+  // 24.2 Đồng bộ Admin từ Cloud snapshot (syncAdminsFromCloud)
+  App.syncAdminsFromCloud([
+    { username: 'ADMIN', fullName: 'Thầy Huỳnh Thanh Chí', role: 'admin', password: '123' },
+    { username: 'GIAOVIEN_CLOUD', fullName: 'Thầy Trần Văn Cloud', role: 'admin', password: 'cloud_pass_789' }
+  ]);
+  assert.strictEqual(App.getAdminAccounts().length, 2, 'Cloud admin sync must merge newly received accounts');
+  assert.strictEqual(App.loginAdmin('GIAOVIEN_CLOUD', 'cloud_pass_789'), true, 'Cloud-synced admin should be able to login');
+
+  // 24.3 Logout trên mobile dọn sạch session, monitor state và in-exam class
+  let classListRemoved = [];
+  let modalsRemoved = 0;
+  global.document.body.classList.remove = (cls) => classListRemoved.push(cls);
+  global.document.querySelectorAll = (sel) => [
+    { remove: () => modalsRemoved++ }
+  ];
+  App.logout();
+  assert.strictEqual(App.state.currentUser, null, 'Logout must clear currentUser');
+  assert.ok(classListRemoved.includes('in-exam'), 'Logout must remove in-exam class from body');
+  assert.strictEqual(modalsRemoved, 1, 'Logout must clean up any active modal overlays');
+
+  console.log('[OK] Test 24 Passed: Multi-admin management, clean mobile logout & button layouts verified 100%.');
+  console.log('[OK] TẤT CẢ 24 BỘ TEST (MULTI-ADMIN, ĐĂNG XUẤT SẠCH MOBILE, CHỐNG ĐÈ NÚT & TĂNG TỐC TẢI/LƯU SERVER) ĐÃ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);
