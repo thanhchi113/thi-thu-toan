@@ -1348,7 +1348,134 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.strictEqual(modalsRemoved, 1, 'Logout must clean up any active modal overlays');
 
   console.log('[OK] Test 24 Passed: Multi-admin management, clean mobile logout & button layouts verified 100%.');
-  console.log('[OK] TẤT CẢ 24 BỘ TEST (MULTI-ADMIN, ĐĂNG XUẤT SẠCH MOBILE, CHỐNG ĐÈ NÚT & TĂNG TỐC TẢI/LƯU SERVER) ĐÃ ĐẠT 100%!');
+
+  // ==========================================
+  // TEST 25: BIỆT DANH HỌC SINH (NICKNAME / TÊN KHÁC), KHÓA TÊN THẬT VỚI HỌC SINH & ADMIN QUAN SÁT CẢ HAI TÊN
+  // ==========================================
+  console.log('--- TEST 25: Student Nickname / Alias, Real Name Lock & Admin Visibility ---');
+
+  // 25.1 Normalize student record & getStudentDisplayName
+  const rawStudent = { studentId: 'HS901', fullName: 'Nguyễn Văn Minh' };
+  App.normalizeStudentRecord(rawStudent);
+  assert.strictEqual(rawStudent.nickname, '', 'Normalized student must have empty string nickname by default');
+  assert.strictEqual(App.getStudentDisplayName(rawStudent), 'Nguyễn Văn Minh', 'Display name falls back to real name if no nickname');
+
+  rawStudent.nickname = 'Minh Toán Học';
+  assert.strictEqual(App.getStudentDisplayName(rawStudent), 'Minh Toán Học', 'Display name returns nickname when present');
+
+  // 25.2 Học sinh tự chỉnh sửa: Khóa tên thật, chỉ được đổi biệt danh
+  App.state.students = [
+    { studentId: 'HS901', fullName: 'Nguyễn Văn Minh', nickname: '', className: '12A1', password: '123', status: 'active', grade: 12 },
+    { studentId: 'HS902', fullName: 'Trần Thị Hoa', nickname: 'Hoa Bách Khoa', className: '12A1', password: '123', status: 'active', grade: 12 }
+  ];
+  App.state.currentUser = { studentId: 'HS901', fullName: 'Nguyễn Văn Minh', nickname: '', role: 'student', className: '12A1', grade: 12 };
+
+  // Giả lập DOM form self-edit khi học sinh cố ý truyền tên thật mới
+  global.document.getElementById = (id) => {
+    if (id === 'selfEditName') return { value: 'Hacker Đổi Tên' };
+    if (id === 'selfEditNickname') return { value: 'Toán Thủ Số 1' };
+    if (id === 'selfEditPhone') return { value: '0988888888' };
+    if (id === 'selfEditPass') return { value: 'newpass123' };
+    if (id === 'selfEditStudentModal') return { remove: () => {} };
+    return null;
+  };
+
+  let pushedCloudUpdate = null;
+  App.pushStudentSubmissionToCloud = async (sub, stUpdate) => {
+    pushedCloudUpdate = stUpdate;
+    return true;
+  };
+
+  App.handleStudentSelfEditSubmit();
+
+  const hs901 = App.state.students.find(s => s.studentId === 'HS901');
+  assert.strictEqual(hs901.fullName, 'Nguyễn Văn Minh', 'Student CANNOT change real name; fullName must remain unchanged');
+  assert.strictEqual(hs901.nickname, 'Toán Thủ Số 1', 'Student can successfully set nickname');
+  assert.strictEqual(hs901.password, 'newpass123', 'Student can update password');
+  assert.strictEqual(App.state.currentUser.fullName, 'Nguyễn Văn Minh', 'CurrentUser fullName remains unchanged');
+  assert.strictEqual(App.state.currentUser.nickname, 'Toán Thủ Số 1', 'CurrentUser nickname is updated');
+  assert.ok(pushedCloudUpdate && pushedCloudUpdate.nickname === 'Toán Thủ Số 1', 'Nickname update pushed to cloud');
+
+  // 25.3 Hiển thị biệt danh trên bảng xếp hạng (Peer Compare Table)
+  App.state.settings = { allowStudentViewOwnScore: true, allowStudentViewClassBoard: true, anonymizeOtherStudents: false };
+  App.state.submissions = [
+    { id: 'SUB1', studentId: 'HS901', studentName: 'Nguyễn Văn Minh', examId: 'EX1', scoreResult: { totalScore: 9.5 }, submittedAt: new Date().toISOString() },
+    { id: 'SUB2', studentId: 'HS902', studentName: 'Trần Thị Hoa', examId: 'EX1', scoreResult: { totalScore: 8.5 }, submittedAt: new Date().toISOString() }
+  ];
+  App.state.exams = [{ id: 'EX1', title: 'Đề Khảo Sát 1', grade: 12, part1: [], part2: [], part3: [] }];
+
+  const peerData = App.getStudentPeerComparison(App.state.currentUser);
+  assert.ok(peerData && peerData.rankedList.length === 2, 'Ranked list should contain students');
+  const hs1Entry = peerData.rankedList.find(x => x.student.studentId === 'HS901');
+  const hs2Entry = peerData.rankedList.find(x => x.student.studentId === 'HS902');
+  assert.strictEqual(App.getStudentDisplayName(hs1Entry.student), 'Toán Thủ Số 1', 'Rank entry for HS901 uses nickname');
+  assert.strictEqual(App.getStudentDisplayName(hs2Entry.student), 'Hoa Bách Khoa', 'Rank entry for HS902 uses nickname');
+
+  // 25.4 Admin quyền: Thêm học sinh có biệt danh, sửa cả họ tên thật lẫn biệt danh
+  App.state.currentUser = { username: 'ADMIN', role: 'admin' };
+
+  // Admin thêm học sinh mới
+  global.document.getElementById = (id) => {
+    if (id === 'newStudentId') return { value: 'HS903' };
+    if (id === 'newStudentName') return { value: 'Lê Văn Cường' };
+    if (id === 'newStudentNickname') return { value: 'Cường KHTN' };
+    if (id === 'newStudentGrade') return { value: '11' };
+    if (id === 'newStudentClass') return { value: '11A2' };
+    if (id === 'newStudentPass') return { value: '123' };
+    if (id === 'newStudentPhone') return { value: '' };
+    if (id === 'newStudentParent') return { value: '' };
+    if (id === 'newStudentNotes') return { value: '' };
+    if (id === 'addStudentModal') return { remove: () => {} };
+    return null;
+  };
+  App.handleAddStudentSubmit();
+
+  const hs903 = App.state.students.find(s => s.studentId === 'HS903');
+  assert.ok(hs903, 'Admin successfully added HS903');
+  assert.strictEqual(hs903.fullName, 'Lê Văn Cường', 'Admin sets real name');
+  assert.strictEqual(hs903.nickname, 'Cường KHTN', 'Admin sets nickname');
+
+  // Admin sửa học sinh HS901 (đổi cả real name và nickname)
+  global.document.getElementById = (id) => {
+    if (id === 'editStudentId') return { value: 'HS901' };
+    if (id === 'editStudentName') return { value: 'Nguyễn Văn Minh (Chính Thức)' };
+    if (id === 'editStudentNickname') return { value: 'Minh Pro VIP' };
+    if (id === 'editStudentGrade') return { value: '12' };
+    if (id === 'editStudentClass') return { value: '12A1' };
+    if (id === 'editStudentPass') return { value: 'pass999' };
+    if (id === 'editStudentPhone') return { value: '' };
+    if (id === 'editStudentParent') return { value: '' };
+    if (id === 'editStudentStatus') return { value: 'active' };
+    if (id === 'editStudentNotes') return { value: '' };
+    if (id === 'editStudentModal') return { remove: () => {} };
+    return null;
+  };
+  App.handleEditStudentSubmit('HS901');
+
+  assert.strictEqual(hs901.fullName, 'Nguyễn Văn Minh (Chính Thức)', 'Admin can edit real name');
+  assert.strictEqual(hs901.nickname, 'Minh Pro VIP', 'Admin can edit nickname');
+
+  // 25.5 Admin luôn nhìn thấy cả tên thật và biệt danh trên các bảng & giao diện
+  App.state.studentSearchQuery = '';
+  App.state.studentGradeFilter = 'ALL';
+  App.state.studentClassFilter = 'ALL';
+  App.state.studentStatusFilter = 'ALL';
+  const studentTableHtml = App.renderStudentTableHtml();
+  assert.ok(studentTableHtml.includes('Nguyễn Văn Minh (Chính Thức)'), 'Admin student table shows real name');
+  assert.ok(studentTableHtml.includes('Minh Pro VIP'), 'Admin student table shows nickname badge');
+
+  App.state.adminViewTab = 'matrix';
+  const gradebookHtml = App.renderAdminGradebookContentHtml();
+  assert.ok(gradebookHtml.includes('Nguyễn Văn Minh (Chính Thức)'), 'Admin gradebook matrix shows real name');
+  assert.ok(gradebookHtml.includes('Minh Pro VIP'), 'Admin gradebook matrix shows nickname badge');
+
+  // 25.6 Tìm kiếm theo cả tên thật và biệt danh
+  assert.strictEqual(App.matchesStudentSearch(hs901, 'Minh (Chính Thức)'), true, 'Matches by real name');
+  assert.strictEqual(App.matchesStudentSearch(hs901, 'Minh Pro VIP'), true, 'Matches by nickname');
+  assert.strictEqual(App.matchesStudentSearch(hs903, 'Cường KHTN'), true, 'Matches HS903 by nickname');
+
+  console.log('[OK] Test 25 Passed: Student nickname/alias, real name lock & admin full visibility verified 100%.');
+  console.log('[OK] TẤT CẢ 25 BỘ TEST (NICKNAME HỌC SINH, KHÓA TÊN THẬT, MULTI-ADMIN, ĐĂNG XUẤT SẠCH MOBILE) ĐÃ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

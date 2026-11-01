@@ -1080,7 +1080,7 @@ const App = {
     if (!student) return false;
     const grade = this.getStudentGrade(student);
     const haystack = this.normalizeSearchText(
-      `${student.studentId || ''} ${student.fullName || ''} ${student.className || ''} khoi ${grade} lop ${student.className || ''} k${grade}`
+      `${student.studentId || ''} ${student.fullName || ''} ${student.nickname || ''} ${student.className || ''} khoi ${grade} lop ${student.className || ''} k${grade}`
     );
     return haystack.includes(q);
   },
@@ -1196,6 +1196,7 @@ const App = {
 
   normalizeStudentRecord(s) {
     if (!s || typeof s !== 'object') return s;
+    if (s.nickname === undefined) s.nickname = '';
     if (s.phone === undefined) s.phone = '';
     if (s.parentName === undefined) s.parentName = '';
     if (s.notes === undefined) s.notes = '';
@@ -1204,6 +1205,16 @@ const App = {
     s.redemptions = Array.isArray(s.redemptions) ? s.redemptions : [];
     s.grade = this.getStudentGrade(s);
     return s;
+  },
+
+  getStudentDisplayName(student, fallback = 'Học sinh') {
+    if (!student) return fallback;
+    if (typeof student === 'string') {
+      const found = (this.state.students || []).find(s => s && (s.studentId === student || s.fullName === student));
+      if (found) return (found.nickname || '').trim() || (found.fullName || '').trim() || found.studentId || fallback;
+      return student;
+    }
+    return (student.nickname || '').trim() || (student.fullName || '').trim() || student.studentId || fallback;
   },
 
   mergeStudentRecords(preferred, fallback) {
@@ -4236,7 +4247,7 @@ const App = {
               <div class="h-6 w-px bg-slate-200 hidden sm:block"></div>
 
               <div class="text-right hidden sm:block">
-                <div class="text-sm font-bold text-slate-800">${u.fullName}</div>
+                <div class="text-sm font-bold text-slate-800">${u.fullName}${u.nickname ? ` <span class="text-xs font-semibold text-amber-600">(${u.nickname})</span>` : ''}</div>
                 <div class="text-xs text-slate-500">Mã HS: <span class="font-mono font-semibold text-indigo-600">${u.studentId}</span> • Khối ${this.getStudentGrade(u)} • Lớp ${u.className || '12'}</div>
               </div>
               <button type="button" onclick="App.logout()" class="ui-btn px-2.5 sm:px-3 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 shadow-xs text-xs font-bold" title="Đăng xuất khỏi hệ thống">
@@ -4257,9 +4268,9 @@ const App = {
                   <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                   <span>Tài khoản đang hoạt động</span>
                 </div>
-                <h2 class="text-xl sm:text-3xl font-extrabold">Xin chào, ${u.fullName}!</h2>
+                <h2 class="text-xl sm:text-3xl font-extrabold">Xin chào, ${u.fullName}${u.nickname ? ` (${u.nickname})` : ''}!</h2>
                 <p class="text-indigo-100 text-xs sm:text-sm mt-1">
-                  Mã học sinh: <strong class="font-mono tracking-wider">${u.studentId}</strong> • Khối: <strong>Khối ${this.getStudentGrade(u)}</strong> • Lớp: <strong>${u.className || '12'}</strong>
+                  Mã học sinh: <strong class="font-mono tracking-wider">${u.studentId}</strong>${u.nickname ? ` • Biệt danh: <strong>${u.nickname}</strong>` : ''} • Khối: <strong>Khối ${this.getStudentGrade(u)}</strong> • Lớp: <strong>${u.className || '12'}</strong>
                   ${u.phone ? ` • SĐT: <strong>${u.phone}</strong>` : ''}
                 </p>
                 <div class="mt-3.5 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
@@ -4639,7 +4650,7 @@ const App = {
                               ${cmp.rankedList.map((item, rIdx) => {
                                 const isMe = item.student.studentId === u.studentId;
                                 const isAnon = this.state.settings.anonymizeOtherStudents && !isMe;
-                                const displayName = isMe ? `${u.fullName} (Bạn)` : (isAnon ? `Học sinh ẩn danh #${rIdx + 1}` : item.student.fullName);
+                                const displayName = isMe ? `${this.getStudentDisplayName(u)} (Bạn)` : (isAnon ? `Học sinh ẩn danh #${rIdx + 1}` : this.getStudentDisplayName(item.student));
                                 const displayId = isMe ? u.studentId : (isAnon ? 'HS******' : item.student.studentId);
                                 const avgStr = item.avg >= 0 ? item.avg.toFixed(2) : '--';
 
@@ -7325,7 +7336,11 @@ const App = {
               <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Chi Tiết Bài Làm &amp; Đáp Án</span>
               <h2 class="text-lg sm:text-xl font-extrabold text-slate-900">${sub.examTitle}</h2>
               <div class="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span>Học sinh: <strong>${sub.studentName}</strong> (${sub.studentId})</span>
+                ${(() => {
+                  const subStudent = (this.state.students || []).find(s => s && s.studentId === sub.studentId);
+                  const nick = subStudent && subStudent.nickname ? ` <span class="text-amber-700 font-semibold">(Biệt danh: ${subStudent.nickname})</span>` : '';
+                  return `<span>Học sinh: <strong>${sub.studentName}</strong> (${sub.studentId})${nick}</span>`;
+                })()}
                 <span>• <strong class="text-indigo-600">Lần thi: ${sub.attemptNumber || 1}</strong></span>
                 <span>• Nộp lúc: ${new Date(sub.submittedAt).toLocaleString('vi-VN')}</span>
                 <span>• Giám sát phòng thi: <strong class="${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold'}">${sub.tabSwitches || 0} lần${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} lần chụp MH)` : ''}</strong></span>
@@ -7513,6 +7528,7 @@ const App = {
         <td class="px-4 py-3 font-mono font-bold text-indigo-700 whitespace-nowrap">${student.studentId}</td>
         <td class="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">
           ${student.fullName}
+          ${student.nickname ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 ml-1" title="Biệt danh: ${student.nickname}"><i class="fa-solid fa-tag text-[9px] mr-1 text-amber-500"></i>${student.nickname}</span>` : ''}
           <span class="text-slate-400 font-normal ml-1">(K${this.getStudentGrade(student)} • ${student.className || '12'})</span>
         </td>
         <td class="px-3 py-3 text-center font-mono font-semibold text-slate-700 whitespace-nowrap">
@@ -7562,6 +7578,7 @@ const App = {
             ...r,
             studentId: s.studentId,
             studentName: s.fullName,
+            nickname: s.nickname || '',
             className: s.className || '12',
             grade: this.getStudentGrade(s)
           });
@@ -7602,6 +7619,7 @@ const App = {
                     <div class="min-w-0 space-y-0.5">
                       <div class="flex flex-wrap items-center gap-1.5">
                         <span class="font-extrabold text-xs sm:text-sm text-slate-900">${r.studentName}</span>
+                        ${r.nickname ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200" title="Biệt danh: ${r.nickname}"><i class="fa-solid fa-tag text-[9px] mr-1 text-amber-500"></i>${r.nickname}</span>` : ''}
                         <span class="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[11px] font-bold">${r.studentId} • K${r.grade} (${r.className})</span>
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-mono text-[11px] font-extrabold">
                           <span>-${r.cost}</span>
@@ -7884,6 +7902,7 @@ const App = {
                     <td class="px-5 py-3.5 font-bold text-slate-800 text-sm whitespace-nowrap">
                       <button onclick="App.showStudentDetailModal('${s.studentId}')" class="hover:text-indigo-600 text-left transition inline-flex items-center space-x-1.5 font-bold cursor-pointer" title="Bấm để xem chi tiết học sinh">
                         <span>${s.fullName}</span>
+                        ${s.nickname ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200" title="Biệt danh: ${s.nickname}"><i class="fa-solid fa-tag text-[9px] mr-1 text-amber-500"></i>${s.nickname}</span>` : ''}
                         <i class="fa-solid fa-chart-line text-[10px] text-indigo-400"></i>
                       </button>
                     </td>
@@ -7982,8 +8001,12 @@ const App = {
               <tr class="hover:bg-slate-50/80 transition">
                 <td class="px-5 py-4 font-mono font-bold text-indigo-700">${sub.studentId}</td>
                 <td class="px-5 py-4 font-bold text-slate-800">
-                  <button onclick="App.showStudentDetailModal('${sub.studentId}')" class="hover:text-indigo-600 text-left transition font-bold cursor-pointer">
-                    ${sub.studentName}
+                  <button onclick="App.showStudentDetailModal('${sub.studentId}')" class="hover:text-indigo-600 text-left transition font-bold cursor-pointer inline-flex items-center gap-1.5">
+                    <span>${sub.studentName}</span>
+                    ${(() => {
+                      const st = (this.state.students || []).find(s => s && s.studentId === sub.studentId);
+                      return st && st.nickname ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200" title="Biệt danh: ${st.nickname}"><i class="fa-solid fa-tag text-[9px] mr-1 text-amber-500"></i>${st.nickname}</span>` : '';
+                    })()}
                   </button>
                 </td>
                 <td class="px-5 py-4 text-xs text-slate-600 truncate max-w-xs">${sub.examTitle}</td>
@@ -9503,12 +9526,13 @@ const App = {
       if (query) {
         const matchId = (st.studentId || '').toLowerCase().includes(query);
         const matchName = (st.fullName || '').toLowerCase().includes(query);
+        const matchNickname = (st.nickname || '').toLowerCase().includes(query);
         const matchPhone = (st.phone || '').toLowerCase().includes(query);
         const matchClass = (st.className || '').toLowerCase().includes(query);
         const matchGrade = (`khối ${stGrade} k${stGrade} lớp ${stGrade}`).includes(query);
         const matchParent = (st.parentName || '').toLowerCase().includes(query);
         const matchNotes = (st.notes || '').toLowerCase().includes(query);
-        if (!matchId && !matchName && !matchPhone && !matchClass && !matchGrade && !matchParent && !matchNotes) return false;
+        if (!matchId && !matchName && !matchNickname && !matchPhone && !matchClass && !matchGrade && !matchParent && !matchNotes) return false;
       }
       return true;
     });
@@ -9564,8 +9588,9 @@ const App = {
                         ${initials}
                       </div>
                       <div class="min-w-0">
-                        <div class="font-bold text-slate-900 group-hover:text-indigo-600 flex items-center gap-1.5 transition text-left">
+                        <div class="font-bold text-slate-900 group-hover:text-indigo-600 flex items-center gap-1.5 transition text-left flex-wrap">
                           <span>${st.fullName}</span>
+                          ${st.nickname ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200" title="Biệt danh / Tên khác của học sinh"><i class="fa-solid fa-tag text-[9px] mr-1 text-amber-500"></i>${st.nickname}</span>` : ''}
                           <i class="fa-solid fa-chart-line text-[10px] text-indigo-400 group-hover:text-indigo-600 transition"></i>
                         </div>
                         <div class="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 mt-0.5">
@@ -9878,6 +9903,11 @@ const App = {
             </div>
           </div>
 
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Biệt danh / Tên khác (Tùy chọn, hiển thị bảng xếp hạng)</label>
+            <input type="text" id="newStudentNickname" placeholder="VD: Bách Khoa, Toán Thủ..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-semibold text-indigo-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+          </div>
+
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Xếp khối (6 – 12) *</label>
@@ -9928,6 +9958,7 @@ const App = {
   handleAddStudentSubmit() {
     const id = document.getElementById('newStudentId').value.trim().toUpperCase();
     const name = document.getElementById('newStudentName').value.trim();
+    const nickname = (document.getElementById('newStudentNickname')?.value || '').trim();
     const gradeVal = parseInt(document.getElementById('newStudentGrade')?.value || '12', 10);
     const grade = (Number.isInteger(gradeVal) && gradeVal >= 6 && gradeVal <= 12) ? gradeVal : 12;
     const cls = document.getElementById('newStudentClass').value.trim();
@@ -9949,6 +9980,7 @@ const App = {
     this.state.students.push({
       studentId: id,
       fullName: name,
+      nickname: nickname,
       grade: grade,
       className: cls || `${grade}A1`,
       password: pass || '123',
@@ -10008,6 +10040,11 @@ const App = {
               <label class="block text-xs font-bold text-slate-700 mb-1">Họ và Tên Học Sinh *</label>
               <input type="text" id="editStudentName" required value="${student.fullName}" placeholder="Nguyễn Văn An" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
             </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Biệt danh / Tên khác (Tùy chọn, hiển thị bảng xếp hạng)</label>
+            <input type="text" id="editStudentNickname" value="${student.nickname || ''}" placeholder="VD: Bách Khoa, Toán Thủ..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-semibold text-indigo-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -10082,6 +10119,7 @@ const App = {
   handleEditStudentSubmit(originalId) {
     const newId = document.getElementById('editStudentId').value.trim().toUpperCase();
     const name = document.getElementById('editStudentName').value.trim();
+    const nickname = (document.getElementById('editStudentNickname')?.value || '').trim();
     const gradeVal = parseInt(document.getElementById('editStudentGrade')?.value || '12', 10);
     const grade = (Number.isInteger(gradeVal) && gradeVal >= 6 && gradeVal <= 12) ? gradeVal : 12;
     const cls = document.getElementById('editStudentClass').value.trim();
@@ -10131,6 +10169,7 @@ const App = {
 
     student.studentId = newId;
     student.fullName = name;
+    student.nickname = nickname;
     student.grade = grade;
     student.className = cls || `${grade}A1`;
     student.password = pass || '123';
@@ -10190,8 +10229,17 @@ const App = {
           </div>
 
           <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1">Họ và Tên Học Sinh *</label>
-            <input type="text" id="selfEditName" required value="${currentStudent.fullName}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-bold text-slate-700">Họ và Tên Thật *</label>
+              <span class="text-[11px] text-slate-400 flex items-center gap-1"><i class="fa-solid fa-lock text-[10px]"></i>Chỉ Thầy/Cô được sửa</span>
+            </div>
+            <input type="text" id="selfEditName" value="${currentStudent.fullName}" readonly disabled class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-100 text-slate-500 font-bold cursor-not-allowed select-none outline-none" title="Họ tên thật do Thầy/Cô quản lý và không được tự ý sửa">
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Biệt danh / Tên khác (Tùy chọn)</label>
+            <input type="text" id="selfEditNickname" value="${currentStudent.nickname || ''}" placeholder="VD: Bách Khoa, Toán Thủ..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-bold text-indigo-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+            <p class="text-[11px] text-slate-400 mt-1"><i class="fa-solid fa-circle-info mr-1 text-indigo-400"></i>Tên này sẽ hiển thị thay bạn trên bảng xếp hạng và các mục vinh danh.</p>
           </div>
 
           <div>
@@ -10227,18 +10275,19 @@ const App = {
     const u = this.state.currentUser;
     if (!u || u.role !== 'student') return;
 
-    const name = document.getElementById('selfEditName').value.trim();
-    const phone = document.getElementById('selfEditPhone').value.trim();
-    const pass = document.getElementById('selfEditPass').value.trim();
+    const nickname = (document.getElementById('selfEditNickname')?.value || '').trim();
+    const phone = (document.getElementById('selfEditPhone')?.value || '').trim();
+    const pass = (document.getElementById('selfEditPass')?.value || '').trim();
 
-    if (!name || !pass) {
-      this.notify('Vui lòng nhập đầy đủ Họ tên và Mật khẩu!', 'warning', 'Thiếu thông tin bắt buộc');
+    if (!pass) {
+      this.notify('Vui lòng nhập Mật khẩu!', 'warning', 'Thiếu thông tin bắt buộc');
       return;
     }
 
     const student = this.state.students.find(s => s.studentId === u.studentId);
     if (student) {
-      student.fullName = name;
+      // Họ tên thật giữ nguyên do Thầy/Cô quản lý, học sinh chỉ đổi biệt danh, phone, password
+      student.nickname = nickname;
       student.phone = phone;
       student.password = pass;
       student.passwordChangedByStudent = true;
@@ -10246,14 +10295,7 @@ const App = {
       student.updatedAt = new Date().toISOString();
     }
 
-    // Cascade cập nhật họ tên sang tất cả bài thi cũ để đồng bộ 100%
-    this.state.submissions.forEach(sub => {
-      if (sub.studentId === u.studentId) {
-        sub.studentName = name;
-      }
-    });
-
-    u.fullName = name;
+    u.nickname = nickname;
     u.phone = phone;
     u.password = pass;
     this.saveSessionUser(u);
@@ -10263,7 +10305,7 @@ const App = {
     const modal = document.getElementById('selfEditStudentModal');
     if (modal) modal.remove();
     this.render();
-    this.notify('Đã cập nhật thông tin cá nhân và mật khẩu thành công! Mật khẩu mới đã được đồng bộ với hệ thống giáo viên.', 'success', 'Cập nhật hồ sơ thành công');
+    this.notify('Đã cập nhật hồ sơ cá nhân và biệt danh thành công! Mật khẩu mới đã được đồng bộ với hệ thống giáo viên.', 'success', 'Cập nhật hồ sơ thành công');
   },
 
   toggleStudentStatus(id) {
@@ -12427,6 +12469,7 @@ const App = {
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 <h3 class="text-base sm:text-xl font-extrabold text-slate-900 break-words">${student.fullName}</h3>
+                ${student.nickname ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0" title="Biệt danh / Tên khác của học sinh"><i class="fa-solid fa-tag text-[10px] mr-1 text-amber-500"></i>Biệt danh: ${student.nickname}</span>` : ''}
                 <span class="px-2 py-0.5 rounded-full text-xs font-bold font-mono bg-indigo-100 text-indigo-800 shrink-0">${student.studentId}</span>
                 <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${student.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">
                   <span class="w-2 h-2 rounded-full ${student.status === 'active' ? 'bg-emerald-500' : 'bg-red-500'}"></span>
