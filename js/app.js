@@ -21,6 +21,7 @@ const App = {
   _memPdfCacheVer: {},
 
   ACCENT_PRESETS: [
+    { id: 'thaychi', name: 'Đỏ Đô Thầy Chí (Website)', hex: '#650f12' },
     { id: 'indigo',  name: 'Chàm Cổ Điển',  hex: '#4f46e5' },
     { id: 'ocean',   name: 'Xanh Đại Dương', hex: '#0284c7' },
     { id: 'emerald', name: 'Ngọc Lục Bảo',   hex: '#059669' },
@@ -3417,6 +3418,10 @@ const App = {
       <div class="min-h-screen bg-slate-50 flex flex-col justify-center py-6 sm:py-12 sm:px-6 lg:px-8 relative text-slate-900">
         <!-- Thanh công cụ đồng bộ: gọn gàng trên điện thoại dọc & ngang, chỉ ghim góc phải trên màn hình rộng -->
         <div class="w-full max-w-md mx-auto px-4 mb-5 lg:mb-0 lg:w-auto lg:px-0 lg:fixed lg:top-4 lg:right-4 z-30 flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2">
+          <button type="button" id="loginTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="ui-btn bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 shadow-xs shrink-0" title="Giới thiệu Thầy Huỳnh Thanh Chí & Website Lớp Toán Anh Chí">
+            <span class="w-4 h-4 rounded bg-[#650f12] text-[#fbf7ef] font-serif font-black text-[10px] flex items-center justify-center shrink-0">π</span>
+            <span class="hidden sm:inline">Web Thầy Chí</span>
+          </button>
           <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex-1 sm:flex-initial min-w-0" title="Quét mã QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
             <i class="fa-solid fa-qrcode shrink-0"></i>
             <span>Tạo App ĐT / QR</span>
@@ -3436,14 +3441,17 @@ const App = {
         </div>
 
         <div class="sm:mx-auto sm:w-full sm:max-w-md text-center px-4">
-          <div class="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-indigo-600 shadow-lg shadow-indigo-500/25 mb-3.5">
-            <i class="fa-solid fa-graduation-cap text-2xl text-white"></i>
+          <div class="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-[#650f12] text-[#fbf7ef] font-serif font-black text-3xl shadow-lg shadow-red-950/20 mb-3 border-2 border-amber-300/30">
+            π
           </div>
-          <h1 class="text-xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+          <div class="text-xs font-bold text-[#650f12] tracking-wider uppercase mb-1">
+            Lớp Toán Anh Chí · Thầy Huỳnh Thanh Chí
+          </div>
+          <h1 class="text-xl sm:text-3xl font-extrabold tracking-tight text-slate-900 font-serif">
             KHẢO THÍ &amp; LUYỆN ĐỀ TOÁN 6 – 12
           </h1>
-          <p class="mt-1.5 text-xs sm:text-sm font-semibold text-indigo-700">
-            Kiểm tra định kì (GK1, CK1, GK2, CK2) • Đề thi vào 10 • Thi thử THPT QG
+          <p class="mt-1 text-xs sm:text-sm font-semibold text-slate-600">
+            Học hiểu bản chất • Đề 3 phần GDPT 2018 (GK, CK, Tuyển sinh 10 &amp; THPT QG)
           </p>
         </div>
 
@@ -3568,6 +3576,45 @@ const App = {
               </div>
             </button>
           </div>
+
+          <!-- Card Giới thiệu Website Thầy Huỳnh Thanh Chí (https://thanhchi113.github.io/Chi-GV-Toan/) -->
+          <div class="mt-4 bg-gradient-to-r from-amber-50/90 via-white to-red-50/70 p-4 rounded-2xl border border-amber-200/80 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-11 h-11 rounded-2xl bg-[#650f12] text-[#fbf7ef] flex items-center justify-center font-serif font-black text-xl shadow-md shrink-0 border border-amber-300/40">
+                π
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="font-bold text-xs text-slate-900 font-serif">Thầy Huỳnh Thanh Chí</span>
+                  <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-200">Lớp Toán Anh Chí</span>
+                </div>
+                <p class="text-[11px] text-slate-600 mt-0.5">Website chính thức: Lịch các lớp Toán 6–12, bảng vàng thành tích &amp; tài liệu PDF</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 w-full sm:w-auto shrink-0">
+              <button type="button" onclick="App.showTeacherIntroModal()" class="flex-1 sm:flex-none ui-btn bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs">
+                <i class="fa-solid fa-circle-info text-indigo-600"></i><span>Giới thiệu</span>
+              </button>
+              <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="flex-1 sm:flex-none ui-btn bg-[#650f12] hover:bg-[#4d0b0d] text-white text-xs font-bold shadow-xs">
+                <i class="fa-solid fa-globe"></i><span>Mở Website</span>
+                <i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-75"></i>
+              </a>
+            </div>
+          </div>
+
+          <!-- Footer Liên kết Website Thầy Chí -->
+          <footer class="mt-6 text-center text-xs text-slate-500 space-y-1">
+            <div>
+              &copy; 2026 Lớp Toán Anh Chí — <strong>Thầy Huỳnh Thanh Chí</strong> · Khối 6 – 12
+            </div>
+            <div class="flex items-center justify-center gap-3 text-[11px] text-slate-400">
+              <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Website chính thức</a>
+              <span>•</span>
+              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Lịch các lớp</a>
+              <span>•</span>
+              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Bảng vàng 9+</a>
+            </div>
+          </footer>
         </div>
       </div>
     `;
@@ -4205,6 +4252,12 @@ const App = {
             </div>
 
             <div class="flex items-center gap-1 sm:gap-2 shrink-0">
+              <!-- Nút Giới thiệu Website Thầy Huỳnh Thanh Chí -->
+              <button type="button" id="studentTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="ui-btn bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 shadow-xs shrink-0" title="Giới thiệu Thầy Huỳnh Thanh Chí & Website Lớp Toán Anh Chí">
+                <span class="w-4 h-4 rounded bg-[#650f12] text-[#fbf7ef] font-serif font-black text-[10px] flex items-center justify-center shrink-0">π</span>
+                <span class="hidden sm:inline">Thầy Chí</span>
+              </button>
+
               <!-- Nút Về Trang Chủ (ẩn trên điện thoại vì bấm vào logo đã về trang chủ) -->
               <button type="button" onclick="App.goHome()" class="hidden md:inline-flex ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-xs" title="Về trang chủ">
                 <i class="fa-solid fa-house"></i>
@@ -4368,6 +4421,18 @@ const App = {
                     <i class="fa-solid fa-star text-[9px]"></i>
                   </span>
                 </button>
+
+                <button
+                  type="button"
+                  id="studentTabTeacherBtn"
+                  onclick="App.showTeacherIntroModal()"
+                  class="ui-btn h-10 px-2 sm:px-3.5 min-w-0 bg-gradient-to-r from-red-50 to-amber-50 hover:from-red-100 hover:to-amber-100 text-[#650f12] border border-[#650f12]/20 font-bold"
+                  title="Giới thiệu Thầy Huỳnh Thanh Chí & Website Lớp Toán Anh Chí"
+                >
+                  <span class="w-4 h-4 rounded bg-[#650f12] text-[#fbf7ef] font-serif font-black text-[10px] flex items-center justify-center shrink-0">π</span>
+                  <span class="sm:hidden">Thầy Chí</span>
+                  <span class="hidden sm:inline">Về Thầy Chí &amp; Web</span>
+                </button>
               </nav>
             </div>
 
@@ -4384,6 +4449,33 @@ const App = {
               <div class="text-[11px] text-slate-400 hidden lg:block">
                 Hệ thống Khảo thí Toán 6 – 12
               </div>
+            </div>
+          </div>
+
+          <!-- Card Nhận Diện Thương Hiệu Lớp Toán Anh Chí — Thầy Huỳnh Thanh Chí -->
+          <div class="bg-gradient-to-r from-[#fbf7ef] via-white to-[#f4ede0] rounded-2xl p-4 sm:p-5 border border-[#e6dbcd] shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 text-slate-800">
+            <div class="flex items-start sm:items-center gap-3.5 min-w-0">
+              <div class="w-12 h-12 rounded-2xl bg-[#650f12] text-[#fbf7ef] flex items-center justify-center font-serif font-black text-2xl shadow-md shrink-0 border-2 border-amber-300/40">
+                π
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h3 class="font-extrabold text-sm sm:text-base text-[#3d0709] font-serif">Lớp Toán Anh Chí — Thầy Huỳnh Thanh Chí</h3>
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#650f12]/10 text-[#650f12] border border-[#650f12]/20">Khối 6 – 12</span>
+                </div>
+                <p class="text-xs text-slate-600 mt-1">
+                  <em>"Học hiểu bản chất • Bứt phá điểm 9+ Toán"</em> — Xem lịch các ca lớp, bảng vàng 9+ và tài liệu chuyên đề trên website chính thức.
+                </p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button type="button" onclick="App.showTeacherIntroModal()" class="ui-btn bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 shadow-xs text-xs font-bold">
+                <i class="fa-solid fa-address-card text-indigo-600"></i><span>Xem Giới Thiệu</span>
+              </button>
+              <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="ui-btn bg-[#650f12] hover:bg-[#3d0709] text-white shadow-xs text-xs font-bold">
+                <i class="fa-solid fa-globe"></i><span>Mở Website Thầy Chí</span>
+                <i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-75"></i>
+              </a>
             </div>
           </div>
 
@@ -4810,6 +4902,22 @@ const App = {
             ${this.state.studentMainTab === 'rewards' ? this.renderStudentRewardsSectionHtml(u, rewardStats) : ''}
           </div>
         </main>
+
+        <!-- Footer Cổng Học Sinh -->
+        <footer class="mt-auto py-5 border-t border-slate-200 bg-white/70 backdrop-blur-md text-center text-xs text-slate-500 space-y-1">
+          <div>
+            &copy; 2026 Lớp Toán Anh Chí — <strong>Thầy Huỳnh Thanh Chí</strong> · Khối 6 – 12
+          </div>
+          <div class="flex items-center justify-center flex-wrap gap-2 sm:gap-3 text-[11px] text-slate-400 px-4">
+            <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Website chính thức</a>
+            <span>•</span>
+            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Lịch các lớp</a>
+            <span>•</span>
+            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Bảng vàng thành tích</a>
+            <span>•</span>
+            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#tai-lieu" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Kho tài liệu PDF</a>
+          </div>
+        </footer>
 
         <!-- Floating Scroll-To-Top Button (Chỉ hiện khi đã cuộn xuống, không bao giờ đè lên nút nội dung) -->
         <button type="button" onclick="App.scrollToTop()" class="scroll-top-fab rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl flex items-center justify-center active:scale-95 cursor-pointer border-2 border-white" title="Lên đầu trang">
@@ -8103,6 +8211,12 @@ const App = {
                 <span class="hidden md:inline">App ĐT / QR</span>
               </button>
 
+              <!-- Nút Giới Thiệu Web Thầy Chí -->
+              <button type="button" id="adminTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="hidden md:inline-flex ui-btn-icon lg:w-auto lg:px-3 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-slate-700 shadow-xs lg:gap-1.5" title="Giới thiệu & liên kết trang web Thầy Chí (Lớp Toán Anh Chí)">
+                <i class="fa-solid fa-graduation-cap text-amber-400"></i>
+                <span class="hidden lg:inline">Web Thầy Chí</span>
+              </button>
+
               <!-- Chuyển nhanh Sáng/Tối & Bảng màu -->
               <button type="button" id="adminQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
                 <i class="fa-solid ${thMeta.icon} text-indigo-400"></i>
@@ -8932,6 +9046,22 @@ const App = {
           </section>
           ` : ''}
         </main>
+
+        <!-- Footer Cổng Học Sinh -->
+        <footer class="mt-auto py-5 border-t border-slate-200 bg-white/70 backdrop-blur-md text-center text-xs text-slate-500 space-y-1">
+          <div>
+            &copy; 2026 Lớp Toán Anh Chí — <strong>Thầy Huỳnh Thanh Chí</strong> · Khối 6 – 12
+          </div>
+          <div class="flex items-center justify-center flex-wrap gap-2 sm:gap-3 text-[11px] text-slate-400 px-4">
+            <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Website chính thức</a>
+            <span>•</span>
+            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Lịch các lớp</a>
+            <span>•</span>
+            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Bảng vàng thành tích</a>
+            <span>•</span>
+            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#tai-lieu" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Kho tài liệu PDF</a>
+          </div>
+        </footer>
 
         <!-- Floating Scroll-To-Top Button (Chỉ hiện khi đã cuộn xuống, không bao giờ đè lên nút nội dung) -->
         <button type="button" onclick="App.scrollToTop()" class="scroll-top-fab rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl flex items-center justify-center active:scale-95 cursor-pointer border-2 border-white" title="Lên đầu trang">
@@ -13826,6 +13956,156 @@ const App = {
 
   closeIosAppModal() {
     document.getElementById('iosAppGuideModal')?.remove();
+  },
+
+  // --- MODAL GIỚI THIỆU WEBSITE THẦY HUỲNH THANH CHÍ (https://thanhchi113.github.io/Chi-GV-Toan/) ---
+  showTeacherIntroModal() {
+    if (typeof document === 'undefined') return;
+    document.getElementById('teacherIntroModal')?.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'teacherIntroModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-3 sm:my-8 text-slate-800 animate-pop-in">
+        <!-- Header màu Đỏ Đô Thương Hiệu (#650f12) & Giấy Ấm (#fbf7ef) -->
+        <div class="p-5 sm:p-6 bg-gradient-to-r from-[#650f12] via-[#7d1c20] to-[#4a090b] text-[#fbf7ef] relative overflow-hidden">
+          <div class="relative z-10 flex items-start justify-between gap-3">
+            <div class="flex items-center gap-3.5 min-w-0">
+              <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-[#fbf7ef] text-[#650f12] flex items-center justify-center font-serif font-black text-2xl sm:text-3xl shadow-lg shrink-0 border-2 border-amber-300/40">
+                π
+              </div>
+              <div class="min-w-0">
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-white/20 backdrop-blur-md text-amber-200 mb-1 border border-white/20">
+                  <i class="fa-solid fa-graduation-cap"></i> Thanh Chí Edu · Lớp Toán Anh Chí
+                </span>
+                <h3 class="font-serif font-bold text-lg sm:text-2xl text-white leading-tight">
+                  Thầy Huỳnh Thanh Chí
+                </h3>
+                <p class="text-xs sm:text-sm text-red-100 font-medium mt-0.5">
+                  Giáo viên Toán THCS &amp; THPT · Sáng lập Lớp Toán Anh Chí
+                </p>
+              </div>
+            </div>
+            <button type="button" onclick="document.getElementById('teacherIntroModal').remove()" class="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition cursor-pointer shrink-0" title="Đóng">
+              <i class="fa-solid fa-xmark text-sm"></i>
+            </button>
+          </div>
+          <div class="absolute -right-6 -bottom-8 opacity-10 text-white font-serif font-black text-9xl pointer-events-none select-none">
+            π
+          </div>
+        </div>
+
+        <div class="p-5 sm:p-7 space-y-5 text-sm max-h-[75vh] overflow-y-auto">
+          <!-- Triết lý đứng lớp -->
+          <div class="p-4 rounded-2xl bg-[#fbf7ef] border border-[#e6dbcd] text-slate-800 space-y-1.5">
+            <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#650f12]">
+              <i class="fa-solid fa-feather-pointed"></i>
+              <span>Triết Lý Giảng Dạy &amp; Đồng Hành</span>
+            </div>
+            <p class="text-xs sm:text-sm leading-relaxed text-[#2a211f]">
+              <em>"Không dạy mẹo học vẹt để đối phó ngắn hạn. Mỗi buổi học tại Lớp Toán Anh Chí giúp học sinh hiểu rõ vì sao có công thức, tự tin phân tích đề và trình bày bài toán mạch lạc từ gốc rễ."</em>
+            </p>
+          </div>
+
+          <!-- 4 Khối & Năng Lực Nổi Bật -->
+          <div>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2.5 flex items-center gap-1.5">
+              <i class="fa-solid fa-compass-drafting text-indigo-600"></i>
+              <span>Chương Trình Đào Tạo Tại Lớp Toán Anh Chí</span>
+            </h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-start gap-2.5">
+                <div class="w-7 h-7 rounded-lg bg-red-100 text-[#650f12] flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                  <i class="fa-solid fa-award"></i>
+                </div>
+                <div>
+                  <div class="font-bold text-xs text-slate-900">Luyện Thi THPT Quốc Gia (Khối 12)</div>
+                  <p class="text-[11px] text-slate-600 mt-0.5">Bám sát cấu trúc đề 3 phần mới GDPT 2018: Trắc nghiệm 4 lựa chọn, Đúng/Sai &amp; Trả lời ngắn.</p>
+                </div>
+              </div>
+
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-start gap-2.5">
+                <div class="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                  <i class="fa-solid fa-stairs"></i>
+                </div>
+                <div>
+                  <div class="font-bold text-xs text-slate-900">Luyện Thi Tuyển Sinh 9 Vào 10</div>
+                  <p class="text-[11px] text-slate-600 mt-0.5">Vững vàng Hình học đường tròn, phương trình – hệ thức Viète và các bài toán thực tế 9+.</p>
+                </div>
+              </div>
+
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-start gap-2.5">
+                <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                  <i class="fa-solid fa-chart-line"></i>
+                </div>
+                <div>
+                  <div class="font-bold text-xs text-slate-900">Bồi Dưỡng Toán 6, 7, 8, 10, 11</div>
+                  <p class="text-[11px] text-slate-600 mt-0.5">Nắm chắc kiến thức trọng tâm, rèn kĩ năng tự luận mạch lạc, bứt phá điểm Giữa kì &amp; Cuối kì.</p>
+                </div>
+              </div>
+
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-start gap-2.5">
+                <div class="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                  <i class="fa-solid fa-file-pdf"></i>
+                </div>
+                <div>
+                  <div class="font-bold text-xs text-slate-900">Hệ Thống Đề Chuẩn LaTeX – TikZ</div>
+                  <p class="text-[11px] text-slate-600 mt-0.5">Đề thi, lời giải chi tiết và hình vẽ TikZ chuẩn mực 100%, tích hợp khảo thí trực tuyến tức thì.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Các mục trên Website chính thức -->
+          <div class="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                <i class="fa-solid fa-globe text-indigo-600"></i>
+                <span>Các Mục Tiện Ích Trên Website Thầy Chí</span>
+              </span>
+              <span class="text-[11px] font-mono font-bold text-indigo-600">thanhchi113.github.io/Chi-GV-Toan</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#lop-hoc" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-indigo-100/60 rounded-xl border border-indigo-100 text-slate-800 transition block">
+                <i class="fa-solid fa-calendar-days text-indigo-600 text-base mb-1 block"></i>
+                <span class="font-bold text-[11px]">Lịch Các Lớp</span>
+              </a>
+              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#thanh-tich" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-amber-100/60 rounded-xl border border-amber-100 text-slate-800 transition block">
+                <i class="fa-solid fa-trophy text-amber-600 text-base mb-1 block"></i>
+                <span class="font-bold text-[11px]">Bảng Vàng 9+</span>
+              </a>
+              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#tai-lieu" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-emerald-100/60 rounded-xl border border-emerald-100 text-slate-800 transition block">
+                <i class="fa-solid fa-book-bookmark text-emerald-600 text-base mb-1 block"></i>
+                <span class="font-bold text-[11px]">Tài Liệu PDF</span>
+              </a>
+              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#tra-cuu-diem" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-blue-100/60 rounded-xl border border-blue-100 text-slate-800 transition block">
+                <i class="fa-solid fa-magnifying-glass-chart text-blue-600 text-base mb-1 block"></i>
+                <span class="font-bold text-[11px]">Tra Cứu Điểm</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer Hành động -->
+        <div class="px-5 py-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div class="text-xs text-slate-500 text-center sm:text-left">
+            <span class="font-semibold text-slate-700">Lớp Toán Anh Chí</span> · Bứt phá điểm số môn Toán
+          </div>
+          <div class="flex items-center gap-2 w-full sm:w-auto">
+            <button type="button" onclick="document.getElementById('teacherIntroModal').remove()" class="flex-1 sm:flex-none px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-xl border border-slate-200 text-xs transition cursor-pointer">
+              Đóng
+            </button>
+            <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="flex-1 sm:flex-none ui-btn bg-[#650f12] hover:bg-[#4a090b] text-white font-bold text-xs shadow-md shadow-red-950/20">
+              <i class="fa-solid fa-globe"></i>
+              <span>Mở Website Thầy Chí</span>
+              <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+            </a>
+          </div>
+        </div>
+      </div>
+    `;
+    this.openModalElement(modal);
   },
 
   switchAppGuideTab(platform) {

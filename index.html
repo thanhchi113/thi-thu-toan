@@ -13,9 +13,12 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="preconnect" href="https://uiyqdqucqplifcvukwul.supabase.co" crossorigin>
   <link rel="dns-prefetch" href="https://uiyqdqucqplifcvukwul.supabase.co">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;0,9..144,800;1,9..144,600;1,9..144,700&family=Patrick+Hand&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='44' font-family='sans-serif' font-size='34' font-weight='800' text-anchor='middle' fill='white'%3E%CF%80%3C/text%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23650f12'/%3E%3Ctext x='32' y='44' font-family='Georgia,serif' font-size='36' font-weight='800' font-style='italic' text-anchor='middle' fill='%23fbf7ef'%3E%CF%80%3C/text%3E%3C/svg%3E">
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -23,7 +26,23 @@
     tailwind.config = {
       theme: {
         extend: {
+          fontFamily: {
+            sans: ['"Be Vietnam Pro"', 'Segoe UI', 'system-ui', 'sans-serif'],
+            serif: ['"Fraunces"', '"Iowan Old Style"', 'Palatino Linotype', 'Georgia', 'serif'],
+            hand: ['"Patrick Hand"', '"Segoe Print"', 'cursive'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
           colors: {
+            thaychi: {
+              50: '#fcf6f6',
+              100: '#faecec',
+              200: '#f5d6d6',
+              500: '#8f2c30',
+              600: '#650f12',
+              700: '#4d0b0d',
+              800: '#3d0709',
+              900: '#260405',
+            },
             indigo: {
               50: 'rgb(var(--accent-50) / <alpha-value>)',
               100: 'rgb(var(--accent-100) / <alpha-value>)',
@@ -63,7 +82,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous"></script>
 
   <!-- Custom Styles -->
-  <link rel="stylesheet" href="css/app.css?v=20261101b">
+  <link rel="stylesheet" href="css/app.css?v=20261103a">
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased min-h-screen">
 
@@ -79,10 +98,10 @@
   </div>
 
   <!-- Application Logic Scripts -->
-  <script src="js/pdf_storage.js?v=20261101b"></script>
-  <script src="js/grading.js?v=20261101b"></script>
-  <script src="js/exam_data.js?v=20261101b"></script>
-  <script src="js/seed_data.js?v=20261101b"></script>
-  <script src="js/app.js?v=20261101b"></script>
+  <script src="js/pdf_storage.js?v=20261103a"></script>
+  <script src="js/grading.js?v=20261103a"></script>
+  <script src="js/exam_data.js?v=20261103a"></script>
+  <script src="js/seed_data.js?v=20261103a"></script>
+  <script src="js/app.js?v=20261103a"></script>
 </body>
 </html>

@@ -1475,7 +1475,68 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.strictEqual(App.matchesStudentSearch(hs903, 'Cường KHTN'), true, 'Matches HS903 by nickname');
 
   console.log('[OK] Test 25 Passed: Student nickname/alias, real name lock & admin full visibility verified 100%.');
-  console.log('[OK] TẤT CẢ 25 BỘ TEST (NICKNAME HỌC SINH, KHÓA TÊN THẬT, MULTI-ADMIN, ĐĂNG XUẤT SẠCH MOBILE) ĐÃ ĐẠT 100%!');
+
+  // ==========================================
+  // TEST 26: Đồng bộ Font chữ (Be Vietnam Pro, Fraunces, Patrick Hand), Giao diện Thương hiệu & Tích hợp Giới thiệu Web Thầy Chí
+  // ==========================================
+  console.log('--- TEST 26: Typography Sync, Brand UI & Teacher Website Integration ---');
+
+  // 26.1 Kiểm tra file index.html có link Google Fonts và cấu hình Tailwind fontFamily
+  const indexHtmlContent = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.ok(indexHtmlContent.includes('Be+Vietnam+Pro'), 'index.html includes Be Vietnam Pro font');
+  assert.ok(indexHtmlContent.includes('Fraunces'), 'index.html includes Fraunces serif font');
+  assert.ok(indexHtmlContent.includes('Patrick+Hand'), 'index.html includes Patrick Hand font');
+  assert.ok(indexHtmlContent.includes('Be Vietnam Pro'), 'Tailwind config defines sans font Be Vietnam Pro');
+  assert.ok(indexHtmlContent.includes('Fraunces'), 'Tailwind config defines serif font Fraunces');
+  assert.ok(indexHtmlContent.includes('Patrick Hand'), 'Tailwind config defines hand font Patrick Hand');
+
+  // 26.2 Kiểm tra file css/app.css có import fonts và các biến CSS custom
+  const appCssContent = fs.readFileSync(path.join(__dirname, '../css/app.css'), 'utf8');
+  assert.ok(appCssContent.includes('fonts.googleapis.com'), 'app.css imports Google Fonts');
+  assert.ok(appCssContent.includes('--font-main:'), 'app.css defines --font-main');
+  assert.ok(appCssContent.includes('--font-serif:'), 'app.css defines --font-serif');
+  assert.ok(appCssContent.includes('--font-hand:'), 'app.css defines --font-hand');
+  assert.ok(appCssContent.includes('.brand-pill-badge'), 'app.css defines .brand-pill-badge');
+
+  // 26.3 Kiểm tra bảng màu Accent Presets có màu Đỏ Đô Thầy Chí (#650f12)
+  const thayChiPreset = App.ACCENT_PRESETS.find(p => p.id === 'thaychi');
+  assert.ok(thayChiPreset, 'ACCENT_PRESETS must have "thaychi"');
+  assert.strictEqual(thayChiPreset.hex.toLowerCase(), '#650f12', 'Preset thaychi hex must be #650f12');
+
+  // 26.4 Kiểm tra hàm mở Modal Giới thiệu Web Thầy Chí (showTeacherIntroModal)
+  assert.strictEqual(typeof App.showTeacherIntroModal, 'function', 'App.showTeacherIntroModal is a function');
+  let appendedModal = null;
+  global.document.body.appendChild = (node) => {
+    appendedModal = node;
+    return node;
+  };
+  App.showTeacherIntroModal();
+  assert.ok(appendedModal, 'Teacher intro modal must be created and appended to DOM');
+  assert.ok(appendedModal.innerHTML.includes('https://thanhchi113.github.io/Chi-GV-Toan/'), 'Modal has link to Chi-GV-Toan website');
+  assert.ok(appendedModal.innerHTML.includes('Huỳnh Thanh Chí') || appendedModal.innerHTML.includes('Thầy Chí'), 'Modal introduces Teacher Huỳnh Thanh Chí');
+  assert.ok(appendedModal.innerHTML.includes('Lớp Toán Anh Chí'), 'Modal mentions Lớp Toán Anh Chí brand');
+
+  // 26.5 Kiểm tra giao diện Đăng nhập có liên kết và thẻ giới thiệu Web Thầy Chí
+  const loginContainer = { innerHTML: '' };
+  App.renderLoginView(loginContainer);
+  assert.ok(loginContainer.innerHTML.includes('https://thanhchi113.github.io/Chi-GV-Toan/'), 'Login view has link to teacher website');
+  assert.ok(loginContainer.innerHTML.includes('loginTeacherIntroBtn'), 'Login view has button to open teacher intro modal');
+
+  // 26.6 Kiểm tra giao diện Cổng Học sinh có mục giới thiệu và liên kết Web Thầy Chí
+  const studentContainer = { innerHTML: '' };
+  App.state.currentUser = { username: 'HS901', fullName: 'Nguyễn Văn Minh', role: 'student', studentId: 'HS901', grade: 12, className: '12A1' };
+  App.renderStudentPortal(studentContainer);
+  assert.ok(studentContainer.innerHTML.includes('https://thanhchi113.github.io/Chi-GV-Toan/'), 'Student portal has link to teacher website');
+  assert.ok(studentContainer.innerHTML.includes('studentTeacherIntroBtn'), 'Student portal has button to open teacher intro modal');
+
+  // 26.7 Kiểm tra giao diện Cổng Admin có nút mở Modal Web Thầy Chí
+  const adminContainer = { innerHTML: '' };
+  App.state.currentUser = { username: 'ADMIN', role: 'admin', fullName: 'Quản Trị Viên' };
+  App.renderAdminDashboard(adminContainer);
+  assert.ok(adminContainer.innerHTML.includes('adminTeacherIntroBtn'), 'Admin dashboard has adminTeacherIntroBtn');
+
+  console.log('[OK] Test 26 Passed: Typography sync, brand identity (#650f12) & Teacher website integration verified 100%.');
+  console.log('[OK] TẤT CẢ 26 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);
