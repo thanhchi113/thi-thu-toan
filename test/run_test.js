@@ -1512,21 +1512,22 @@ const PDFStorage = require('../js/pdf_storage.js');
   };
   App.showTeacherIntroModal();
   assert.ok(appendedModal, 'Teacher intro modal must be created and appended to DOM');
-  assert.ok(appendedModal.innerHTML.includes('https://thanhchi113.github.io/Chi-GV-Toan/'), 'Modal has link to Chi-GV-Toan website');
+  assert.ok(appendedModal.innerHTML.includes('https://thanhchi113.github.io/'), 'Modal has link to official website');
+  assert.ok(appendedModal.innerHTML.includes('https://thanhchi113.github.io/Chi-GV-Toan/'), 'Modal keeps portfolio link');
   assert.ok(appendedModal.innerHTML.includes('Huỳnh Thanh Chí') || appendedModal.innerHTML.includes('Thầy Chí'), 'Modal introduces Teacher Huỳnh Thanh Chí');
   assert.ok(appendedModal.innerHTML.includes('Lớp Toán Anh Chí'), 'Modal mentions Lớp Toán Anh Chí brand');
 
   // 26.5 Kiểm tra giao diện Đăng nhập có liên kết và thẻ giới thiệu Web Thầy Chí
   const loginContainer = { innerHTML: '' };
   App.renderLoginView(loginContainer);
-  assert.ok(loginContainer.innerHTML.includes('https://thanhchi113.github.io/Chi-GV-Toan/'), 'Login view has link to teacher website');
+  assert.ok(loginContainer.innerHTML.includes('https://thanhchi113.github.io/'), 'Login view has link to official teacher website');
   assert.ok(loginContainer.innerHTML.includes('loginTeacherIntroBtn'), 'Login view has button to open teacher intro modal');
 
   // 26.6 Kiểm tra giao diện Cổng Học sinh có mục giới thiệu và liên kết Web Thầy Chí
   const studentContainer = { innerHTML: '' };
   App.state.currentUser = { username: 'HS901', fullName: 'Nguyễn Văn Minh', role: 'student', studentId: 'HS901', grade: 12, className: '12A1' };
   App.renderStudentPortal(studentContainer);
-  assert.ok(studentContainer.innerHTML.includes('https://thanhchi113.github.io/Chi-GV-Toan/'), 'Student portal has link to teacher website');
+  assert.ok(studentContainer.innerHTML.includes('https://thanhchi113.github.io/'), 'Student portal has link to official teacher website');
   assert.ok(studentContainer.innerHTML.includes('studentTeacherIntroBtn'), 'Student portal has button to open teacher intro modal');
 
   // 26.7 Kiểm tra giao diện Cổng Admin có nút mở Modal Web Thầy Chí
@@ -1536,7 +1537,174 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.ok(adminContainer.innerHTML.includes('adminTeacherIntroBtn'), 'Admin dashboard has adminTeacherIntroBtn');
 
   console.log('[OK] Test 26 Passed: Typography sync, brand identity (#650f12) & Teacher website integration verified 100%.');
-  console.log('[OK] TẤT CẢ 26 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
+
+  // ==========================================
+  // TEST 27: Đồng bộ Dữ liệu Hệ sinh thái, Quản lý 13 Nhóm Lớp & Giao Bài Tập Về Nhà Theo Nhóm Lớp (Photo + Interactive)
+  // ==========================================
+  console.log('--- TEST 27: Data Sync, 13 Class Groups & Class-Group Homework System ---');
+
+  // 27.1 Đồng bộ thông tin liên hệ & website chính thức
+  assert.strictEqual(App.ADMIN_RECOVERY_EMAIL, 'chithanhhuynh11@gmail.com', 'Synced recovery email');
+  assert.strictEqual(App.TEACHER_MAIN_WEB_URL, 'https://thanhchi113.github.io/', 'Synced official website URL');
+  assert.strictEqual(App.TEACHER_PHONE, '090 595 7716', 'Synced teacher Zalo/phone');
+  assert.strictEqual(App.DEFAULT_CLASS_GROUPS.length, 13, '13 canonical class groups synced with main website');
+
+  const allGroupNames = App.getClassGroups().map(g => g.name);
+  ['12A 2K9', '12B 2K9', '12D', '11A 2K10', '11B 2K10', '10A 2K11', '10B 2K11', '10C 2K11', '9 2K12', '8A 2K13', '8B 2K13', '7 2K14', '7 Onl'].forEach(cn => {
+    assert.ok(allGroupNames.some(n => App.isSameClassName(n, cn)), `Canonical group "${cn}" must exist`);
+  });
+
+  // 27.2 Tạo học sinh thuộc các nhóm lớp khác nhau & kiểm tra phân quyền Đề thi theo Nhóm lớp
+  App.state.students.push(
+    { studentId: 'HS951', fullName: 'Lê Hoàng A', grade: 12, className: '12A 2K9', status: 'active' },
+    { studentId: 'HS952', fullName: 'Trần Minh B', grade: 12, className: '12B 2K9', status: 'active' },
+    { studentId: 'HS953', fullName: 'Phạm Thu C', grade: 10, className: '10A 2K11', status: 'active' }
+  );
+  const st12A = App.state.students.find(s => s.studentId === 'HS951');
+  const st12B = App.state.students.find(s => s.studentId === 'HS952');
+  const st10A = App.state.students.find(s => s.studentId === 'HS953');
+
+  const classExam = App.normalizeExamRecord({
+    id: 'EXAM-CLASS-12A',
+    title: 'Kiểm tra 15 phút riêng 12A 2K9',
+    grade: 12,
+    is_active: true,
+    allowed_all: false,
+    access_type: 'class',
+    allowed_classes: ['12A 2K9']
+  });
+  App.state.exams.unshift(classExam);
+  assert.strictEqual(App.isStudentAllowedExam(classExam, st12A), true, '12A 2K9 student allowed in 12A exam');
+  assert.strictEqual(App.isStudentAllowedExam(classExam, st12B), false, '12B 2K9 student blocked from 12A exam');
+
+  // 27.3 Giao Bài tập về nhà chế độ Chụp ảnh vở (photo) cho nhóm lớp 12A 2K9 & 12B 2K9
+  const pastDueIso = new Date(Date.now() - 3600 * 1000).toISOString();
+  const photoHw = App.normalizeHomeworkRecord({
+    id: 'HW-PHOTO-12AB',
+    itemKind: 'homework',
+    hwMode: 'photo',
+    title: 'BTVN Tuần 10 — Cực trị hàm hợp',
+    grade: 12,
+    description: 'Giải chi tiết Câu 1-5 vào vở và chụp ảnh nộp.',
+    dueAt: pastDueIso,
+    maxScore: 10,
+    allowResubmit: true,
+    accessType: 'class',
+    allowedAll: false,
+    allowedClasses: ['12A 2K9', '12B 2K9']
+  });
+  App.state.homeworks.unshift(photoHw);
+
+  assert.strictEqual(App.isStudentAllowedHomework(photoHw, st12A), true, '12A 2K9 receives photo BTVN');
+  assert.strictEqual(App.isStudentAllowedHomework(photoHw, st12B), true, '12B 2K9 receives photo BTVN');
+  assert.strictEqual(App.isStudentAllowedHomework(photoHw, st10A), false, '10A 2K11 does NOT see 12AB BTVN');
+
+  const targets12AB = App.getHomeworkTargetStudents(photoHw);
+  assert.ok(targets12AB.some(s => s.studentId === 'HS951') && targets12AB.some(s => s.studentId === 'HS952'), 'Target students include 12A & 12B');
+  assert.ok(!targets12AB.some(s => s.studentId === 'HS953'), 'Target students exclude 10A');
+
+  // Học sinh HS951 nộp ảnh vở (quá hạn -> isLate = true, pendingManualGrade = true)
+  const origGetElementById = global.document.getElementById;
+  App.state.currentUser = { ...st12A, role: 'student' };
+  App.state.tempPhotoHwImages = ['data:image/jpeg;base64,/9j/4AAQSkZJRg=='];
+  global.document.getElementById = (id) => {
+    if (id === 'studentHwNoteInput') return { value: 'Em nộp bài ạ, câu 5 em làm 2 cách.' };
+    return origGetElementById ? origGetElementById(id) : null;
+  };
+  App.submitPhotoHomework('HW-PHOTO-12AB');
+
+  const hs951Sub = App.getStudentLatestHwSubmission('HW-PHOTO-12AB', 'HS951');
+  assert.ok(hs951Sub, 'Photo homework submission recorded');
+  assert.strictEqual(hs951Sub.isHomework, true, 'Marked as homework submission');
+  assert.strictEqual(hs951Sub.hwMode, 'photo', 'Mode is photo');
+  assert.strictEqual(hs951Sub.isLate, true, 'Detected late submission accurately');
+  assert.strictEqual(hs951Sub.pendingManualGrade, true, 'Awaiting teacher grade');
+
+  // Khi đang chờ chấm, chưa cộng điểm thưởng sai lệch
+  const rewardBeforeGrade = App.getStudentRewardStats('HS951');
+  assert.strictEqual(rewardBeforeGrade.earnedPoints, 0, 'Pending ungraded BTVN does not award 0/premature points');
+
+  // Danh sách nhắc nộp Zalo chỉ liệt kê HS952 (vì HS951 đã nộp)
+  const missingTxt = await App.copyMissingHwStudentsList('HW-PHOTO-12AB');
+  assert.ok(missingTxt.includes('HS952') && !missingTxt.includes('HS951'), 'Missing list includes HS952 and excludes submitted HS951');
+
+  // Giáo viên mở modal chấm ảnh vở thấy ảnh nộp + chấm điểm 9.25đ + nhận xét cho HS951
+  App.state.currentUser = { username: 'ADMIN', role: 'admin', fullName: 'Thầy Chí' };
+  let gradeModalNode = null;
+  global.document.body.appendChild = (node) => { gradeModalNode = node; return node; };
+  App.showGradePhotoHomeworkModal(hs951Sub.id);
+  assert.ok(gradeModalNode && gradeModalNode.innerHTML.includes('data:image/jpeg;base64,/9j/4AAQSkZJRg=='), 'Teacher grade modal renders student uploaded notebook photo');
+
+  global.document.getElementById = (id) => {
+    if (id === 'gradePhotoScoreInput') return { value: '9.25' };
+    if (id === 'gradePhotoCommentInput') return { value: 'Cách 2 câu 5 rất sáng tạo!' };
+    return origGetElementById ? origGetElementById(id) : null;
+  };
+  App.savePhotoHomeworkGrade(hs951Sub.id);
+  global.document.getElementById = origGetElementById;
+
+  assert.strictEqual(hs951Sub.pendingManualGrade, false, 'Marked graded');
+  assert.strictEqual(hs951Sub.teacherScore, 9.25, 'Teacher score saved');
+  assert.strictEqual(hs951Sub.scoreResult.totalScore, 9.25, 'scoreResult synced with teacherScore');
+  assert.strictEqual(hs951Sub.scoreResult.maxTotal, 10, 'scoreResult preserves maxTotal = 10');
+  assert.strictEqual(hs951Sub.teacherComment, 'Cách 2 câu 5 rất sáng tạo!', 'Teacher comment saved');
+
+  const rewardAfterGrade = App.getStudentRewardStats('HS951');
+  assert.ok(rewardAfterGrade.earnedPoints > 0, 'Graded BTVN earns reward points for student');
+
+  // 27.4 Đổi tên nhóm lớp nguyên tử (renameClassGroupInternal) cập nhật đồng bộ HS + Đề + BTVN
+  App.renameClassGroupInternal('12A 2K9', '12A1 VIP 2K9', 12, 'T3-T6 17h30');
+  assert.strictEqual(st12A.className, '12A1 VIP 2K9', 'Student className updated atomically');
+  assert.ok(classExam.allowed_classes.includes('12A1 VIP 2K9'), 'Exam allowed_classes updated atomically');
+  assert.ok(photoHw.allowedClasses.includes('12A1 VIP 2K9'), 'Homework allowedClasses updated atomically');
+
+  // 27.5 Giao Bài tập về nhà chế độ Điền đáp án chấm tự động (interactive) & tắt cảnh báo thoát phòng thi
+  const interHw = App.normalizeHomeworkRecord({
+    id: 'HW-INTER-10A',
+    itemKind: 'homework',
+    hwMode: 'interactive',
+    title: 'BTVN Trắc nghiệm Mệnh đề & Tập hợp',
+    grade: 10,
+    pdfUrl: 'pdfs/sample.pdf',
+    time_minutes: 0,
+    accessType: 'class',
+    allowedAll: false,
+    allowedClasses: ['10A 2K11'],
+    part1: [{ id: 1, correct_answer: 'B' }, { id: 2, correct_answer: 'D' }],
+    part2: [],
+    part3: []
+  });
+  App.state.homeworks.unshift(interHw);
+  App.state.currentUser = { ...st10A, role: 'student' };
+  await App.startInteractiveHomework('HW-INTER-10A');
+
+  assert.ok(App.state.activeExam && App.state.activeExam.id === 'HW-INTER-10A', 'Interactive homework opens exam/PDF workspace');
+  assert.strictEqual(App.state.activeExam.isHomeworkRoom, true, 'isHomeworkRoom flag active');
+  assert.strictEqual(App.state.activeExam.noTimeLimit, true, '0 minutes enables free-time BTVN mode');
+  assert.strictEqual(App.isExamExitWarningEnabled(), false, 'Exit anti-cheat warning disabled during BTVN');
+  assert.strictEqual(App.isScreenshotWarningEnabled(), false, 'Screenshot warning disabled during BTVN');
+
+  App.state.answers = { part1: { 1: 'B', 2: 'D' }, part2: {}, part3: {}, part4: {}, flagged: {} };
+  App.submitExam(true);
+  if (App.state.timerInterval) {
+    clearInterval(App.state.timerInterval);
+    App.state.timerInterval = null;
+  }
+  const hs953HwSub = App.getStudentLatestHwSubmission('HW-INTER-10A', 'HS953');
+  assert.ok(hs953HwSub, 'Interactive homework submission recorded');
+  assert.strictEqual(hs953HwSub.isHomework, true, 'Interactive submission flagged as homework');
+  assert.strictEqual(hs953HwSub.hwMode, 'interactive', 'Mode is interactive');
+  assert.strictEqual(hs953HwSub.scoreResult.part1.correctCount, 2, 'Interactive BTVN auto-graded 2/2 correct');
+
+  // 27.6 Đồng bộ đám mây mergeCloudState giữ điểm GV đã chấm mới hơn
+  const olderUngradedClone = { ...hs951Sub, pendingManualGrade: true, teacherScore: null, gradedAt: '', updatedAt: '2020-01-01T00:00:00.000Z' };
+  App.mergeCloudState({ submissions: [olderUngradedClone] });
+  const mergedSub = App.state.submissions.find(s => s.id === hs951Sub.id);
+  assert.strictEqual(mergedSub.pendingManualGrade, false, 'Cloud merge preserves newer teacher-graded BTVN');
+  assert.strictEqual(mergedSub.teacherScore, 9.25, 'Cloud merge preserves teacherScore 9.25');
+
+  console.log('[OK] Test 27 Passed: Ecosystem data sync, 13 class groups & Photo/Interactive homework system verified 100%.');
+  console.log('[OK] TẤT CẢ 27 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

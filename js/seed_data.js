@@ -5,7 +5,7 @@ const INITIAL_SEED_DATA = {
     password: "123",
     fullName: "Thầy Huỳnh Thanh Chí",
     role: "admin",
-    email: "badaoqn132@gmail.com"
+    email: "chithanhhuynh11@gmail.com"
   },
   students: [
     {

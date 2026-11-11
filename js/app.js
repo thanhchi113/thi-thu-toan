@@ -9,12 +9,31 @@ if (typeof PDFStorage === 'undefined' && typeof require === 'function') {
 }
 
 const App = {
-  ADMIN_RECOVERY_EMAIL: 'badaoqn132@gmail.com',
+  ADMIN_RECOVERY_EMAIL: 'chithanhhuynh11@gmail.com',
   PUBLIC_APP_URL: 'https://thanhchi113.github.io/thi-thu-toan/',
+  TEACHER_MAIN_WEB_URL: 'https://thanhchi113.github.io/',
+  TEACHER_PORTFOLIO_URL: 'https://thanhchi113.github.io/Chi-GV-Toan/',
+  TEACHER_PHONE: '090 595 7716',
+  TEACHER_ZALO_URL: 'https://zalo.me/0905957716',
   SUPABASE_URL: 'https://uiyqdqucqplifcvukwul.supabase.co',
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_eVPODZoNRLiGD8Ldl2VjAg_eC_KTKDg',
   SUPABASE_BUCKET: 'khao-thi-pdfs',
   DATA_SEED_VERSION: '2026-10-29-cap3-hs001-079-clean-v1',
+  DEFAULT_CLASS_GROUPS: [
+    { name: '12A 2K9', grade: 12, schedule: 'Thứ 2 · 4 · 6', note: 'Luyện thi THPT QG · Toán 12' },
+    { name: '12B 2K9', grade: 12, schedule: 'Thứ 3 · 5 · 7', note: 'Luyện thi THPT QG · Toán 12' },
+    { name: '12D', grade: 12, schedule: 'Thứ 2 · 4 · 6', note: 'Luyện thi THPT QG · Toán 12' },
+    { name: '11A 2K10', grade: 11, schedule: 'Thứ 2 · 4 · 6', note: 'Toán 11 Chuyên sâu & Luyện đề' },
+    { name: '11B 2K10', grade: 11, schedule: 'Thứ 3 · 5 · 7', note: 'Toán 11 Chuyên sâu & Luyện đề' },
+    { name: '10A 2K11', grade: 10, schedule: 'Thứ 2 · 4 · 6', note: 'Toán 10 Nền tảng & Vận dụng' },
+    { name: '10B 2K11', grade: 10, schedule: 'Thứ 3 · 5 · 7', note: 'Toán 10 Nền tảng & Vận dụng' },
+    { name: '10C 2K11', grade: 10, schedule: 'Thứ 3 · 5 · 7', note: 'Toán 10 Nền tảng & Vận dụng' },
+    { name: '9 2K12', grade: 9, schedule: 'Thứ 3 · 5 · 7', note: 'Luyện thi Tuyển sinh 9 vào 10' },
+    { name: '8A 2K13', grade: 8, schedule: 'Thứ 2 · 4 · 6', note: 'Toán 8 Đại số & Hình học phẳng' },
+    { name: '8B 2K13', grade: 8, schedule: 'Thứ 3 · 5 · 7', note: 'Toán 8 Đại số & Hình học phẳng' },
+    { name: '7 2K14', grade: 7, schedule: 'Thứ 2 · 4 · 6', note: 'Toán 7 Trực tiếp' },
+    { name: '7 Onl', grade: 7, schedule: 'Thứ 2 · 4 · 6', note: 'Toán 7 Trực tuyến' }
+  ],
   _pdfViewers: {},
   _deferredInstallPrompt: null,
   _enableNodeCloudTest: false,
@@ -132,11 +151,19 @@ const App = {
     studentExamGradeFilter: 'ALL',
     studentExamCategoryFilter: 'ALL',
 
-    // Bộ lọc & Tìm kiếm Tài liệu & Chuyên đề theo Khối 6 – 12
+    // Bộ lọc & Tìm kiếm Bài Tập Về Nhà, Tài liệu & Chuyên đề theo Khối 6 – 12 & Nhóm lớp
     hwSearchQuery: '',
     hwGradeFilter: 'ALL',
+    hwKindFilter: 'ALL',        // 'ALL' | 'homework' | 'document'
+    hwClassFilter: 'ALL',       // 'ALL' hoặc tên nhóm lớp
     studentHwSearchQuery: '',
     studentHwGradeFilter: 'ALL',
+    studentHwKindFilter: 'ALL', // 'ALL' | 'homework' | 'document'
+    deepLinkClassHint: '',
+    hwSubModalClassFilter: 'ALL',
+    hwSubModalStatusFilter: 'ALL',
+    tempPhotoHwImages: [],
+    tempSelectedHwSolFile: null,
 
     // Cấu hình quyền xem điểm, so sánh Lớp/Khối, ẩn danh & giám sát chống thoát màn hình khi thi
     settings: {
@@ -148,6 +175,8 @@ const App = {
       warnOnExitExam: true,              // Cảnh báo & ghi nhận vi phạm khi thoát ra ngoài lúc đang thi (Điện thoại / App / Web)
       warnOnScreenshot: true,            // Phát âm thanh & cảnh báo khi học sinh chụp màn hình lúc đang thi
       rewardCatalog: null,               // Danh mục phần thưởng đổi điểm (null -> dùng DEFAULT_REWARD_CATALOG)
+      classGroups: null,                 // Danh sách nhóm lớp tùy chỉnh của Lớp Toán Anh Chí
+      deletedClassGroups: [],            // Danh sách nhóm lớp mặc định đã xóa
     },
     violationLogs: [],
     studentScoreTab: 'mine',             // 'mine' (Kết quả cá nhân) | 'classBoard' (So sánh Lớp / Khối)
@@ -179,10 +208,12 @@ const App = {
   },
 
   isExamExitWarningEnabled() {
+    if (this.state.activeExam && this.state.activeExam.isHomeworkRoom) return false;
     return !(this.state.settings && this.state.settings.warnOnExitExam === false);
   },
 
   isScreenshotWarningEnabled() {
+    if (this.state.activeExam && this.state.activeExam.isHomeworkRoom) return false;
     return !(this.state.settings && this.state.settings.warnOnScreenshot === false);
   },
 
@@ -467,6 +498,31 @@ const App = {
     });
     const params = new URLSearchParams(window.location.search);
     let urlChanged = false;
+    const tabParam = (params.get('tab') || '').toLowerCase().trim();
+    if (tabParam === 'homeworks' || tabParam === 'homework' || tabParam === 'btvn') {
+      this.state.studentMainTab = 'homeworks';
+      if (tabParam === 'btvn' || tabParam === 'homework') this.state.studentHwKindFilter = 'homework';
+    } else if (tabParam === 'exams' || tabParam === 'grades' || tabParam === 'rewards') {
+      this.state.studentMainTab = tabParam;
+    }
+    const kindParam = (params.get('kind') || '').toLowerCase().trim();
+    if (kindParam === 'homework' || kindParam === 'document') {
+      this.state.studentHwKindFilter = kindParam;
+      this.state.hwKindFilter = kindParam;
+    }
+    const gradeParam = parseInt(params.get('grade') || '', 10);
+    if (Number.isInteger(gradeParam) && gradeParam >= 6 && gradeParam <= 12) {
+      this.state.studentExamGradeFilter = gradeParam;
+      this.state.studentHwGradeFilter = gradeParam;
+      this.state.hwGradeFilter = gradeParam;
+      this.state.examGradeFilter = gradeParam;
+    }
+    const clsParam = (params.get('class') || '').trim();
+    if (clsParam) {
+      this.state.deepLinkClassHint = clsParam;
+      this.state.hwClassFilter = clsParam;
+      this.state.adminClassFilter = clsParam;
+    }
     const installTarget = (params.get('install') || '').toLowerCase();
     if (installTarget === 'ios' || installTarget === 'android' || installTarget === 'app') {
       params.delete('install');
@@ -1143,7 +1199,7 @@ const App = {
   getStudentRewardStats(studentId) {
     const stu = (this.state.students || []).find(s => s && s.studentId === studentId)
       || (this.state.currentUser && this.state.currentUser.studentId === studentId ? this.state.currentUser : null);
-    const subs = (this.state.submissions || []).filter(s => s && s.studentId === studentId && s.scoreResult);
+    const subs = (this.state.submissions || []).filter(s => s && s.studentId === studentId && s.scoreResult && !s.pendingManualGrade);
 
     // Chống spam nộp bài rỗng: mỗi đề chỉ tính lượt làm đạt điểm tích lũy cao nhất
     const bestByExam = new Map();
@@ -1272,9 +1328,15 @@ const App = {
       ex.category = (seedMatch && seedMatch.category) ? seedMatch.category : this.inferExamCategory(ex);
     }
     if (ex.allowed_all === undefined) ex.allowed_all = true;
-    if (!ex.allowed_grades) ex.allowed_grades = [ex.grade || 12];
-    if (!ex.allowed_students) ex.allowed_students = [];
-    if (!ex.access_type) ex.access_type = ex.allowed_all ? 'all' : (ex.allowed_grades.length ? 'grade' : 'custom');
+    if (!Array.isArray(ex.allowed_grades)) ex.allowed_grades = [ex.grade || 12];
+    if (!Array.isArray(ex.allowed_classes)) ex.allowed_classes = [];
+    if (!Array.isArray(ex.allowed_students)) ex.allowed_students = [];
+    if (!ex.access_type) {
+      ex.access_type = ex.allowed_all
+        ? 'all'
+        : (ex.allowed_classes.length ? 'class' : (ex.allowed_grades.length ? 'grade' : 'custom'));
+    }
+    if (ex.access_type !== 'all') ex.allowed_all = false;
     return ex;
   },
 
@@ -1284,6 +1346,9 @@ const App = {
     delete hw.htmlDocKey;
     if (!hw.pdfUrl || /^(tex:|idb_html:)/.test(hw.pdfUrl)) {
       hw.pdfUrl = '';
+    }
+    if (!hw.solutionPdfUrl || /^(tex:|idb_html:)/.test(hw.solutionPdfUrl)) {
+      hw.solutionPdfUrl = '';
     }
     if (!hw.grade) {
       const seedHw = seedHws.find(sh => sh.id === hw.id);
@@ -1295,7 +1360,32 @@ const App = {
         hw.grade = m ? parseInt(m[1], 10) : (/vào\s*(?:lớp\s*)?10/i.test(txt) ? 9 : 12);
       }
     }
-    if (!hw.accessType) hw.accessType = hw.allowedAll ? 'all' : 'selected';
+    const isHwKind = hw.itemKind === 'homework' || hw.hwMode === 'photo' || hw.hwMode === 'interactive';
+    hw.itemKind = isHwKind ? 'homework' : 'document';
+    hw.hwMode = isHwKind ? (hw.hwMode === 'interactive' ? 'interactive' : 'photo') : 'none';
+    hw.dueAt = hw.dueAt ? String(hw.dueAt) : '';
+    hw.maxScore = Number(hw.maxScore || 10) || 10;
+    hw.time_minutes = Math.max(0, parseInt(hw.time_minutes || 0, 10) || 0);
+    hw.allowResubmit = hw.allowResubmit !== false;
+    hw.allowViewSolution = hw.allowViewSolution !== false;
+    hw.solutionFileName = hw.solutionFileName || '';
+    if (!Array.isArray(hw.allowedClasses)) hw.allowedClasses = [];
+    if (!Array.isArray(hw.allowedGrades)) hw.allowedGrades = [Number(hw.grade || 12)];
+    if (!Array.isArray(hw.allowedStudents)) hw.allowedStudents = [];
+    if (!hw.accessType) {
+      hw.accessType = hw.allowedAll
+        ? 'all'
+        : (hw.allowedClasses.length ? 'class' : 'selected');
+    }
+    hw.allowedAll = hw.accessType === 'all';
+    if (!Array.isArray(hw.part1)) hw.part1 = [];
+    if (!Array.isArray(hw.part2)) hw.part2 = [];
+    if (!Array.isArray(hw.part3)) hw.part3 = [];
+    if (!Array.isArray(hw.part4)) hw.part4 = [];
+    if (!hw.scoring || typeof hw.scoring !== 'object') {
+      hw.scoring = { mode: 'equal', p1Total: null, p2Total: null, p3Total: null, p4Total: null };
+    }
+    if (hw.is_active === undefined) hw.is_active = true;
     return hw;
   },
 
@@ -1390,6 +1480,8 @@ const App = {
       warnOnExitExam: true,
       warnOnScreenshot: true,
       rewardCatalog: null,
+      classGroups: null,
+      deletedClassGroups: [],
       peerCompareDefaultLockedV1: true
     };
     const storedSettings = localStorage.getItem('thpt_settings');
@@ -1491,7 +1583,7 @@ const App = {
 
   hasLocalOnlyPdf(item) {
     if (!item || typeof item !== 'object') return false;
-    return [item.pdf_url, item.solution_pdf_url, item.pdfUrl]
+    return [item.pdf_url, item.solution_pdf_url, item.pdfUrl, item.solutionPdfUrl]
       .some(u => typeof u === 'string' && u.startsWith('idb:'));
   },
 
@@ -1694,7 +1786,7 @@ const App = {
       if (candidates.length < 4) {
         const hws = (this.state.homeworks || []).filter(h =>
           h && h.pdfUrl && !String(h.pdfUrl).startsWith('idb:') &&
-          (u.role === 'admin' || h.allowedAll || (Array.isArray(h.allowedStudents) && h.allowedStudents.includes(u.studentId)))
+          (u.role === 'admin' || this.isStudentAllowedHomework(h, u))
         );
         hws.slice(0, 4 - candidates.length).forEach(h => candidates.push({ url: h.pdfUrl, key: h.id }));
       }
@@ -1714,18 +1806,20 @@ const App = {
     }, 450);
   },
 
-  async downloadHomeworkPdf(hwId) {
+  async downloadHomeworkPdf(hwId, isSolution = false) {
     const hw = (this.state.homeworks || []).find(h => h.id === hwId);
     if (!hw) return;
-    const resolved = await this.resolvePdfSourceUrl(hw.pdfUrl, hw.id);
+    const srcUrl = isSolution ? hw.solutionPdfUrl : hw.pdfUrl;
+    const cacheKey = isSolution ? `${hw.id}_sol` : hw.id;
+    const resolved = await this.resolvePdfSourceUrl(srcUrl, cacheKey);
     if (!resolved) {
-      this.notify('Không tải được file PDF của tài liệu này. Vui lòng kiểm tra kết nối mạng!', 'warning', 'Chưa tải được PDF');
+      this.notify('Không tải được file PDF này. Vui lòng kiểm tra kết nối mạng!', 'warning', 'Chưa tải được PDF');
       return;
     }
     if (typeof document !== 'undefined') {
       const a = document.createElement('a');
       a.href = resolved;
-      a.download = hw.fileName || `${hw.id}.pdf`;
+      a.download = (isSolution ? hw.solutionFileName : hw.fileName) || `${cacheKey}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1755,7 +1849,10 @@ const App = {
         s?.totalScore ?? s?.scoreResult?.totalScore,
         s?.tabSwitches,
         s?.screenshotCount,
-        s?.answers?.part4Scores || null
+        s?.answers?.part4Scores || null,
+        s?.teacherScore ?? null,
+        s?.teacherComment || '',
+        s?.pendingManualGrade ? 1 : 0
       ])
     }));
   },
@@ -1909,20 +2006,20 @@ const App = {
       }
     }
 
-    // 5. Gộp Lượt nộp bài (Union theo id, ưu tiên bản có updatedAt mới hơn hoặc đã chấm điểm Tự luận)
+    // 5. Gộp Lượt nộp bài (Union theo id, ưu tiên bản có updatedAt mới hơn hoặc đã chấm điểm Tự luận / BTVN)
     if (Array.isArray(cloud.submissions)) {
       const subMap = new Map();
-      (this.state.submissions || []).forEach(s => { if (s && s.id) subMap.set(s.id, s); });
+      (this.state.submissions || []).forEach(s => { if (s && s.id && !delSet.has(s.id)) subMap.set(s.id, s); });
       cloud.submissions.forEach(cs => {
-        if (!cs || !cs.id) return;
+        if (!cs || !cs.id || delSet.has(cs.id)) return;
         const cur = subMap.get(cs.id);
         if (!cur) {
           subMap.set(cs.id, cs);
         } else {
           const incTime = Date.parse(cs.updatedAt || cs.submittedAt || '') || 0;
           const curTime = Date.parse(cur.updatedAt || cur.submittedAt || '') || 0;
-          const incGraded = cs.answers && cs.answers.part4Scores && Object.keys(cs.answers.part4Scores).length > 0;
-          const curGraded = cur.answers && cur.answers.part4Scores && Object.keys(cur.answers.part4Scores).length > 0;
+          const incGraded = Boolean((cs.answers && cs.answers.part4Scores && Object.keys(cs.answers.part4Scores).length > 0) || cs.gradedAt || (cs.isHomework && !cs.pendingManualGrade && cs.teacherScore !== undefined));
+          const curGraded = Boolean((cur.answers && cur.answers.part4Scores && Object.keys(cur.answers.part4Scores).length > 0) || cur.gradedAt || (cur.isHomework && !cur.pendingManualGrade && cur.teacherScore !== undefined));
           if (incTime > curTime || (incGraded && !curGraded)) subMap.set(cs.id, cs);
         }
       });
@@ -2174,6 +2271,9 @@ const App = {
         for (const hw of (this.state.homeworks || [])) {
           if (hw.pdfUrl && String(hw.pdfUrl).startsWith('idb:')) {
             uploadJobs.push(uploadSlotIfNeeded(hw.pdfUrl, hw.id).then((u) => { hw.pdfUrl = u; }));
+          }
+          if (hw.solutionPdfUrl && String(hw.solutionPdfUrl).startsWith('idb:')) {
+            uploadJobs.push(uploadSlotIfNeeded(hw.solutionPdfUrl, `${hw.id}_sol`).then((u) => { hw.solutionPdfUrl = u; }));
           }
         }
         if (uploadJobs.length > 0) {
@@ -3577,7 +3677,7 @@ const App = {
             </button>
           </div>
 
-          <!-- Card Giới thiệu Website Thầy Huỳnh Thanh Chí (https://thanhchi113.github.io/Chi-GV-Toan/) -->
+          <!-- Card Giới thiệu Website Thầy Huỳnh Thanh Chí (https://thanhchi113.github.io/) -->
           <div class="mt-4 bg-gradient-to-r from-amber-50/90 via-white to-red-50/70 p-4 rounded-2xl border border-amber-200/80 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left">
             <div class="flex items-center gap-3 min-w-0">
               <div class="w-11 h-11 rounded-2xl bg-[#650f12] text-[#fbf7ef] flex items-center justify-center font-serif font-black text-xl shadow-md shrink-0 border border-amber-300/40">
@@ -3588,14 +3688,14 @@ const App = {
                   <span class="font-bold text-xs text-slate-900 font-serif">Thầy Huỳnh Thanh Chí</span>
                   <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-200">Lớp Toán Anh Chí</span>
                 </div>
-                <p class="text-[11px] text-slate-600 mt-0.5">Website chính thức: Lịch các lớp Toán 6–12, bảng vàng thành tích &amp; tài liệu PDF</p>
+                <p class="text-[11px] text-slate-600 mt-0.5">Website chính thức: Lịch 13 ca lớp Toán 6–12, BTVN theo nhóm lớp &amp; tài liệu PDF • Zalo ${this.TEACHER_PHONE}</p>
               </div>
             </div>
             <div class="flex items-center gap-2 w-full sm:w-auto shrink-0">
               <button type="button" onclick="App.showTeacherIntroModal()" class="flex-1 sm:flex-none ui-btn bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs">
                 <i class="fa-solid fa-circle-info text-indigo-600"></i><span>Giới thiệu</span>
               </button>
-              <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="flex-1 sm:flex-none ui-btn bg-[#650f12] hover:bg-[#4d0b0d] text-white text-xs font-bold shadow-xs">
+              <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="flex-1 sm:flex-none ui-btn bg-[#650f12] hover:bg-[#4d0b0d] text-white text-xs font-bold shadow-xs">
                 <i class="fa-solid fa-globe"></i><span>Mở Website</span>
                 <i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-75"></i>
               </a>
@@ -3605,14 +3705,16 @@ const App = {
           <!-- Footer Liên kết Website Thầy Chí -->
           <footer class="mt-6 text-center text-xs text-slate-500 space-y-1">
             <div>
-              &copy; 2026 Lớp Toán Anh Chí — <strong>Thầy Huỳnh Thanh Chí</strong> · Khối 6 – 12
+              &copy; 2026 Lớp Toán Anh Chí — <strong>Thầy Huỳnh Thanh Chí</strong> · Khối 6 – 12 · Zalo: <a href="https://zalo.me/0905957716" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 font-semibold">${this.TEACHER_PHONE}</a>
             </div>
-            <div class="flex items-center justify-center gap-3 text-[11px] text-slate-400">
-              <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Website chính thức</a>
+            <div class="flex items-center justify-center flex-wrap gap-2.5 text-[11px] text-slate-400">
+              <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Website chính thức</a>
               <span>•</span>
-              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Lịch các lớp</a>
+              <a href="https://thanhchi113.github.io/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Lịch các lớp</a>
               <span>•</span>
-              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Bảng vàng 9+</a>
+              <a href="https://thanhchi113.github.io/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Bảng vàng 9+</a>
+              <span>•</span>
+              <a href="https://thanhchi113.github.io/tai-lieu.html" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Tài liệu PDF</a>
             </div>
           </footer>
         </div>
@@ -3670,24 +3772,108 @@ const App = {
     return m ? parseInt(m[1], 10) : 12;
   },
 
+  normalizeClassKey(cls) {
+    return String(cls || '').trim().replace(/\s+/g, ' ').toUpperCase();
+  },
+
+  isSameClassName(a, b) {
+    const ka = this.normalizeClassKey(a);
+    const kb = this.normalizeClassKey(b);
+    return Boolean(ka && kb && ka === kb);
+  },
+
+  getClassGroups() {
+    const deletedSet = new Set(
+      (Array.isArray(this.state.settings?.deletedClassGroups) ? this.state.settings.deletedClassGroups : [])
+        .map(c => this.normalizeClassKey(c))
+        .filter(Boolean)
+    );
+    const customList = Array.isArray(this.state.settings?.classGroups) ? this.state.settings.classGroups : null;
+    const baseSource = customList && customList.length > 0 ? customList : this.DEFAULT_CLASS_GROUPS;
+
+    const groupMap = new Map();
+    const putGroup = (g, isExplicitCustom = false) => {
+      if (!g || !g.name) return;
+      const cleanName = String(g.name).trim().replace(/\s+/g, ' ');
+      const key = this.normalizeClassKey(cleanName);
+      if (!key) return;
+      if (!isExplicitCustom && deletedSet.has(key)) return;
+      if (!groupMap.has(key)) {
+        const inferredGrade = Number.isInteger(Number(g.grade)) && Number(g.grade) >= 6 && Number(g.grade) <= 12
+          ? Number(g.grade)
+          : this.getStudentGrade({ className: cleanName });
+        groupMap.set(key, {
+          name: cleanName,
+          grade: inferredGrade,
+          schedule: String(g.schedule || '').trim(),
+          note: String(g.note || '').trim(),
+          studentCount: 0
+        });
+      }
+    };
+
+    (baseSource || []).forEach(g => putGroup(g, Boolean(customList)));
+    if (customList) {
+      (this.DEFAULT_CLASS_GROUPS || []).forEach(g => putGroup(g, false));
+    }
+
+    (this.state.students || []).forEach(st => {
+      const clsName = String(st?.className || '').trim().replace(/\s+/g, ' ');
+      if (!clsName) return;
+      const key = this.normalizeClassKey(clsName);
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          name: clsName,
+          grade: this.getStudentGrade(st),
+          schedule: '',
+          note: 'Nhóm lớp từ danh sách học sinh',
+          studentCount: 0
+        });
+      }
+      groupMap.get(key).studentCount += 1;
+    });
+
+    return Array.from(groupMap.values()).sort((a, b) =>
+      (b.grade - a.grade) || a.name.localeCompare(b.name, 'vi')
+    );
+  },
+
+  getClassGroupsDatalistHtml(id = 'allClassGroupsDatalist') {
+    const groups = this.getClassGroups();
+    return `<datalist id="${id}">${groups.map(g => `<option value="${this.escapeHtmlAttr(g.name)}">Khối ${g.grade}${g.schedule ? ' · ' + this.escapeHtmlAttr(g.schedule) : ''} (${g.studentCount} HS)</option>`).join('')}</datalist>`;
+  },
+
   syncGradeFromClassInput(clsValue, gradeSelectId) {
-    const m = String(clsValue || '').match(/(?:^|\D)(1[0-2]|[6-9])(?=\D|$)/);
     const sel = document.getElementById(gradeSelectId);
-    if (m && sel) sel.value = String(parseInt(m[1], 10));
+    if (!sel) return;
+    const found = this.getClassGroups().find(g => this.isSameClassName(g.name, clsValue));
+    if (found) {
+      sel.value = String(found.grade);
+      return;
+    }
+    const m = String(clsValue || '').match(/(?:^|\D)(1[0-2]|[6-9])(?=\D|$)/);
+    if (m) sel.value = String(parseInt(m[1], 10));
   },
 
   syncClassFromGradeSelect(gradeValue, classInputId) {
     const inp = document.getElementById(classInputId);
     if (!inp) return;
-    if (/^(1[0-2]|[6-9])A1$/i.test(inp.value.trim())) {
-      inp.value = `${gradeValue}A1`;
+    const curVal = inp.value.trim();
+    const gNum = parseInt(gradeValue, 10);
+    const matchingGroup = this.getClassGroups().find(g => g.grade === gNum);
+    if (!curVal || /^(1[0-2]|[6-9])A1$/i.test(curVal)) {
+      inp.value = matchingGroup ? matchingGroup.name : `${gradeValue}A1`;
     }
   },
 
-  // Kiểm tra quyền dự thi của học sinh theo 3 chế độ: Tất cả / Theo khối (6-12) / Chỉ định
+  // Kiểm tra quyền dự thi của học sinh theo 4 chế độ: Tất cả / Theo nhóm lớp / Theo khối (6-12) / Chỉ định
   isStudentAllowedExam(ex, u) {
     if (!ex || !ex.is_active || !u) return false;
-    if (ex.allowed_all) return true;
+    if (ex.allowed_all || ex.access_type === 'all') return true;
+    if (ex.access_type === 'class') {
+      const myCls = u.className || '';
+      return Array.isArray(ex.allowed_classes) && ex.allowed_classes.some(c => this.isSameClassName(c, myCls));
+    }
     const studentGrade = this.getStudentGrade(u);
     if (ex.access_type === 'grade') {
       return Array.isArray(ex.allowed_grades) && ex.allowed_grades.map(Number).includes(studentGrade);
@@ -3695,7 +3881,7 @@ const App = {
     return Array.isArray(ex.allowed_students) && ex.allowed_students.includes(u.studentId);
   },
 
-  // Tìm kiếm đề thi theo tên đề, đợt thi, loại đề (GK/CK/Vào 10/THPT QG), tên file PDF đề/đáp án, mã đề, khối lớp
+  // Tìm kiếm đề thi theo tên đề, đợt thi, loại đề, nhóm lớp, tên file PDF đề/đáp án, mã đề, khối lớp
   matchExamSearch(ex, query) {
     if (!query) return true;
     const q = String(query).toLowerCase().trim();
@@ -3712,16 +3898,24 @@ const App = {
       catMeta.label,
       catMeta.short,
       ex.category,
+      ...(Array.isArray(ex.allowed_classes) ? ex.allowed_classes : []),
       `khối ${ex.grade || 12}`,
       `lớp ${ex.grade || 12}`
     ].some(v => v && String(v).toLowerCase().includes(q));
   },
 
   isStudentAllowedHomework(hw, u) {
-    if (!hw || !u) return false;
+    if (!hw || hw.is_active === false || !u) return false;
     if (hw.allowedAll || hw.accessType === 'all') return true;
+    if (hw.accessType === 'class') {
+      const myCls = u.className || '';
+      return Array.isArray(hw.allowedClasses) && hw.allowedClasses.some(c => this.isSameClassName(c, myCls));
+    }
     const studentGrade = this.getStudentGrade(u);
-    if (hw.accessType === 'grade') return Number(hw.grade || 12) === studentGrade;
+    if (hw.accessType === 'grade') {
+      const gList = Array.isArray(hw.allowedGrades) && hw.allowedGrades.length ? hw.allowedGrades.map(Number) : [Number(hw.grade || 12)];
+      return gList.includes(studentGrade);
+    }
     return Array.isArray(hw.allowedStudents) && hw.allowedStudents.includes(u.studentId);
   },
 
@@ -3733,11 +3927,596 @@ const App = {
       hw.title,
       hw.description,
       hw.fileName,
+      hw.solutionFileName,
       hw.id,
+      hw.itemKind === 'homework' ? 'bài tập về nhà btvn' : 'tài liệu chuyên đề',
+      ...(Array.isArray(hw.allowedClasses) ? hw.allowedClasses : []),
       `khối ${hw.grade || 12}`,
       `lớp ${hw.grade || 12}`,
       `toán ${hw.grade || 12}`
     ].some(v => v && String(v).toLowerCase().includes(q));
+  },
+
+  isHomeworkSubmission(sub) {
+    return Boolean(sub && (sub.isHomework || String(sub.id || '').startsWith('HWSUB-') || String(sub.examId || '').startsWith('HW-')));
+  },
+
+  buildPhotoHomeworkScoreResult(maxScore = 10, teacherScore = null, pending = true) {
+    const maxTotal = Number(maxScore || 10) || 10;
+    const hasScore = !pending && teacherScore !== null && teacherScore !== undefined && teacherScore !== '' && !Number.isNaN(Number(teacherScore));
+    const sc = hasScore ? +Math.max(0, Math.min(maxTotal, Number(teacherScore))).toFixed(2) : 0;
+    const pct = maxTotal > 0 ? +((sc / maxTotal) * 100).toFixed(1) : 0;
+    let rank = 'Chờ chấm';
+    if (hasScore) {
+      if (pct >= 90) rank = 'Xuất sắc';
+      else if (pct >= 80) rank = 'Giỏi';
+      else if (pct >= 65) rank = 'Khá';
+      else if (pct >= 50) rank = 'Trung bình';
+      else rank = 'Cần cố gắng';
+    }
+    return {
+      totalScore: sc,
+      maxTotal,
+      percentage: pct,
+      rank,
+      part1: { score: 0, maxScore: 0, correctCount: 0, totalQuestions: 0, details: {} },
+      part2: { score: 0, maxScore: 0, details: {} },
+      part3: { score: 0, maxScore: 0, correctCount: 0, totalQuestions: 0, details: {} },
+      part4: { score: sc, maxScore: maxTotal, totalQuestions: 1, gradedCount: hasScore ? 1 : 0, pendingManual: !hasScore, details: {} }
+    };
+  },
+
+  getHomeworkAsExamObject(hw) {
+    if (!hw) return null;
+    const tMin = Math.max(0, parseInt(hw.time_minutes || 0, 10) || 0);
+    return {
+      ...hw,
+      id: hw.id,
+      title: hw.title,
+      grade: Number(hw.grade || 12),
+      pdf_url: hw.pdfUrl || '',
+      pdf_name: hw.fileName || '',
+      solution_pdf_url: hw.solutionPdfUrl || '',
+      solution_pdf_name: hw.solutionFileName || '',
+      allow_view_answers: hw.allowViewSolution !== false,
+      time_minutes: tMin > 0 ? tMin : 90,
+      noTimeLimit: tMin <= 0,
+      isHomeworkRoom: true,
+      homeworkRefId: hw.id,
+      part1: Array.isArray(hw.part1) ? hw.part1 : [],
+      part2: Array.isArray(hw.part2) ? hw.part2 : [],
+      part3: Array.isArray(hw.part3) ? hw.part3 : [],
+      part4: Array.isArray(hw.part4) ? hw.part4 : [],
+      scoring: hw.scoring || { mode: 'equal', p1Total: null, p2Total: null, p3Total: null, p4Total: null }
+    };
+  },
+
+  resolveSubmissionExamOrHw(sub) {
+    if (!sub) return SAMPLE_EXAM_2027;
+    const foundExam = (this.state.exams || []).find(e => e && e.id === sub.examId);
+    if (foundExam) return foundExam;
+    const hwId = sub.homeworkId || sub.examId;
+    const foundHw = (this.state.homeworks || []).find(h => h && h.id === hwId);
+    if (foundHw) return this.getHomeworkAsExamObject(foundHw);
+    return SAMPLE_EXAM_2027;
+  },
+
+  getHomeworkDueStatus(hw, referenceIso = null) {
+    if (!hw || !hw.dueAt) {
+      return {
+        hasDue: false,
+        isOverdue: false,
+        isSoon: false,
+        dueFormatted: '',
+        label: 'Không giới hạn hạn nộp',
+        badgeCls: 'bg-slate-100 text-slate-600 border-slate-200'
+      };
+    }
+    const dueMs = Date.parse(hw.dueAt);
+    if (!dueMs || Number.isNaN(dueMs)) {
+      return {
+        hasDue: false,
+        isOverdue: false,
+        isSoon: false,
+        dueFormatted: String(hw.dueAt),
+        label: `Hạn nộp: ${hw.dueAt}`,
+        badgeCls: 'bg-slate-100 text-slate-600 border-slate-200'
+      };
+    }
+    const dueFormatted = new Date(dueMs).toLocaleString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+    const refMs = referenceIso ? (Date.parse(referenceIso) || Date.now()) : Date.now();
+    const diff = dueMs - refMs;
+    if (diff < 0) {
+      return {
+        hasDue: true,
+        dueMs,
+        isOverdue: true,
+        isSoon: false,
+        dueFormatted,
+        label: `Quá hạn (${dueFormatted})`,
+        badgeCls: 'bg-rose-50 text-rose-700 border-rose-200'
+      };
+    }
+    if (diff <= 24 * 3600 * 1000) {
+      const hrs = Math.max(1, Math.ceil(diff / 3600000));
+      return {
+        hasDue: true,
+        dueMs,
+        isOverdue: false,
+        isSoon: true,
+        dueFormatted,
+        label: `Sắp hết hạn • còn ~${hrs}h (${dueFormatted})`,
+        badgeCls: 'bg-amber-50 text-amber-800 border-amber-200'
+      };
+    }
+    return {
+      hasDue: true,
+      dueMs,
+      isOverdue: false,
+      isSoon: false,
+      dueFormatted,
+      label: `Hạn nộp: ${dueFormatted}`,
+      badgeCls: 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    };
+  },
+
+  getHomeworkTargetStudents(hw) {
+    return (this.state.students || []).filter(st => st && st.status !== 'locked' && this.isStudentAllowedHomework(hw, st));
+  },
+
+  getStudentLatestHwSubmission(hwId, studentId) {
+    const matches = (this.state.submissions || []).filter(s =>
+      s && s.studentId === studentId && (s.homeworkId === hwId || s.examId === hwId)
+    );
+    if (matches.length === 0) return null;
+    return matches.sort((a, b) => (Date.parse(b.submittedAt || '') || 0) - (Date.parse(a.submittedAt || '') || 0))[0];
+  },
+
+  // --- QUẢN LÝ NHÓM LỚP ĐỒNG BỘ VỚI WEBSITE CHÍNH THỨC ---
+  showClassGroupsModal() {
+    if (typeof document === 'undefined') return;
+    const existing = document.getElementById('classGroupsModal');
+    if (existing) existing.remove();
+
+    const groups = this.getClassGroups();
+    const modal = document.createElement('div');
+    modal.id = 'classGroupsModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-[#fbf7ef] via-white to-indigo-50/50 flex items-center justify-between gap-2 shrink-0">
+          <div class="flex items-center space-x-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-[#650f12] text-[#fbf7ef] flex items-center justify-center shadow-sm shrink-0">
+              <i class="fa-solid fa-chalkboard-user text-base"></i>
+            </div>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900">Quản Lý Nhóm Lớp (${groups.length} nhóm lớp)</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Đồng bộ danh sách ca lớp với Website Lớp Toán Anh Chí • Thêm, sửa lịch học, đổi tên lớp hoặc giao BTVN nhanh</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button type="button" onclick="App.showBulkMoveClassModal()" class="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold cursor-pointer inline-flex items-center gap-1.5">
+              <i class="fa-solid fa-people-arrows"></i><span class="hidden sm:inline">Chuyển lớp hàng loạt</span><span class="sm:hidden">Chuyển lớp</span>
+            </button>
+            <button type="button" onclick="document.getElementById('classGroupsModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer">
+              <i class="fa-solid fa-xmark text-base"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5 text-xs">
+          <!-- Form thêm / cập nhật nhóm lớp -->
+          <form onsubmit="event.preventDefault(); App.handleSaveClassGroup();" class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <span id="classGroupFormHeading" class="font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <i class="fa-solid fa-plus-circle text-indigo-600"></i><span>Thêm mới hoặc cập nhật nhóm lớp</span>
+              </span>
+              <input type="hidden" id="editingClassOriginalName" value="">
+              <button type="button" id="cancelEditClassGroupBtn" onclick="App.resetClassGroupForm()" class="hidden text-[11px] font-bold text-slate-500 hover:text-slate-800 underline cursor-pointer">Hủy chế độ sửa</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+              <div class="sm:col-span-3">
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">Tên nhóm lớp *</label>
+                <input type="text" id="cgInputName" required placeholder="VD: 12A 2K9" oninput="App.syncGradeFromClassInput(this.value, 'cgInputGrade')" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:border-indigo-600 outline-none">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">Khối *</label>
+                <select id="cgInputGrade" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-bold text-indigo-700 focus:border-indigo-600 outline-none cursor-pointer">
+                  ${[6, 7, 8, 9, 10, 11, 12].map(g => `<option value="${g}" ${g === 12 ? 'selected' : ''}>Khối ${g}</option>`).join('')}
+                </select>
+              </div>
+              <div class="sm:col-span-3">
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">Lịch học</label>
+                <input type="text" id="cgInputSchedule" placeholder="VD: Thứ 2 · 4 · 6 (17h30)" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-semibold text-slate-700 focus:border-indigo-600 outline-none">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">Ghi chú</label>
+                <input type="text" id="cgInputNote" placeholder="VD: Luyện đề 9+" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 focus:border-indigo-600 outline-none">
+              </div>
+              <div class="sm:col-span-2 flex items-end">
+                <button type="submit" id="cgSubmitBtn" class="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-xs transition cursor-pointer flex items-center justify-center gap-1.5">
+                  <i class="fa-solid fa-floppy-disk"></i><span>Lưu Lớp</span>
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <!-- Danh sách các nhóm lớp hiện có -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            ${groups.map(g => {
+              const safeAttr = this.escapeHtmlAttr(g.name);
+              const safeJs = g.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+              const hwCount = (this.state.homeworks || []).filter(hw => hw.itemKind === 'homework' && ((hw.accessType === 'class' && (hw.allowedClasses || []).some(c => this.isSameClassName(c, g.name))) || hw.accessType === 'all' || (hw.accessType === 'grade' && Number(hw.grade) === g.grade))).length;
+              return `
+                <div class="p-4 rounded-2xl border border-slate-200 bg-white hover:border-indigo-200 transition flex flex-col justify-between gap-3 shadow-2xs">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="px-2 py-0.5 rounded-lg bg-indigo-600 text-white font-extrabold text-[11px]">Khối ${g.grade}</span>
+                        <h4 class="font-extrabold text-sm text-slate-900">${safeAttr}</h4>
+                        <span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]">${g.studentCount} HS</span>
+                        <span class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[10px]">${hwCount} BTVN</span>
+                      </div>
+                      <div class="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        ${g.schedule ? `<span><i class="fa-regular fa-calendar text-indigo-500 mr-1"></i>${this.escapeHtmlAttr(g.schedule)}</span>` : '<span class="italic text-slate-400">Chưa ghi lịch học</span>'}
+                        ${g.note ? `<span>• ${this.escapeHtmlAttr(g.note)}</span>` : ''}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-1.5">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <button type="button" onclick="App.quickAssignHomeworkToClass('${safeJs}')" class="px-2.5 py-1.5 rounded-lg bg-[#650f12] hover:bg-[#4d0b0d] text-white font-bold text-[11px] cursor-pointer inline-flex items-center gap-1">
+                        <i class="fa-solid fa-paper-plane text-[10px]"></i><span>Giao BTVN</span>
+                      </button>
+                      <button type="button" onclick="document.getElementById('classGroupsModal')?.remove(); App.setAdminMainTab('students'); App.onStudentFilterInput('class', '${safeJs}');" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[11px] cursor-pointer inline-flex items-center gap-1">
+                        <i class="fa-solid fa-users text-[10px]"></i><span>Xem HS</span>
+                      </button>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <button type="button" onclick="App.editClassGroupIntoForm('${safeJs}')" class="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] cursor-pointer" title="Sửa hoặc đổi tên nhóm lớp">
+                        <i class="fa-solid fa-pen"></i><span>Sửa / Đổi tên</span>
+                      </button>
+                      ${g.studentCount === 0 ? `
+                        <button type="button" onclick="App.deleteClassGroup('${safeJs}')" class="px-2 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-[11px] cursor-pointer" title="Xóa nhóm lớp trống">
+                          <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                      ` : ''}
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+    this.openModalElement(modal, Boolean(existing));
+  },
+
+  editClassGroupIntoForm(className) {
+    const g = this.getClassGroups().find(x => this.isSameClassName(x.name, className));
+    if (!g) return;
+    const origEl = document.getElementById('editingClassOriginalName');
+    const nameEl = document.getElementById('cgInputName');
+    const gradeEl = document.getElementById('cgInputGrade');
+    const schEl = document.getElementById('cgInputSchedule');
+    const noteEl = document.getElementById('cgInputNote');
+    const headEl = document.getElementById('classGroupFormHeading');
+    const cancelBtn = document.getElementById('cancelEditClassGroupBtn');
+    if (origEl) origEl.value = g.name;
+    if (nameEl) { nameEl.value = g.name; nameEl.focus(); }
+    if (gradeEl) gradeEl.value = String(g.grade);
+    if (schEl) schEl.value = g.schedule || '';
+    if (noteEl) noteEl.value = g.note || '';
+    if (headEl) headEl.innerHTML = `<i class="fa-solid fa-pen-to-square text-amber-600"></i><span>Đang sửa nhóm lớp: ${this.escapeHtmlAttr(g.name)} (đổi tên sẽ tự đồng bộ HS, Đề thi &amp; BTVN)</span>`;
+    if (cancelBtn) cancelBtn.classList.remove('hidden');
+  },
+
+  resetClassGroupForm() {
+    const origEl = document.getElementById('editingClassOriginalName');
+    const nameEl = document.getElementById('cgInputName');
+    const schEl = document.getElementById('cgInputSchedule');
+    const noteEl = document.getElementById('cgInputNote');
+    const headEl = document.getElementById('classGroupFormHeading');
+    const cancelBtn = document.getElementById('cancelEditClassGroupBtn');
+    if (origEl) origEl.value = '';
+    if (nameEl) nameEl.value = '';
+    if (schEl) schEl.value = '';
+    if (noteEl) noteEl.value = '';
+    if (headEl) headEl.innerHTML = '<i class="fa-solid fa-plus-circle text-indigo-600"></i><span>Thêm mới hoặc cập nhật nhóm lớp</span>';
+    if (cancelBtn) cancelBtn.classList.add('hidden');
+  },
+
+  handleSaveClassGroup() {
+    const origName = (document.getElementById('editingClassOriginalName')?.value || '').trim();
+    const rawName = (document.getElementById('cgInputName')?.value || '').trim().replace(/\s+/g, ' ');
+    const grade = parseInt(document.getElementById('cgInputGrade')?.value || '12', 10) || 12;
+    const schedule = (document.getElementById('cgInputSchedule')?.value || '').trim();
+    const note = (document.getElementById('cgInputNote')?.value || '').trim();
+    if (!rawName) return false;
+
+    if (!this.state.settings) this.state.settings = {};
+    const currentGroups = this.getClassGroups().map(g => ({
+      name: g.name,
+      grade: g.grade,
+      schedule: g.schedule || '',
+      note: g.note || ''
+    }));
+
+    if (origName && !this.isSameClassName(origName, rawName)) {
+      this.renameClassGroupInternal(origName, rawName, grade, schedule, note, currentGroups);
+    } else {
+      const targetKey = this.normalizeClassKey(origName || rawName);
+      const idx = currentGroups.findIndex(g => this.normalizeClassKey(g.name) === targetKey);
+      const record = { name: rawName, grade, schedule, note };
+      if (idx >= 0) currentGroups[idx] = record;
+      else currentGroups.push(record);
+      this.state.settings.classGroups = currentGroups;
+      if (Array.isArray(this.state.settings.deletedClassGroups)) {
+        this.state.settings.deletedClassGroups = this.state.settings.deletedClassGroups.filter(
+          c => !this.isSameClassName(c, rawName)
+        );
+      }
+      this.saveData({ markAdminDirty: true });
+      this.notify(`Đã lưu thông tin nhóm lớp "${rawName}" (Khối ${grade})!`, 'success', 'Lưu nhóm lớp thành công');
+    }
+
+    if (typeof document !== 'undefined' && document.getElementById('classGroupsModal')) {
+      this.showClassGroupsModal();
+    }
+    this.renderPreservingScroll();
+    return true;
+  },
+
+  renameClassGroupInternal(oldName, newName, newGrade = null, newSchedule = null, newNote = null, baseGroups = null) {
+    const cleanNew = String(newName || '').trim().replace(/\s+/g, ' ');
+    if (!oldName || !cleanNew) return 0;
+    if (!this.state.settings) this.state.settings = {};
+
+    const groups = baseGroups || this.getClassGroups().map(g => ({
+      name: g.name,
+      grade: g.grade,
+      schedule: g.schedule || '',
+      note: g.note || ''
+    }));
+
+    const oldKey = this.normalizeClassKey(oldName);
+    const newKey = this.normalizeClassKey(cleanNew);
+    const nextGroups = [];
+    let merged = false;
+
+    groups.forEach(g => {
+      const gk = this.normalizeClassKey(g.name);
+      if (gk === oldKey || gk === newKey) {
+        if (!merged) {
+          nextGroups.push({
+            name: cleanNew,
+            grade: newGrade || g.grade || 12,
+            schedule: newSchedule !== null ? newSchedule : (g.schedule || ''),
+            note: newNote !== null ? newNote : (g.note || '')
+          });
+          merged = true;
+        }
+      } else {
+        nextGroups.push(g);
+      }
+    });
+    if (!merged) {
+      nextGroups.push({
+        name: cleanNew,
+        grade: newGrade || 12,
+        schedule: newSchedule || '',
+        note: newNote || ''
+      });
+    }
+    this.state.settings.classGroups = nextGroups;
+
+    const delList = Array.isArray(this.state.settings.deletedClassGroups) ? [...this.state.settings.deletedClassGroups] : [];
+    if (!delList.some(c => this.isSameClassName(c, oldName))) delList.push(oldName);
+    this.state.settings.deletedClassGroups = delList.filter(c => !this.isSameClassName(c, cleanNew));
+
+    const nowIso = new Date().toISOString();
+    let movedStudents = 0;
+    (this.state.students || []).forEach(st => {
+      if (st && this.isSameClassName(st.className, oldName)) {
+        st.className = cleanNew;
+        if (newGrade) st.grade = newGrade;
+        st.updatedAt = nowIso;
+        movedStudents++;
+      }
+    });
+
+    (this.state.exams || []).forEach(ex => {
+      if (Array.isArray(ex?.allowed_classes)) {
+        ex.allowed_classes = [...new Set(ex.allowed_classes.map(c => this.isSameClassName(c, oldName) ? cleanNew : c))];
+      }
+    });
+
+    (this.state.homeworks || []).forEach(hw => {
+      if (Array.isArray(hw?.allowedClasses)) {
+        hw.allowedClasses = [...new Set(hw.allowedClasses.map(c => this.isSameClassName(c, oldName) ? cleanNew : c))];
+      }
+    });
+
+    if (this.isSameClassName(this.state.adminClassFilter, oldName)) this.state.adminClassFilter = cleanNew;
+    if (this.isSameClassName(this.state.studentClassFilter, oldName)) this.state.studentClassFilter = cleanNew;
+    if (this.isSameClassName(this.state.hwClassFilter, oldName)) this.state.hwClassFilter = cleanNew;
+
+    this.saveData({ markAdminDirty: true });
+    this.notify(`Đã đổi tên lớp "${oldName}" thành "${cleanNew}" và đồng bộ ${movedStudents} học sinh cùng toàn bộ Đề thi / BTVN!`, 'success', 'Đổi tên nhóm lớp thành công');
+    return movedStudents;
+  },
+
+  deleteClassGroup(className) {
+    const group = this.getClassGroups().find(g => this.isSameClassName(g.name, className));
+    if (!group) return false;
+    if (group.studentCount > 0) {
+      this.notify(`Nhóm lớp "${group.name}" đang có ${group.studentCount} học sinh. Hãy chuyển học sinh sang lớp khác trước khi xóa!`, 'warning', 'Không thể xóa lớp đang có học sinh');
+      return false;
+    }
+    if (!this.state.settings) this.state.settings = {};
+    const remaining = this.getClassGroups()
+      .filter(g => !this.isSameClassName(g.name, className))
+      .map(g => ({ name: g.name, grade: g.grade, schedule: g.schedule || '', note: g.note || '' }));
+    this.state.settings.classGroups = remaining;
+    if (!Array.isArray(this.state.settings.deletedClassGroups)) this.state.settings.deletedClassGroups = [];
+    if (!this.state.settings.deletedClassGroups.some(c => this.isSameClassName(c, className))) {
+      this.state.settings.deletedClassGroups.push(className);
+    }
+    this.saveData({ markAdminDirty: true });
+    if (typeof document !== 'undefined' && document.getElementById('classGroupsModal')) {
+      this.showClassGroupsModal();
+    }
+    this.renderPreservingScroll();
+    this.notify(`Đã xóa nhóm lớp trống "${className}".`, 'success', 'Đã xóa nhóm lớp');
+    return true;
+  },
+
+  quickAssignHomeworkToClass(className) {
+    if (typeof document !== 'undefined') {
+      document.getElementById('classGroupsModal')?.remove();
+    }
+    const found = this.getClassGroups().find(g => this.isSameClassName(g.name, className));
+    this.state.adminMainTab = 'homeworks';
+    this.render();
+    this.showAddHomeworkModal({
+      itemKind: 'homework',
+      hwMode: 'photo',
+      accessType: 'class',
+      preselectedClass: found ? found.name : className,
+      grade: found ? found.grade : 12
+    });
+  },
+
+  showBulkMoveClassModal(defaultTargetClass = '') {
+    if (typeof document === 'undefined') return;
+    document.getElementById('classGroupsModal')?.remove();
+    document.getElementById('bulkMoveClassModal')?.remove();
+
+    const groups = this.getClassGroups();
+    const targetCls = defaultTargetClass || (groups[0] ? groups[0].name : '12A 2K9');
+    const modal = document.createElement('div');
+    modal.id = 'bulkMoveClassModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[88vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between gap-2 shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+              <i class="fa-solid fa-people-arrows"></i>
+            </div>
+            <div>
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900">Xếp / Chuyển Nhóm Lớp Hàng Loạt</h3>
+              <p class="text-xs text-slate-500">Chọn học sinh và chuyển nhanh vào đúng ca lớp (tự động đồng bộ khối lớp)</p>
+            </div>
+          </div>
+          <button type="button" onclick="document.getElementById('bulkMoveClassModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        <form id="bulkMoveClassForm" onsubmit="event.preventDefault(); App.handleBulkMoveClassSubmit();" class="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+          <div class="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="sm:col-span-2">
+              <label class="block font-bold text-indigo-950 mb-1">Nhóm lớp chuyển đến *</label>
+              <input type="text" id="bulkMoveTargetClassInput" list="allClassGroupsDatalist" required value="${this.escapeHtmlAttr(targetCls)}" oninput="App.syncGradeFromClassInput(this.value, 'bulkMoveTargetGradeSelect')" placeholder="Chọn hoặc nhập tên lớp..." class="w-full px-3.5 py-2 rounded-xl border border-indigo-300 bg-white font-bold text-slate-900 outline-none focus:border-indigo-600">
+              ${this.getClassGroupsDatalistHtml('allClassGroupsDatalist')}
+            </div>
+            <div>
+              <label class="block font-bold text-indigo-950 mb-1">Khối tương ứng *</label>
+              <select id="bulkMoveTargetGradeSelect" class="w-full px-3 py-2 rounded-xl border border-indigo-300 bg-white font-bold text-indigo-700 outline-none cursor-pointer">
+                ${[6, 7, 8, 9, 10, 11, 12].map(g => `<option value="${g}" ${g === (groups.find(x => this.isSameClassName(x.name, targetCls))?.grade || 12) ? 'selected' : ''}>Khối ${g}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="font-bold text-slate-800">Chọn học sinh cần xếp vào lớp:</span>
+              <div class="flex items-center gap-1.5">
+                <button type="button" onclick="document.querySelectorAll('#bulkMoveClassModal .bm-stu-row').forEach(r => { if (r.style.display !== 'none') r.querySelector('input').checked = true; })" class="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-bold cursor-pointer">Chọn đang lọc</button>
+                <button type="button" onclick="document.querySelectorAll('#bulkMoveClassModal input[name=bulkMoveStuCheck]').forEach(cb => { cb.checked = false; })" class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 font-bold cursor-pointer">Bỏ chọn</button>
+              </div>
+            </div>
+            <input type="text" oninput="const q=this.value.toLowerCase().trim(); document.querySelectorAll('#bulkMoveClassModal .bm-stu-row').forEach(r => { r.style.display = (!q || (r.getAttribute('data-search')||'').includes(q)) ? '' : 'none'; });" placeholder="Tìm nhanh tên học sinh, mã HS, lớp hiện tại..." class="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white outline-none">
+            <div class="max-h-60 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-2xl bg-white">
+              ${(this.state.students || []).map(st => `
+                <label class="bm-stu-row flex items-center justify-between px-3.5 py-2 hover:bg-indigo-50/40 cursor-pointer" data-search="${this.escapeHtmlAttr((st.fullName + ' ' + st.studentId + ' ' + (st.className || '')).toLowerCase())}">
+                  <span class="flex items-center gap-2.5 min-w-0">
+                    <input type="checkbox" name="bulkMoveStuCheck" value="${st.studentId}" class="rounded text-indigo-600">
+                    <span class="font-bold text-slate-900 truncate">${st.fullName}</span>
+                    <span class="font-mono text-indigo-600">${st.studentId}</span>
+                  </span>
+                  <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold shrink-0">K${this.getStudentGrade(st)} • ${st.className || '12'}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+        </form>
+
+        <div class="px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+          <button type="button" onclick="document.getElementById('bulkMoveClassModal')?.remove()" class="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 cursor-pointer">Hủy</button>
+          <button type="submit" form="bulkMoveClassForm" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm cursor-pointer inline-flex items-center gap-1.5">
+            <i class="fa-solid fa-check"></i><span>Chuyển Vào Nhóm Lớp</span>
+          </button>
+        </div>
+      </div>
+    `;
+    this.openModalElement(modal);
+  },
+
+  handleBulkMoveClassSubmit(studentIdsArg = null, targetClassArg = null, targetGradeArg = null) {
+    const targetCls = String(targetClassArg ?? (document.getElementById('bulkMoveTargetClassInput')?.value || '')).trim().replace(/\s+/g, ' ');
+    const targetGrade = parseInt(targetGradeArg ?? (document.getElementById('bulkMoveTargetGradeSelect')?.value || '12'), 10) || 12;
+    const ids = Array.isArray(studentIdsArg)
+      ? studentIdsArg
+      : Array.from(document.querySelectorAll('#bulkMoveClassModal input[name="bulkMoveStuCheck"]:checked')).map(cb => cb.value);
+
+    if (!targetCls) {
+      this.notify('Vui lòng chọn hoặc nhập tên nhóm lớp chuyển đến!', 'warning', 'Thiếu tên nhóm lớp');
+      return 0;
+    }
+    if (ids.length === 0) {
+      this.notify('Vui lòng chọn ít nhất 1 học sinh!', 'warning', 'Chưa chọn học sinh');
+      return 0;
+    }
+
+    const idSet = new Set(ids);
+    const nowIso = new Date().toISOString();
+    let count = 0;
+    (this.state.students || []).forEach(st => {
+      if (st && idSet.has(st.studentId)) {
+        st.className = targetCls;
+        st.grade = targetGrade;
+        st.updatedAt = nowIso;
+        count++;
+      }
+    });
+
+    if (!this.state.settings) this.state.settings = {};
+    const groups = this.getClassGroups().map(g => ({ name: g.name, grade: g.grade, schedule: g.schedule || '', note: g.note || '' }));
+    if (!groups.some(g => this.isSameClassName(g.name, targetCls))) {
+      groups.push({ name: targetCls, grade: targetGrade, schedule: '', note: '' });
+    }
+    this.state.settings.classGroups = groups;
+
+    if (this.state.currentUser && idSet.has(this.state.currentUser.studentId)) {
+      this.state.currentUser.className = targetCls;
+      this.state.currentUser.grade = targetGrade;
+      this.saveSessionUser(this.state.currentUser);
+    }
+
+    this.saveData({ markAdminDirty: true });
+    if (typeof document !== 'undefined') document.getElementById('bulkMoveClassModal')?.remove();
+    this.render();
+    this.notify(`Đã chuyển ${count} học sinh vào nhóm lớp "${targetCls}" (Khối ${targetGrade})!`, 'success', 'Chuyển lớp thành công');
+    return count;
   },
 
   redeemReward(rewardId, skipConfirm = false) {
@@ -4231,6 +5010,10 @@ const App = {
     const allowedExams = this.state.exams.filter(e => this.isStudentAllowedExam(e, u));
     const allowedHomeworks = this.state.homeworks.filter(h => this.isStudentAllowedHomework(h, u));
     const mySubmissions = this.state.submissions.filter(s => s.studentId === u.studentId);
+    const myExamSubmissions = mySubmissions.filter(s => !this.isHomeworkSubmission(s));
+    const myHwSubmissions = mySubmissions.filter(s => this.isHomeworkSubmission(s));
+    const assignedBtvn = allowedHomeworks.filter(h => h.itemKind === 'homework');
+    const pendingBtvn = assignedBtvn.filter(h => !this.getStudentLatestHwSubmission(h.id, u.studentId));
     const rewardStats = this.getStudentRewardStats(u.studentId);
     if (!this.state.studentMainTab) this.state.studentMainTab = 'exams';
     const thMeta = this.getThemeMeta();
@@ -4341,16 +5124,20 @@ const App = {
                   </button>
                 </div>
               </div>
-              <div class="grid grid-cols-3 sm:flex gap-2 sm:gap-3">
-                <div class="bg-white/10 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[92px]">
+              <div class="grid grid-cols-2 sm:flex gap-2 sm:gap-3">
+                <div class="bg-white/10 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[84px]">
                   <div class="text-[11px] sm:text-xs text-indigo-200 truncate">Đề mở</div>
                   <div class="text-xl sm:text-2xl font-bold font-mono">${allowedExams.length}</div>
                 </div>
-                <div class="bg-white/10 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[92px]">
+                <button type="button" onclick="App.state.studentHwKindFilter='homework'; App.setStudentMainTab('homeworks');" class="bg-white/15 hover:bg-white/25 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[92px] transition cursor-pointer border ${pendingBtvn.length > 0 ? 'border-amber-300/60' : 'border-white/10'}" title="Xem bài tập về nhà theo nhóm lớp">
+                  <div class="text-[11px] sm:text-xs text-indigo-100 truncate">BTVN cần làm</div>
+                  <div class="text-xl sm:text-2xl font-extrabold font-mono ${pendingBtvn.length > 0 ? 'text-amber-300' : 'text-white'}">${pendingBtvn.length}<span class="text-xs font-normal opacity-80">/${assignedBtvn.length}</span></div>
+                </button>
+                <div class="bg-white/10 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[84px]">
                   <div class="text-[11px] sm:text-xs text-indigo-200 truncate">Đã nộp</div>
                   <div class="text-xl sm:text-2xl font-bold font-mono">${mySubmissions.length}</div>
                 </div>
-                <button type="button" onclick="App.setStudentMainTab('rewards')" class="bg-amber-400/20 hover:bg-amber-400/30 border border-amber-300/40 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[100px] transition cursor-pointer" title="Xem điểm tích lũy & đổi phần thưởng">
+                <button type="button" onclick="App.setStudentMainTab('rewards')" class="bg-amber-400/20 hover:bg-amber-400/30 border border-amber-300/40 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[96px] transition cursor-pointer" title="Xem điểm tích lũy & đổi phần thưởng">
                   <div class="text-[11px] sm:text-xs text-amber-200 font-semibold truncate">Điểm thưởng</div>
                   <div class="text-xl sm:text-2xl font-extrabold font-mono text-amber-300 inline-flex items-center justify-center gap-1">
                     <span>${rewardStats.availablePoints}</span>
@@ -4360,6 +5147,23 @@ const App = {
               </div>
             </div>
           </div>
+
+          ${pendingBtvn.length > 0 ? `
+          <div class="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <i class="fa-solid fa-bell"></i>
+              </div>
+              <div class="min-w-0">
+                <div class="text-xs sm:text-sm font-extrabold text-amber-950">Nhóm lớp ${u.className || ('Khối ' + this.getStudentGrade(u))} đang có ${pendingBtvn.length} Bài Tập Về Nhà chưa nộp!</div>
+                <p class="text-[11px] sm:text-xs text-amber-800 truncate mt-0.5">Bài gần nhất: <strong>${pendingBtvn[0].title}</strong> ${pendingBtvn[0].dueAt ? `• ${this.getHomeworkDueStatus(pendingBtvn[0]).label}` : ''}</p>
+              </div>
+            </div>
+            <button type="button" onclick="App.state.studentHwKindFilter='homework'; App.setStudentMainTab('homeworks');" class="ui-btn bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs shrink-0">
+              <i class="fa-solid fa-pen-to-square"></i><span>Làm &amp; Nộp BTVN Ngay</span>
+            </button>
+          </div>
+          ` : ''}
 
           <!-- Thanh Điều Hướng Cổng Học Sinh -->
           <div class="bg-white rounded-2xl p-2 sm:p-2.5 border border-slate-200 shadow-sm">
@@ -4385,11 +5189,11 @@ const App = {
                   onclick="App.setStudentMainTab('homeworks')"
                   class="ui-btn h-10 px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-book-open shrink-0"></i>
-                  <span class="sm:hidden">Tài Liệu</span>
-                  <span class="hidden sm:inline">Tài Liệu &amp; Chuyên Đề</span>
-                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
-                    ${allowedHomeworks.length}
+                  <i class="fa-solid fa-book-open-reader shrink-0"></i>
+                  <span class="sm:hidden">BTVN &amp; TL</span>
+                  <span class="hidden sm:inline">Bài Tập &amp; Tài Liệu</span>
+                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${pendingBtvn.length > 0 ? 'bg-rose-600 text-white font-extrabold' : (this.state.studentMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs')}">
+                    ${pendingBtvn.length > 0 ? `${pendingBtvn.length} mới` : allowedHomeworks.length}
                   </span>
                 </button>
 
@@ -4441,7 +5245,7 @@ const App = {
                 <i class="fa-solid fa-circle-info text-indigo-500 text-xs"></i>
                 <span>
                   ${this.state.studentMainTab === 'exams' ? 'Chọn đề thi theo Khối 6 – 12 và phân loại (GK1, CK1, GK2, CK2, Đề thi vào 10, Thi thử THPT QG) để vào làm bài trực tuyến.' : ''}
-                  ${this.state.studentMainTab === 'homeworks' ? 'Chọn tài liệu & chuyên đề theo Khối 6 – 12 để xem trực tiếp hoặc tải file PDF về máy.' : ''}
+                  ${this.state.studentMainTab === 'homeworks' ? 'Nhận Bài Tập Về Nhà theo nhóm lớp (nộp ảnh vở tự luận hoặc điền đáp án trực tuyến) và tải tài liệu PDF chuyên đề.' : ''}
                   ${this.state.studentMainTab === 'grades' ? 'Tra cứu kết quả các lượt nộp bài, đối chiếu đáp án chi tiết và xem vị trí trên bảng xếp hạng lớp.' : ''}
                   ${this.state.studentMainTab === 'rewards' ? 'Tích lũy điểm sao qua từng đề thi đạt kết quả tốt và đổi các phần thưởng khuyến khích từ Giáo viên.' : ''}
                 </span>
@@ -4472,7 +5276,7 @@ const App = {
               <button type="button" onclick="App.showTeacherIntroModal()" class="ui-btn bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 shadow-xs text-xs font-bold">
                 <i class="fa-solid fa-address-card text-indigo-600"></i><span>Xem Giới Thiệu</span>
               </button>
-              <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="ui-btn bg-[#650f12] hover:bg-[#3d0709] text-white shadow-xs text-xs font-bold">
+              <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="ui-btn bg-[#650f12] hover:bg-[#3d0709] text-white shadow-xs text-xs font-bold">
                 <i class="fa-solid fa-globe"></i><span>Mở Website Thầy Chí</span>
                 <i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-75"></i>
               </a>
@@ -4522,26 +5326,43 @@ const App = {
               </div>
 
               <div id="studentExamListContainer" class="p-5 sm:p-6">
-                ${this.renderStudentExamGridHtml(allowedExams, mySubmissions)}
+                ${this.renderStudentExamGridHtml(allowedExams, myExamSubmissions)}
               </div>
             </section>
             ` : ''}
 
             ${this.state.studentMainTab === 'homeworks' ? `
-            <!-- 2. Tài Liệu & Chuyên Đề -->
+            <!-- 2. Bài Tập Về Nhà & Tài Liệu Chuyên Đề -->
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div class="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
                 <div>
-                  <h3 class="text-lg font-bold text-slate-900 flex items-center">
-                    <i class="fa-solid fa-book-open text-indigo-600 mr-2"></i>
-                    Tài Liệu &amp; Chuyên Đề (${allowedHomeworks.length})
+                  <h3 class="text-lg font-bold text-slate-900 flex items-center flex-wrap gap-2">
+                    <span><i class="fa-solid fa-book-open-reader text-indigo-600 mr-2"></i>Bài Tập Về Nhà &amp; Tài Liệu (${allowedHomeworks.length})</span>
+                    <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">Lớp ${u.className || ('Khối ' + this.getStudentGrade(u))}</span>
                   </h3>
-                  <p class="text-xs text-slate-500 mt-0.5">Phân chia theo Khối 6 – 12 • Tài liệu lý thuyết, chuyên đề trọng tâm và bài tập tự luyện</p>
+                  <p class="text-xs text-slate-500 mt-0.5">Bài tập về nhà giao riêng cho nhóm lớp của bạn (${assignedBtvn.length} BTVN • ${pendingBtvn.length} chưa nộp) và tài liệu chuyên đề PDF</p>
                 </div>
+                <button type="button" onclick="App.syncFromCloud({ manual: true })" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs shrink-0 self-start sm:self-auto">
+                  <i class="fa-solid fa-arrows-rotate ${this.state.cloudSyncStatus === 'syncing' ? 'fa-spin' : ''}"></i>
+                  <span>Cập nhật BTVN mới</span>
+                </button>
               </div>
 
-              <!-- Thanh Phân Khối 6 – 12 & Tìm Kiếm Tài Liệu -->
+              <!-- Thanh Phân Loại (BTVN / Tài liệu) + Khối 6 – 12 & Tìm Kiếm -->
               <div class="p-5 sm:p-6 pt-4 pb-3 border-b border-slate-100 bg-slate-50/60 space-y-2.5">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <button type="button" onclick="App.onStudentHwFilterInput('kind', 'ALL')" class="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${(!this.state.studentHwKindFilter || this.state.studentHwKindFilter === 'ALL') ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}">
+                    Tất cả (${allowedHomeworks.length})
+                  </button>
+                  <button type="button" onclick="App.onStudentHwFilterInput('kind', 'homework')" class="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer inline-flex items-center gap-1.5 ${this.state.studentHwKindFilter === 'homework' ? 'bg-[#650f12] text-white border-[#650f12] shadow-xs' : 'bg-white text-[#650f12] border-[#650f12]/25 hover:bg-red-50'}">
+                    <i class="fa-solid fa-pen-to-square"></i><span>Bài Tập Về Nhà (${assignedBtvn.length})</span>
+                    ${pendingBtvn.length > 0 ? `<span class="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${this.state.studentHwKindFilter === 'homework' ? 'bg-amber-300 text-[#650f12]' : 'bg-rose-600 text-white'}">${pendingBtvn.length} cần nộp</span>` : ''}
+                  </button>
+                  <button type="button" onclick="App.onStudentHwFilterInput('kind', 'document')" class="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer inline-flex items-center gap-1.5 ${this.state.studentHwKindFilter === 'document' ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}">
+                    <i class="fa-solid fa-file-pdf text-red-500"></i><span>Tài Liệu &amp; Chuyên Đề (${allowedHomeworks.length - assignedBtvn.length})</span>
+                  </button>
+                </div>
+
                 ${this.renderExamGradePillsHtml(allowedHomeworks, this.state.studentHwGradeFilter, 'App.onStudentHwFilterInput')}
 
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-slate-200/70">
@@ -4551,7 +5372,7 @@ const App = {
                       id="studentHwSearchInput"
                       type="text"
                       oninput="App.onStudentHwFilterInput('query', this.value)"
-                      placeholder="Tìm theo tên chuyên đề, mô tả, khối lớp (Khối 6 – 12), tên file PDF..."
+                      placeholder="Tìm theo tên bài tập về nhà, chuyên đề, mô tả, nhóm lớp, tên file PDF..."
                       value="${this.state.studentHwSearchQuery || ''}"
                       class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:border-indigo-500 outline-none transition"
                     />
@@ -4803,8 +5624,8 @@ const App = {
                       <p class="text-xs text-slate-500 mt-0.5">Theo dõi kết quả làm bài và điểm trung bình qua từng vòng khảo sát</p>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
-                      ${this.state.exams.filter(ex => this.isStudentAllowedExam(ex, u) || mySubmissions.some(s => s.examId === ex.id)).map((ex) => {
-                        const sSub = mySubmissions.find(s => s.examId === ex.id);
+                      ${this.state.exams.filter(ex => this.isStudentAllowedExam(ex, u) || myExamSubmissions.some(s => s.examId === ex.id)).map((ex) => {
+                        const sSub = myExamSubmissions.find(s => s.examId === ex.id);
                         const catShort = this.getExamCategoryMeta(this.inferExamCategory(ex)).short;
                         const label = `K${ex.grade || 12} • ${catShort}`;
                         return `
@@ -4818,17 +5639,17 @@ const App = {
                           </div>
                         `;
                       }).join('')}
-                      ${mySubmissions.length > 0 ? `
+                      ${myExamSubmissions.length > 0 ? `
                         <div class="flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-600 text-white shadow-xs text-xs font-bold">
                           <span>ĐTB:</span>
-                          <span class="font-mono">${(mySubmissions.reduce((a, b) => a + Number(b.scoreResult.totalScore), 0) / mySubmissions.length).toFixed(2)}đ</span>
+                          <span class="font-mono">${(myExamSubmissions.reduce((a, b) => a + Number(b.scoreResult.totalScore), 0) / myExamSubmissions.length).toFixed(2)}đ</span>
                         </div>
                       ` : ''}
                     </div>
                   </div>
                 </div>
 
-                ${mySubmissions.length === 0 ? `
+                ${myExamSubmissions.length === 0 ? `
                   <div class="bg-white rounded-xl p-8 text-center border border-slate-200 text-slate-500">
                     <p>Bạn chưa hoàn thành đề thi nào. Hãy chọn đề ở mục <strong>Đề Thi &amp; Kiểm Tra</strong> để bắt đầu làm bài!</p>
                   </div>
@@ -4851,7 +5672,7 @@ const App = {
                           </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100">
-                          ${mySubmissions.map(sub => `
+                          ${myExamSubmissions.map(sub => `
                             <tr class="hover:bg-slate-50/80 transition">
                               <td class="px-5 py-4 font-bold text-slate-900">${sub.examTitle}</td>
                               <td class="px-3 py-4 text-center font-bold text-xs text-indigo-700">Lần ${sub.attemptNumber || 1}</td>
@@ -4894,6 +5715,56 @@ const App = {
                     </div>
                   </div>
                 `}
+
+                ${myHwSubmissions.length > 0 ? `
+                  <div class="mt-6 bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div class="px-5 py-3.5 bg-[#fbf7ef] border-b border-[#e6dbcd] flex items-center justify-between gap-2">
+                      <span class="text-xs sm:text-sm font-extrabold text-[#650f12] flex items-center gap-2">
+                        <i class="fa-solid fa-book-open-reader"></i>
+                        <span>Lịch Sử Nộp &amp; Nhận Xét Bài Tập Về Nhà (${myHwSubmissions.length})</span>
+                      </span>
+                    </div>
+                    <div class="overflow-x-auto">
+                      <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
+                        <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+                          <tr>
+                            <th class="px-5 py-3 font-semibold">Bài Tập Về Nhà</th>
+                            <th class="px-3 py-3 font-semibold text-center">Hình thức</th>
+                            <th class="px-4 py-3 font-semibold">Thời gian nộp</th>
+                            <th class="px-4 py-3 font-semibold text-center">Điểm số</th>
+                            <th class="px-5 py-3 font-semibold">Nhận xét của Giáo viên</th>
+                            <th class="px-5 py-3 font-semibold text-right">Thao tác</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                          ${myHwSubmissions.map(sub => `
+                            <tr class="hover:bg-slate-50/80 transition">
+                              <td class="px-5 py-3.5 font-bold text-slate-900">
+                                <div>${sub.examTitle}</div>
+                                ${sub.isLate ? '<span class="inline-block mt-0.5 px-2 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">Nộp muộn</span>' : '<span class="inline-block mt-0.5 px-2 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">Đúng hạn</span>'}
+                              </td>
+                              <td class="px-3 py-3.5 text-center text-xs font-semibold text-slate-600">${sub.hwMode === 'interactive' ? 'Điền đáp án' : 'Nộp ảnh vở'}</td>
+                              <td class="px-4 py-3.5 text-xs text-slate-500">${new Date(sub.submittedAt).toLocaleString('vi-VN')}</td>
+                              <td class="px-4 py-3.5 text-center">
+                                ${sub.pendingManualGrade
+                                  ? '<span class="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold">Chờ thầy chấm</span>'
+                                  : `<span class="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-extrabold font-mono">${sub.scoreResult.totalScore} / ${Number(sub.scoreResult.maxTotal || 10).toFixed(1)}</span>`}
+                              </td>
+                              <td class="px-5 py-3.5 text-xs text-slate-600 max-w-xs">
+                                ${sub.teacherComment ? `<span class="font-medium text-slate-800">${this.escapeHtmlAttr(sub.teacherComment)}</span>` : '<span class="text-slate-400 italic">Chưa có nhận xét</span>'}
+                              </td>
+                              <td class="px-5 py-3.5 text-right">
+                                <button onclick="${sub.hwMode === 'interactive' ? `App.viewSubmissionDetail('${sub.id}')` : `App.viewPhotoHomeworkSubmissionModal('${sub.id}')`}" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer">
+                                  <i class="fa-solid fa-eye"></i><span>Xem bài</span>
+                                </button>
+                              </td>
+                            </tr>
+                          `).join('')}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ` : ''}
               `}
               </div>
             </section>
@@ -4906,16 +5777,16 @@ const App = {
         <!-- Footer Cổng Học Sinh -->
         <footer class="mt-auto py-5 border-t border-slate-200 bg-white/70 backdrop-blur-md text-center text-xs text-slate-500 space-y-1">
           <div>
-            &copy; 2026 Lớp Toán Anh Chí — <strong>Thầy Huỳnh Thanh Chí</strong> · Khối 6 – 12
+            &copy; 2026 Lớp Toán Anh Chí — <strong>Thầy Huỳnh Thanh Chí</strong> · Khối 6 – 12 · Zalo: <a href="https://zalo.me/0905957716" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 font-semibold">${this.TEACHER_PHONE}</a>
           </div>
           <div class="flex items-center justify-center flex-wrap gap-2 sm:gap-3 text-[11px] text-slate-400 px-4">
-            <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Website chính thức</a>
+            <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Website chính thức</a>
             <span>•</span>
-            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Lịch các lớp</a>
+            <a href="https://thanhchi113.github.io/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Lịch các lớp</a>
             <span>•</span>
-            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Bảng vàng thành tích</a>
+            <a href="https://thanhchi113.github.io/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Bảng vàng thành tích</a>
             <span>•</span>
-            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#tai-lieu" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Kho tài liệu PDF</a>
+            <a href="https://thanhchi113.github.io/tai-lieu.html" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Kho tài liệu PDF</a>
           </div>
         </footer>
 
@@ -5185,52 +6056,163 @@ const App = {
     const u = this.state.currentUser;
     const baseList = allowedList || this.state.homeworks.filter(h => this.isStudentAllowedHomework(h, u));
     const gFilter = this.state.studentHwGradeFilter || 'ALL';
+    const kFilter = this.state.studentHwKindFilter || 'ALL';
     const q = this.state.studentHwSearchQuery || '';
     const filtered = baseList.filter(hw => {
+      if (kFilter !== 'ALL' && (hw.itemKind || 'document') !== kFilter) return false;
       if (gFilter !== 'ALL' && String(hw.grade || 12) !== String(gFilter)) return false;
       return this.matchHwSearch(hw, q);
+    }).sort((a, b) => {
+      const aIsHw = a.itemKind === 'homework' ? 1 : 0;
+      const bIsHw = b.itemKind === 'homework' ? 1 : 0;
+      if (aIsHw !== bIsHw) return bIsHw - aIsHw;
+      return 0;
     });
 
     if (filtered.length === 0) {
       return `
         <div class="bg-slate-50 rounded-2xl p-8 text-center border border-dashed border-slate-200 text-slate-500 text-xs">
           <i class="fa-solid fa-folder-open text-2xl text-slate-300 mb-2"></i>
-          <p class="font-semibold">${baseList.length === 0 ? 'Hiện chưa có tài liệu hoặc chuyên đề nào được mở cho bạn.' : `Không tìm thấy tài liệu phù hợp${gFilter !== 'ALL' ? ` trong Khối ${gFilter}` : ''}.`}</p>
+          <p class="font-semibold">${baseList.length === 0 ? 'Hiện chưa có Bài tập về nhà hoặc Tài liệu nào được mở cho nhóm lớp của bạn.' : 'Không tìm thấy Bài tập về nhà hoặc Tài liệu phù hợp với bộ lọc hiện tại.'}</p>
         </div>
       `;
     }
 
     return `
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        ${filtered.map(hw => `
-          <div class="bg-white rounded-2xl p-5 border border-slate-200 hover:border-indigo-200 hover:shadow-md transition flex items-start space-x-4">
-            <div class="w-11 h-11 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-100">
-              <i class="fa-solid fa-file-pdf text-lg"></i>
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
-                <span class="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  Khối ${hw.grade || 12}
-                </span>
-                <span class="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-slate-100 text-slate-600 font-mono">
-                  ${hw.dateAdded || 'Mới cập nhật'}
-                </span>
-              </div>
-              <h4 class="text-sm font-bold text-slate-900 truncate" title="${hw.title}">${hw.title}</h4>
-              <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">${hw.description}</p>
-              <div class="mt-2 text-[11px] text-slate-400 font-mono truncate">${hw.fileName || 'Tai_Lieu.pdf'} • ${hw.fileSize || '2.0 MB'}</div>
+        ${filtered.map(hw => {
+          const isBtvn = hw.itemKind === 'homework';
+          const safeTitleJs = String(hw.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          if (!isBtvn) {
+            return `
+              <div class="bg-white rounded-2xl p-5 border border-slate-200 hover:border-indigo-200 hover:shadow-md transition flex items-start space-x-4">
+                <div class="w-11 h-11 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-100">
+                  <i class="fa-solid fa-file-pdf text-lg"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
+                    <span class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">Tài liệu PDF</span>
+                    <span class="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      Khối ${hw.grade || 12}
+                    </span>
+                    ${Array.isArray(hw.allowedClasses) && hw.allowedClasses.length > 0 ? `<span class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">Lớp: ${hw.allowedClasses.join(', ')}</span>` : ''}
+                    <span class="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-slate-100 text-slate-600 font-mono">
+                      ${hw.dateAdded || 'Mới cập nhật'}
+                    </span>
+                  </div>
+                  <h4 class="text-sm font-bold text-slate-900 truncate" title="${this.escapeHtmlAttr(hw.title)}">${hw.title}</h4>
+                  <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">${hw.description || ''}</p>
+                  <div class="mt-2 text-[11px] text-slate-400 font-mono truncate">${hw.fileName || 'Tai_Lieu.pdf'} • ${hw.fileSize || '2.0 MB'}</div>
 
-              <div class="mt-3 grid grid-cols-2 sm:flex items-center gap-2">
-                <button type="button" onclick="App.openPdfModal('${hw.title}', '${hw.pdfUrl}', '${hw.id}')" class="ui-btn bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100">
-                  <i class="fa-solid fa-eye"></i><span>Xem trực tiếp</span>
-                </button>
-                <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}')" class="ui-btn bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200/80">
-                  <i class="fa-solid fa-download"></i><span>Tải về</span>
-                </button>
+                  <div class="mt-3 grid grid-cols-2 sm:flex items-center gap-2">
+                    <button type="button" onclick="App.openPdfModal('${safeTitleJs}', '${hw.pdfUrl}', '${hw.id}')" class="ui-btn bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100">
+                      <i class="fa-solid fa-eye"></i><span>Xem trực tiếp</span>
+                    </button>
+                    <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}')" class="ui-btn bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200/80">
+                      <i class="fa-solid fa-download"></i><span>Tải về</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+
+          const latestSub = u ? this.getStudentLatestHwSubmission(hw.id, u.studentId) : null;
+          const dueMeta = this.getHomeworkDueStatus(hw);
+          const isInteractive = hw.hwMode === 'interactive';
+          const canShowSol = Boolean(hw.solutionPdfUrl && hw.allowViewSolution !== false && (latestSub || dueMeta.isOverdue));
+          const classLabel = hw.accessType === 'class' && Array.isArray(hw.allowedClasses) && hw.allowedClasses.length
+            ? `Nhóm lớp: ${hw.allowedClasses.join(', ')}`
+            : (hw.accessType === 'grade' ? `Toàn Khối ${hw.grade || 12}` : 'Lớp của bạn');
+
+          let statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300"><i class="fa-solid fa-clock mr-1"></i>Chưa nộp bài</span>';
+          if (latestSub) {
+            if (latestSub.pendingManualGrade) {
+              statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200"><i class="fa-solid fa-circle-check mr-1"></i>Đã nộp${latestSub.isLate ? ' (Muộn)' : ''} • Chờ thầy chấm</span>`;
+            } else {
+              statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300"><i class="fa-solid fa-award mr-1"></i>Điểm: ${latestSub.scoreResult.totalScore}/${Number(latestSub.scoreResult.maxTotal || hw.maxScore || 10).toFixed(1)}đ</span>`;
+            }
+          }
+
+          return `
+            <div class="bg-white rounded-2xl p-5 border-2 ${!latestSub ? 'border-amber-200/90 hover:border-amber-400' : 'border-emerald-200/80 hover:border-indigo-300'} hover:shadow-md transition flex flex-col justify-between space-y-3.5">
+              <div class="space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-1.5">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="px-2.5 py-0.5 rounded-lg text-[11px] font-extrabold bg-[#650f12] text-white">
+                      <i class="fa-solid ${isInteractive ? 'fa-list-check' : 'fa-camera'} mr-1"></i>${isInteractive ? 'BTVN Trực Tuyến' : 'BTVN Nộp Ảnh Vở'}
+                    </span>
+                    <span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">${this.escapeHtmlAttr(classLabel)}</span>
+                  </div>
+                  ${statusBadge}
+                </div>
+
+                <h4 class="text-sm sm:text-base font-extrabold text-slate-900 leading-snug">${hw.title}</h4>
+                ${hw.description ? `<p class="text-xs text-slate-600 leading-relaxed whitespace-pre-line">${this.escapeHtmlAttr(hw.description)}</p>` : ''}
+
+                <div class="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px]">
+                  <span class="px-2 py-0.5 rounded-lg border font-semibold ${dueMeta.badgeCls}">
+                    <i class="fa-regular fa-calendar-check mr-1"></i>${dueMeta.label}
+                  </span>
+                  <span class="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 font-mono font-semibold">
+                    Thang điểm: ${hw.maxScore || 10}đ
+                  </span>
+                  ${hw.time_minutes > 0 ? `<span class="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 font-semibold"><i class="fa-regular fa-clock mr-1"></i>${hw.time_minutes} phút</span>` : ''}
+                </div>
+
+                ${latestSub && latestSub.teacherComment ? `
+                  <div class="mt-2 p-3 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs text-emerald-950 space-y-0.5">
+                    <div class="font-extrabold text-[11px] uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                      <i class="fa-solid fa-comment-dots"></i><span>Nhận xét của Thầy Chí:</span>
+                    </div>
+                    <p class="leading-relaxed font-medium">${this.escapeHtmlAttr(latestSub.teacherComment)}</p>
+                  </div>
+                ` : ''}
+              </div>
+
+              <div class="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                ${isInteractive ? `
+                  ${(!latestSub || hw.allowResubmit !== false) ? `
+                    <button type="button" onclick="App.startInteractiveHomework('${hw.id}')" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs">
+                      <i class="fa-solid fa-pen-to-square"></i><span>${latestSub ? 'Làm lại BTVN' : 'Làm bài trực tuyến'}</span>
+                    </button>
+                  ` : ''}
+                  ${latestSub ? `
+                    <button type="button" onclick="App.viewSubmissionDetail('${latestSub.id}')" class="ui-btn bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs">
+                      <i class="fa-solid fa-eye"></i><span>Xem kết quả &amp; đáp án</span>
+                    </button>
+                  ` : ''}
+                ` : `
+                  ${(!latestSub || hw.allowResubmit !== false) ? `
+                    <button type="button" onclick="App.showSubmitPhotoHomeworkModal('${hw.id}')" class="ui-btn bg-[#650f12] hover:bg-[#4d0b0d] text-white font-bold text-xs shadow-xs">
+                      <i class="fa-solid fa-camera"></i><span>${latestSub ? 'Nộp lại / Bổ sung ảnh' : 'Chụp / Tải Ảnh Nộp BTVN'}</span>
+                    </button>
+                  ` : ''}
+                  ${latestSub ? `
+                    <button type="button" onclick="App.viewPhotoHomeworkSubmissionModal('${latestSub.id}')" class="ui-btn bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs">
+                      <i class="fa-solid fa-images"></i><span>Xem bài đã nộp (${(latestSub.photoImages || []).length} ảnh)</span>
+                    </button>
+                  ` : ''}
+                `}
+
+                ${hw.pdfUrl ? `
+                  <button type="button" onclick="App.openPdfModal('${safeTitleJs}', '${hw.pdfUrl}', '${hw.id}')" class="ui-btn bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 text-xs">
+                    <i class="fa-solid fa-file-pdf"></i><span>Đề PDF</span>
+                  </button>
+                  <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}')" class="ui-btn bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 text-xs" title="Tải đề PDF về máy">
+                    <i class="fa-solid fa-download"></i>
+                  </button>
+                ` : ''}
+
+                ${canShowSol ? `
+                  <button type="button" onclick="App.openPdfModal('${safeTitleJs} - Lời giải', '${hw.solutionPdfUrl}', '${hw.id}_sol')" class="ui-btn bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs">
+                    <i class="fa-solid fa-lightbulb text-amber-600"></i><span>PDF Lời giải</span>
+                  </button>
+                ` : ''}
               </div>
             </div>
-          </div>
-        `).join('')}
+          `;
+        }).join('')}
       </div>
     `;
   },
@@ -5245,13 +6227,329 @@ const App = {
       }
     }
     if (field === 'grade') this.state.studentHwGradeFilter = val;
+    if (field === 'kind') this.state.studentHwKindFilter = val;
     this.render();
   },
 
   resetStudentHwFilter() {
     this.state.studentHwSearchQuery = '';
     this.state.studentHwGradeFilter = 'ALL';
+    this.state.studentHwKindFilter = 'ALL';
     this.render();
+  },
+
+  // --- HỌC SINH NỘP BTVN DẠNG ẢNH CHỤP VỞ / TỰ LUẬN & LÀM BTVN TRỰC TUYẾN ---
+  showSubmitPhotoHomeworkModal(hwId) {
+    if (typeof document === 'undefined') return;
+    const hw = (this.state.homeworks || []).find(h => h.id === hwId);
+    const u = this.state.currentUser;
+    if (!hw || !u) return;
+
+    document.getElementById('submitPhotoHwModal')?.remove();
+    const prevSub = this.getStudentLatestHwSubmission(hw.id, u.studentId);
+    this.state.tempPhotoHwImages = prevSub && Array.isArray(prevSub.photoImages) ? [...prevSub.photoImages] : [];
+    const dueMeta = this.getHomeworkDueStatus(hw);
+    const safeTitleJs = String(hw.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+    const modal = document.createElement('div');
+    modal.id = 'submitPhotoHwModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-xl w-full max-h-[90vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-[#fbf7ef] via-white to-indigo-50/40 flex items-center justify-between gap-2 shrink-0">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-[#650f12] text-white flex items-center justify-center shrink-0">
+              <i class="fa-solid fa-camera"></i>
+            </div>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-slate-900 truncate">Nộp Bài Tập Về Nhà: ${hw.title}</h3>
+              <p class="text-xs text-slate-500 mt-0.5">${dueMeta.label} • Chụp rõ nét các trang vở bài làm của bạn</p>
+            </div>
+          </div>
+          <button type="button" onclick="document.getElementById('submitPhotoHwModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        <form id="submitPhotoHwForm" onsubmit="event.preventDefault(); App.submitPhotoHomework('${hw.id}');" class="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+          ${hw.description ? `
+            <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 leading-relaxed whitespace-pre-line">
+              <div class="font-extrabold text-slate-900 mb-1"><i class="fa-solid fa-clipboard-list text-indigo-600 mr-1.5"></i>Yêu cầu của Giáo viên:</div>
+              ${this.escapeHtmlAttr(hw.description)}
+            </div>
+          ` : ''}
+
+          ${hw.pdfUrl ? `
+            <div class="flex items-center justify-between p-3 rounded-xl bg-indigo-50/60 border border-indigo-200">
+              <span class="font-bold text-indigo-900 truncate"><i class="fa-solid fa-file-pdf text-red-500 mr-1.5"></i>${hw.fileName || 'De_BTVN.pdf'}</span>
+              <button type="button" onclick="App.openPdfModal('${safeTitleJs}', '${hw.pdfUrl}', '${hw.id}')" class="px-3 py-1.5 rounded-lg bg-white hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold cursor-pointer shrink-0">
+                <i class="fa-solid fa-eye mr-1"></i>Mở đề PDF
+              </button>
+            </div>
+          ` : ''}
+
+          <div class="space-y-2">
+            <label class="block font-extrabold text-slate-800">1. Ảnh chụp vở bài làm (Tối đa 8 trang ảnh, tự động nén siêu nhẹ) *</label>
+            <input type="file" id="studentHwPhotoInput" accept="image/*" multiple class="hidden" onchange="App.handleStudentHwPhotoSelect(event)">
+            <div onclick="document.getElementById('studentHwPhotoInput')?.click()" class="border-2 border-dashed border-indigo-300 hover:border-indigo-500 bg-indigo-50/40 hover:bg-indigo-50/80 rounded-2xl p-5 text-center cursor-pointer transition">
+              <i class="fa-solid fa-cloud-arrow-up text-2xl text-indigo-600 mb-1.5"></i>
+              <div class="font-extrabold text-slate-800 text-xs sm:text-sm">Bấm để chụp ảnh trực tiếp hoặc chọn ảnh từ thư viện điện thoại</div>
+              <p class="text-[11px] text-slate-500 mt-0.5">Hỗ trợ chọn nhiều trang vở cùng lúc • Rõ chữ và hình vẽ</p>
+            </div>
+            <div id="photoHwPreviewGrid" class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+              ${this.renderPhotoHwPreviewGridHtml()}
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-extrabold text-slate-800 mb-1">2. Ghi chú gửi Thầy (Câu còn vướng mắc / Trình bày ngắn)</label>
+            <textarea id="studentHwNoteInput" rows="3" placeholder="VD: Em đã làm xong từ bài 1 đến bài 5, câu 4b hình học em chưa chắc chắn nhờ thầy xem giúp ạ..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-600 outline-none text-xs">${this.escapeHtmlAttr(prevSub?.studentNote || '')}</textarea>
+          </div>
+        </form>
+
+        <div class="px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+          <button type="button" onclick="document.getElementById('submitPhotoHwModal')?.remove()" class="px-4 py-2.5 rounded-xl bg-white border border-slate-200 font-bold text-xs text-slate-700 cursor-pointer">Hủy</button>
+          <button type="submit" id="submitPhotoHwBtn" form="submitPhotoHwForm" class="px-5 py-2.5 rounded-xl bg-[#650f12] hover:bg-[#4d0b0d] text-white font-extrabold text-xs shadow-md cursor-pointer inline-flex items-center gap-1.5">
+            <i class="fa-solid fa-paper-plane"></i><span>Nộp Bài Tập Về Nhà</span>
+          </button>
+        </div>
+      </div>
+    `;
+    this.openModalElement(modal);
+  },
+
+  renderPhotoHwPreviewGridHtml() {
+    const imgs = Array.isArray(this.state.tempPhotoHwImages) ? this.state.tempPhotoHwImages : [];
+    if (imgs.length === 0) return '';
+    return imgs.map((src, idx) => `
+      <div class="relative group rounded-xl overflow-hidden border border-slate-200 aspect-[3/4] bg-slate-100">
+        <img src="${src}" alt="Trang ${idx + 1}" onclick="App.previewFullImage('${src}')" class="w-full h-full object-cover cursor-pointer">
+        <span class="absolute left-1.5 bottom-1.5 px-1.5 py-0.5 rounded bg-black/65 text-white text-[10px] font-bold">Trang ${idx + 1}</span>
+        <button type="button" onclick="App.removeStudentHwPhoto(${idx})" class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center text-xs shadow cursor-pointer" title="Xóa ảnh này">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+    `).join('');
+  },
+
+  async handleStudentHwPhotoSelect(event) {
+    const files = Array.from(event?.target?.files || []);
+    if (!files.length) return;
+    const cur = Array.isArray(this.state.tempPhotoHwImages) ? this.state.tempPhotoHwImages : [];
+    const remain = Math.max(0, 8 - cur.length);
+    if (remain <= 0) {
+      this.notify('Tối đa 8 ảnh cho mỗi bài tập về nhà!', 'warning', 'Đã đạt giới hạn ảnh');
+      return;
+    }
+    const compressed = await Promise.all(files.slice(0, remain).map(f => this.compressImageFile(f, 1280, 0.72)));
+    this.state.tempPhotoHwImages = [...cur, ...compressed.filter(Boolean)];
+    const grid = document.getElementById('photoHwPreviewGrid');
+    if (grid) grid.innerHTML = this.renderPhotoHwPreviewGridHtml();
+    if (event.target) event.target.value = '';
+  },
+
+  removeStudentHwPhoto(idx) {
+    if (!Array.isArray(this.state.tempPhotoHwImages)) return;
+    this.state.tempPhotoHwImages.splice(idx, 1);
+    const grid = document.getElementById('photoHwPreviewGrid');
+    if (grid) grid.innerHTML = this.renderPhotoHwPreviewGridHtml();
+  },
+
+  submitPhotoHomework(hwId, overridePayload = null) {
+    const hw = (this.state.homeworks || []).find(h => h.id === hwId);
+    const u = this.state.currentUser;
+    if (!hw || !u) return null;
+
+    const images = overridePayload && Array.isArray(overridePayload.images)
+      ? overridePayload.images
+      : (Array.isArray(this.state.tempPhotoHwImages) ? [...this.state.tempPhotoHwImages] : []);
+    const note = overridePayload && typeof overridePayload.note === 'string'
+      ? overridePayload.note.trim()
+      : (typeof document !== 'undefined' ? (document.getElementById('studentHwNoteInput')?.value || '').trim() : '');
+
+    if (images.length === 0 && !note) {
+      this.notify('Vui lòng tải lên ít nhất 1 ảnh chụp vở bài làm hoặc nhập phần trình bày trước khi nộp!', 'warning', 'Chưa có bài làm');
+      return null;
+    }
+
+    const nowIso = overridePayload?.submittedAt || new Date().toISOString();
+    const dueMs = hw.dueAt ? Date.parse(hw.dueAt) : 0;
+    const isLate = Boolean(dueMs && !Number.isNaN(dueMs) && Date.parse(nowIso) > dueMs);
+    const safeStu = String(u.studentId || 'HS').replace(/[^A-Za-z0-9]/g, '');
+    const existing = this.getStudentLatestHwSubmission(hw.id, u.studentId);
+    const maxScore = Number(hw.maxScore || 10) || 10;
+
+    const sub = {
+      id: existing ? existing.id : `HWSUB-${Date.now()}-${safeStu}`,
+      examId: hw.id,
+      homeworkId: hw.id,
+      examTitle: hw.title,
+      isHomework: true,
+      hwMode: 'photo',
+      studentId: u.studentId,
+      studentName: u.fullName,
+      studentClass: u.className || '',
+      submittedAt: nowIso,
+      updatedAt: nowIso,
+      isLate,
+      attemptNumber: existing ? (Number(existing.attemptNumber || 1) + 1) : 1,
+      durationTakenSeconds: 0,
+      tabSwitches: 0,
+      screenshotCount: 0,
+      photoImages: images,
+      studentNote: note,
+      pendingManualGrade: true,
+      teacherScore: null,
+      teacherComment: existing?.teacherComment || '',
+      scoreResult: this.buildPhotoHomeworkScoreResult(maxScore, null, true),
+      answers: { part1: {}, part2: {}, part3: {}, part4: { 1: { text: note, images } } }
+    };
+
+    this.state.submissions = (this.state.submissions || []).filter(s => s.id !== sub.id);
+    this.state.submissions.unshift(sub);
+    this.state.tempPhotoHwImages = [];
+    this.saveData();
+    this.pushStudentSubmissionToCloud(sub);
+
+    if (typeof document !== 'undefined') {
+      document.getElementById('submitPhotoHwModal')?.remove();
+    }
+    this.render();
+    this.notify(
+      `Đã nộp Bài tập về nhà "${hw.title}" thành công${isLate ? ' (ghi nhận nộp muộn sau hạn)' : ''}! Thầy sẽ chấm điểm và gửi nhận xét cho bạn.`,
+      'success',
+      'Nộp BTVN thành công'
+    );
+    return sub;
+  },
+
+  viewPhotoHomeworkSubmissionModal(subId) {
+    if (typeof document === 'undefined') return;
+    const sub = (this.state.submissions || []).find(s => s.id === subId);
+    if (!sub) return;
+    const hw = (this.state.homeworks || []).find(h => h.id === (sub.homeworkId || sub.examId));
+    document.getElementById('viewPhotoHwSubModal')?.remove();
+
+    const imgs = Array.isArray(sub.photoImages) ? sub.photoImages : [];
+    const modal = document.createElement('div');
+    modal.id = 'viewPhotoHwSubModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="px-4 sm:px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-2 shrink-0">
+          <div>
+            <h3 class="font-extrabold text-sm sm:text-base text-slate-900">${sub.examTitle}</h3>
+            <p class="text-xs text-slate-500 mt-0.5">Học sinh: <strong>${sub.studentName}</strong> (${sub.studentId}) • Nộp lúc: ${new Date(sub.submittedAt).toLocaleString('vi-VN')} ${sub.isLate ? '• <strong class="text-rose-600">Nộp muộn</strong>' : '• <strong class="text-emerald-600">Đúng hạn</strong>'}</p>
+          </div>
+          <button type="button" onclick="document.getElementById('viewPhotoHwSubModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <div class="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+          <div class="p-4 rounded-2xl border ${sub.pendingManualGrade ? 'bg-amber-50/70 border-amber-200' : 'bg-emerald-50/70 border-emerald-200'} flex items-center justify-between gap-3">
+            <div>
+              <div class="font-bold uppercase tracking-wider text-[11px] ${sub.pendingManualGrade ? 'text-amber-800' : 'text-emerald-800'}">Kết quả chấm BTVN</div>
+              <div class="text-lg font-extrabold mt-0.5 ${sub.pendingManualGrade ? 'text-amber-900' : 'text-emerald-900'}">
+                ${sub.pendingManualGrade ? 'Đang chờ Giáo viên chấm điểm' : `${sub.scoreResult.totalScore} / ${sub.scoreResult.maxTotal || 10} điểm (${sub.scoreResult.rank})`}
+              </div>
+            </div>
+            ${(!sub.pendingManualGrade && hw && hw.solutionPdfUrl && hw.allowViewSolution !== false) ? `
+              <button type="button" onclick="App.openPdfModal('${String(hw.title || '').replace(/'/g, "\\'")} - Lời giải', '${hw.solutionPdfUrl}', '${hw.id}_sol')" class="px-3 py-2 rounded-xl bg-white border border-emerald-300 text-emerald-800 font-bold cursor-pointer">
+                <i class="fa-solid fa-file-pdf mr-1"></i>Xem PDF Lời giải
+              </button>
+            ` : ''}
+          </div>
+
+          ${sub.teacherComment ? `
+            <div class="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200 space-y-1">
+              <div class="font-extrabold text-indigo-900"><i class="fa-solid fa-comment-dots mr-1.5"></i>Nhận xét &amp; sửa bài của Giáo viên:</div>
+              <p class="text-slate-800 leading-relaxed whitespace-pre-line">${this.escapeHtmlAttr(sub.teacherComment)}</p>
+            </div>
+          ` : ''}
+
+          ${sub.studentNote ? `
+            <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+              <div class="font-bold text-slate-700">Ghi chú của học sinh:</div>
+              <p class="text-slate-600 whitespace-pre-line">${this.escapeHtmlAttr(sub.studentNote)}</p>
+            </div>
+          ` : ''}
+
+          ${imgs.length > 0 ? `
+            <div class="space-y-2">
+              <div class="font-bold text-slate-800">Ảnh bài làm đã nộp (${imgs.length} trang — bấm vào ảnh để phóng to):</div>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                ${imgs.map((src, i) => `
+                  <div class="rounded-xl overflow-hidden border border-slate-200 bg-slate-100">
+                    <img src="${src}" alt="Trang ${i + 1}" onclick="App.previewFullImage('${src}')" class="w-full h-44 object-cover cursor-pointer hover:opacity-90 transition">
+                    <div class="px-2.5 py-1.5 text-[11px] font-bold text-slate-600 bg-white flex items-center justify-between">
+                      <span>Trang ${i + 1}</span>
+                      <button type="button" onclick="App.previewFullImage('${src}')" class="text-indigo-600 hover:underline cursor-pointer">Phóng to</button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+    this.openModalElement(modal);
+  },
+
+  async startInteractiveHomework(hwId) {
+    const hw = (this.state.homeworks || []).find(h => h.id === hwId);
+    if (!hw) return;
+    if (this.state.currentUser?.role === 'student' && !this.isStudentAllowedHomework(hw, this.state.currentUser)) {
+      this.notify('Bạn chưa được phân quyền làm bài tập về nhà này!', 'error', 'Chưa được cấp quyền');
+      return;
+    }
+    const examObj = this.getHomeworkAsExamObject(hw);
+    const subs = (this.state.submissions || []).filter(s => s.studentId === this.state.currentUser.studentId && (s.homeworkId === hw.id || s.examId === hw.id));
+    this.state.currentAttemptNumber = subs.length + 1;
+
+    if (typeof document !== 'undefined') {
+      document.body?.classList?.add?.('in-exam');
+      if (document.documentElement?.style) document.documentElement.style.overflow = 'hidden';
+      if (document.body?.style) document.body.style.overflow = 'hidden';
+    }
+
+    this.state.activeSubmissionDetailId = null;
+    this.state.currentDetailSubId = null;
+    this.state.activeExam = examObj;
+    this.pushOverlayHistory();
+    this.state.answers = { part1: {}, part2: {}, part3: {}, part4: {}, flagged: {} };
+
+    const p3Boxes = this.getPart3BoxCount(examObj);
+    examObj.part3.forEach(q => { this.state.answers.part3[q.id] = Array(p3Boxes).fill(''); });
+    examObj.part4.forEach(q => { this.state.answers.part4[q.id] = { text: '', images: [] }; });
+
+    this.state.examStartTime = new Date();
+    this.state.secondsLeft = examObj.noTimeLimit ? 0 : (examObj.time_minutes * 60);
+    this.state.tabSwitchesCount = 0;
+    this.state.screenshotCount = 0;
+    this.state.violationLogs = [];
+    this.resetExamMonitorState();
+    this.state.activeSectionTab = examObj.part1.length ? 'p1' : (examObj.part2.length ? 'p2' : (examObj.part3.length ? 'p3' : 'p4'));
+    this.state.mobileExamPane = 'both';
+    this.state.examPdfCollapsed = (this.getNormalizedExamLayoutMode() === 'fast-entry');
+    this.state.examSheetCollapsed = false;
+    this.state.paletteFilter = 'all';
+    this.state.activePart3Target = { qId: 1, boxIdx: 0 };
+
+    const fastPdfUrl = examObj.pdf_url ? await this.resolveCachedPdfUrlFast(examObj.pdf_url, hw.id) : '';
+    this.state.resolvedPdfUrl = fastPdfUrl || '';
+
+    this.render();
+    this.startTimer();
+
+    if (!fastPdfUrl && examObj.pdf_url) {
+      this.resolvePdfSourceUrl(examObj.pdf_url, hw.id).then((resolved) => {
+        if (!resolved || !this.state.activeExam || this.state.activeExam.id !== hw.id) return;
+        this.state.resolvedPdfUrl = resolved;
+        this.mountPdfViewer('examRoomPdfViewer', resolved, { flowWithPage: this.isExamStackedFlowMode() });
+      }).catch(() => {});
+    }
   },
 
   // --- VIEW: PHÒNG THI CHUẨN AZOTA & INTERACTIVE TEST ---
@@ -5337,6 +6635,10 @@ const App = {
 
   startTimer() {
     this.clearIntervalTimer();
+    if (this.state.activeExam && this.state.activeExam.noTimeLimit) {
+      this.updateTimerDisplay();
+      return;
+    }
     this.state.timerInterval = setInterval(() => {
       this.state.secondsLeft--;
       this.updateTimerDisplay();
@@ -5357,8 +6659,13 @@ const App = {
   },
 
   updateTimerDisplay() {
-    const el = document.getElementById('examTimer');
+    const el = typeof document !== 'undefined' ? document.getElementById('examTimer') : null;
     if (!el) return;
+    if (this.state.activeExam && this.state.activeExam.noTimeLimit) {
+      el.textContent = 'Tự do';
+      el.classList.remove('text-red-600', 'animate-pulse');
+      return;
+    }
     const m = Math.floor(this.state.secondsLeft / 60);
     const s = this.state.secondsLeft % 60;
     el.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
@@ -6905,9 +8212,11 @@ const App = {
     document.getElementById('antiCheatModal')?.remove();
 
     // Khôi phục cuộn trang bình thường
-    document.body.classList.remove('in-exam');
-    document.documentElement.style.overflow = '';
-    document.body.style.overflow = '';
+    if (typeof document !== 'undefined') {
+      document.body?.classList?.remove?.('in-exam');
+      if (document.documentElement?.style) document.documentElement.style.overflow = '';
+      if (document.body?.style) document.body.style.overflow = '';
+    }
 
     const formattedP3Answers = {};
     Object.keys(this.state.answers.part3).forEach(k => {
@@ -6926,18 +8235,30 @@ const App = {
     const prevEarnedPoints = this.getStudentRewardStats(this.state.currentUser.studentId).earnedPoints;
     const safeStuSuffix = String(this.state.currentUser.studentId || 'HS').replace(/[^A-Za-z0-9]/g, '');
     const nowIso = new Date().toISOString();
+    const isHwRoom = Boolean(this.state.activeExam && this.state.activeExam.isHomeworkRoom);
+    const hwDueMs = (isHwRoom && this.state.activeExam.dueAt) ? Date.parse(this.state.activeExam.dueAt) : 0;
+    const isLateHw = Boolean(isHwRoom && hwDueMs && !Number.isNaN(hwDueMs) && Date.parse(nowIso) > hwDueMs);
+    const pendingP4 = Boolean(result.part4 && result.part4.pendingManual);
     const submission = {
-      id: `SUB-${Date.now()}-${safeStuSuffix}`,
+      id: `${isHwRoom ? 'HWSUB' : 'SUB'}-${Date.now()}-${safeStuSuffix}`,
       examId: this.state.activeExam.id,
+      ...(isHwRoom ? {
+        homeworkId: this.state.activeExam.id,
+        isHomework: true,
+        hwMode: 'interactive',
+        isLate: isLateHw,
+        studentClass: this.state.currentUser.className || '',
+        pendingManualGrade: pendingP4
+      } : {}),
       examTitle: this.state.activeExam.title,
       studentId: this.state.currentUser.studentId,
       studentName: this.state.currentUser.fullName,
       submittedAt: nowIso,
       updatedAt: nowIso,
       durationTakenSeconds: duration,
-      tabSwitches: this.state.tabSwitchesCount,
-      screenshotCount: this.state.screenshotCount || 0,
-      violationLogs: Array.isArray(this.state.violationLogs) ? [...this.state.violationLogs] : [],
+      tabSwitches: isHwRoom ? 0 : this.state.tabSwitchesCount,
+      screenshotCount: isHwRoom ? 0 : (this.state.screenshotCount || 0),
+      violationLogs: isHwRoom ? [] : (Array.isArray(this.state.violationLogs) ? [...this.state.violationLogs] : []),
       attemptNumber: this.state.currentAttemptNumber || 1,
       scoreResult: result,
       answers: JSON.parse(JSON.stringify(evaluatedAnswers))
@@ -7077,7 +8398,7 @@ const App = {
 
     const sub = this.state.submissions.find(s => s.id === this.state.currentDetailSubId);
     if (!sub) return;
-    const exam = this.state.exams.find(e => e.id === sub.examId) || SAMPLE_EXAM_2027;
+    const exam = this.resolveSubmissionExamOrHw(sub);
     const res = sub.scoreResult || GradingSystem.grade(sub.answers || {}, exam);
     const isStudent = this.state.currentUser && this.state.currentUser.role === 'student';
     const canViewAnswers = !isStudent || (exam.allow_view_answers !== false && (this.state.settings && this.state.settings.allowStudentViewAnswers !== false));
@@ -7375,7 +8696,16 @@ const App = {
     document.documentElement.style.overflow = '';
     document.body.style.overflow = '';
 
-    const exam = this.state.exams.find(e => e.id === sub.examId) || SAMPLE_EXAM_2027;
+    if (sub.isHomework && sub.hwMode === 'photo') {
+      if (this.state.currentUser && this.state.currentUser.role === 'admin') {
+        this.showGradePhotoHomeworkModal(sub.id);
+      } else {
+        this.viewPhotoHomeworkSubmissionModal(sub.id);
+      }
+      return;
+    }
+
+    const exam = this.resolveSubmissionExamOrHw(sub);
     const res = GradingSystem.grade(sub.answers || {}, exam);
     sub.scoreResult = res;
     const isStudent = this.state.currentUser && this.state.currentUser.role === 'student';
@@ -7584,7 +8914,7 @@ const App = {
   saveManualPart4Grades(subId) {
     const sub = this.state.submissions.find(s => s.id === subId);
     if (!sub) return;
-    const exam = this.state.exams.find(e => e.id === sub.examId) || SAMPLE_EXAM_2027;
+    const exam = this.resolveSubmissionExamOrHw(sub);
     const p4List = Array.isArray(exam.part4) ? exam.part4 : [];
     if (!sub.answers) sub.answers = { part1: {}, part2: {}, part3: {}, part4: {}, part4Scores: {} };
     if (!sub.answers.part4Scores) sub.answers.part4Scores = {};
@@ -7602,7 +8932,9 @@ const App = {
     });
 
     sub.scoreResult = GradingSystem.grade(sub.answers, exam);
-    sub.updatedAt = new Date().toISOString();
+    sub.pendingManualGrade = Boolean(sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual);
+    sub.gradedAt = new Date().toISOString();
+    sub.updatedAt = sub.gradedAt;
     this.saveData({ markAdminDirty: true });
     this.pushStudentSubmissionToCloud(sub);
     this.notify(`Đã cập nhật điểm Tự luận! Tổng điểm mới: ${sub.scoreResult.totalScore}/${sub.scoreResult.maxTotal}đ.`, 'success', 'Lưu điểm Tự luận');
@@ -7884,7 +9216,7 @@ const App = {
   getFilteredGradebookStudents() {
     return (this.state.students || []).filter(s => {
       if (this.state.adminGradeFilter && this.state.adminGradeFilter !== 'ALL' && String(this.getStudentGrade(s)) !== String(this.state.adminGradeFilter)) return false;
-      if (this.state.adminClassFilter && this.state.adminClassFilter !== 'ALL' && (s.className || '12') !== this.state.adminClassFilter) return false;
+      if (this.state.adminClassFilter && this.state.adminClassFilter !== 'ALL' && !this.isSameClassName(s.className || '12', this.state.adminClassFilter)) return false;
       if (this.state.adminGradebookSearch && !this.matchesStudentSearch(s, this.state.adminGradebookSearch)) return false;
       return true;
     });
@@ -7965,7 +9297,7 @@ const App = {
                 <td class="px-4 py-2.5 text-center font-mono font-extrabold text-sm text-indigo-950 bg-indigo-100/80 border-b-2 border-indigo-200">
                   ${(() => {
                     const allAvgs = stuList.map(s => {
-                      const subs = this.state.submissions.filter(x => x.studentId === s.studentId);
+                      const subs = this.state.submissions.filter(x => x.studentId === s.studentId && !this.isHomeworkSubmission(x));
                       return subs.length > 0 ? (subs.reduce((a, b) => a + Number(b.scoreResult.totalScore), 0) / subs.length) : null;
                     }).filter(x => x !== null);
                     return allAvgs.length > 0 ? (allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length).toFixed(2) + 'đ' : '--';
@@ -8069,7 +9401,7 @@ const App = {
         if (!st || String(this.getStudentGrade(st)) !== String(this.state.adminGradeFilter)) return false;
       }
       if (this.state.adminClassFilter && this.state.adminClassFilter !== 'ALL') {
-        if (!st || (st.className || '12') !== this.state.adminClassFilter) return false;
+        if (!st || !this.isSameClassName(st.className || '12', this.state.adminClassFilter)) return false;
       }
       if (this.state.adminGradebookSearch) {
         if (st) return this.matchesStudentSearch(st, this.state.adminGradebookSearch);
@@ -8117,10 +9449,16 @@ const App = {
                     })()}
                   </button>
                 </td>
-                <td class="px-5 py-4 text-xs text-slate-600 truncate max-w-xs">${sub.examTitle}</td>
+                <td class="px-5 py-4 text-xs text-slate-600 truncate max-w-xs">
+                  ${this.isHomeworkSubmission(sub) ? '<span class="px-1.5 py-0.5 mr-1 rounded bg-[#650f12] text-white text-[10px] font-bold">BTVN</span>' : ''}
+                  <span>${sub.examTitle}</span>
+                </td>
                 <td class="px-3 py-4 text-center font-bold text-xs text-indigo-700">Lần ${sub.attemptNumber || 1}</td>
                 <td class="px-3 py-4 text-center">
-                  ${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? `
+                  ${this.isHomeworkSubmission(sub) ? (sub.isLate
+                    ? '<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">Nộp muộn</span>'
+                    : '<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Đúng hạn</span>'
+                  ) : ((sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? `
                     <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-red-100 text-red-700 border border-red-200" title="Đã ghi nhận rời màn hình hoặc chụp màn hình">
                       <i class="fa-solid ${(sub.screenshotCount || 0) > 0 ? 'fa-camera' : 'fa-triangle-exclamation'} mr-1"></i>${sub.tabSwitches || sub.screenshotCount} lần${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} chụp)` : ''}
                     </span>
@@ -8128,7 +9466,7 @@ const App = {
                     <span class="text-emerald-600 text-xs font-medium inline-flex items-center gap-1">
                       <i class="fa-solid fa-check"></i>Nghiêm túc
                     </span>
-                  `}
+                  `)}
                 </td>
                 <td class="px-4 py-4 text-center font-mono text-xs font-semibold">${sub.scoreResult.part1.score}đ</td>
                 <td class="px-4 py-4 text-center font-mono text-xs font-semibold">${sub.scoreResult.part2.score}đ</td>
@@ -8141,13 +9479,13 @@ const App = {
                     : '<span class="text-slate-300">—</span>'}
                 </td>
                 <td class="px-4 py-4 text-center">
-                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-extrabold ${sub.scoreResult.totalScore >= 8 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">
-                    ${sub.scoreResult.totalScore}đ
-                  </span>
+                  ${sub.pendingManualGrade
+                    ? '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">Chờ chấm</span>'
+                    : `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-extrabold ${sub.scoreResult.totalScore >= 8 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${sub.scoreResult.totalScore}đ</span>`}
                 </td>
                 <td class="px-5 py-4 text-right">
-                  <button onclick="App.viewSubmissionDetail('${sub.id}')" class="px-3 py-1.5 ${sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'} rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer">
-                    <i class="fa-solid ${sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual ? 'fa-pen-nib' : 'fa-eye'}"></i><span>${sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual ? 'Chấm TL' : 'Chi tiết'}</span>
+                  <button onclick="App.viewSubmissionDetail('${sub.id}')" class="px-3 py-1.5 ${(sub.pendingManualGrade || (sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual)) ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'} rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer">
+                    <i class="fa-solid ${(sub.pendingManualGrade || (sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual)) ? 'fa-pen-nib' : 'fa-eye'}"></i><span>${(sub.pendingManualGrade || (sub.scoreResult.part4 && sub.scoreResult.part4.pendingManual)) ? (sub.isHomework ? 'Chấm BTVN' : 'Chấm TL') : 'Chi tiết'}</span>
                   </button>
                 </td>
               </tr>
@@ -8162,7 +9500,11 @@ const App = {
   renderAdminDashboard(container) {
     const u = this.state.currentUser;
     const pendingRedemptions = this.getPendingRedemptionsCount();
-    const allClasses = [...new Set(this.state.students.map(s => s.className || '12'))];
+    const classGroupObjs = this.getClassGroups();
+    const allClasses = classGroupObjs.map(g => g.name);
+    const hwOnlyCount = (this.state.homeworks || []).filter(h => h.itemKind === 'homework').length;
+    const docOnlyCount = Math.max(0, (this.state.homeworks || []).length - hwOnlyCount);
+    const pendingHwGradeCount = (this.state.submissions || []).filter(s => this.isHomeworkSubmission(s) && s.pendingManualGrade).length;
     const activeStudentGrades = [...new Set(this.state.students.map(s => this.getStudentGrade(s)))].sort((a, b) => a - b);
     const filteredStudents = this.getFilteredGradebookStudents();
     const examsList = this.state.exams;
@@ -8294,12 +9636,17 @@ const App = {
                   onclick="App.setAdminMainTab('homeworks')"
                   class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-book-open shrink-0"></i>
-                  <span class="sm:hidden">Tài Liệu</span>
-                  <span class="hidden sm:inline">Tài Liệu &amp; Chuyên Đề</span>
+                  <i class="fa-solid fa-house-laptop shrink-0"></i>
+                  <span class="sm:hidden">BTVN &amp; TL</span>
+                  <span class="hidden sm:inline">Giao BTVN &amp; Tài Liệu</span>
                   <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
                     ${this.state.homeworks.length}
                   </span>
+                  ${pendingHwGradeCount > 0 ? `
+                    <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono font-extrabold shrink-0 bg-amber-500 text-white" title="${pendingHwGradeCount} bài tập về nhà chờ chấm">
+                      ${pendingHwGradeCount}
+                    </span>
+                  ` : ''}
                 </button>
 
                 <button
@@ -8336,9 +9683,9 @@ const App = {
                 <i class="fa-solid fa-circle-info text-indigo-500 text-xs"></i>
                 <span>
                   ${this.state.adminMainTab === 'main' ? 'Theo dõi thống kê toàn hệ thống, sổ điểm tổng hợp qua các đợt kiểm tra và nhật ký nộp bài chi tiết.' : ''}
-                  ${this.state.adminMainTab === 'students' ? 'Quản lý hồ sơ học sinh, xếp khối (Khối 6 – 12), cấp tài khoản mới, tra cứu liên hệ và đồng bộ mật khẩu.' : ''}
-                  ${this.state.adminMainTab === 'exams' ? 'Quản lý đề thi theo Khối 6 – 12 và phân loại (GK1, CK1, GK2, CK2, Đề thi vào 10, Thi thử THPT QG), tải lên file PDF đề thi, đáp án và phân quyền dự thi.' : ''}
-                  ${this.state.adminMainTab === 'homeworks' ? 'Quản lý kho tài liệu & chuyên đề theo Khối 6 – 12, tải lên file PDF và phân quyền truy cập cho học sinh.' : ''}
+                  ${this.state.adminMainTab === 'students' ? 'Quản lý hồ sơ học sinh, nhóm lớp (12A 2K9, 11A 2K10...), xếp khối (Khối 6 – 12), cấp tài khoản mới và đồng bộ mật khẩu.' : ''}
+                  ${this.state.adminMainTab === 'exams' ? 'Quản lý đề thi theo Khối 6 – 12 và theo từng nhóm lớp, tải lên file PDF đề thi, đáp án và phân quyền dự thi.' : ''}
+                  ${this.state.adminMainTab === 'homeworks' ? 'Giao bài tập về nhà theo từng nhóm lớp (chụp ảnh vở hoặc điền đáp án trên PDF), kiểm tra hạn nộp, chấm điểm nhận xét và quản lý tài liệu.' : ''}
                   ${this.state.adminMainTab === 'rewards' ? 'Duyệt trao phần thưởng, quản lý kho quà đổi điểm và cộng điểm khuyến khích cho học sinh.' : ''}
                   ${this.state.adminMainTab === 'settings' ? 'Cập nhật hồ sơ & mật khẩu Giáo viên, khôi phục qua email, phân quyền xem điểm và quản trị dữ liệu.' : ''}
                 </span>
@@ -8363,6 +9710,12 @@ const App = {
                 <p class="text-xs text-slate-500 mt-0.5">Xếp khối học sinh (Khối 6 – 12), quản lý hồ sơ, liên hệ phụ huynh, tài khoản đăng nhập và lịch sử thi</p>
               </div>
               <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+                <button type="button" id="openClassGroupsModalBtn" onclick="App.showClassGroupsModal()" class="ui-btn bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
+                  <i class="fa-solid fa-people-roof"></i><span>Nhóm Lớp (${allClasses.length})</span>
+                </button>
+                <button type="button" id="openBulkMoveClassBtn" onclick="App.showBulkMoveClassModal()" class="ui-btn bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs">
+                  <i class="fa-solid fa-right-left"></i><span>Chuyển Nhóm Lớp</span>
+                </button>
                 <button type="button" id="openBulkGradeModalBtn" onclick="App.showBulkGradeModal()" class="ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs">
                   <i class="fa-solid fa-layer-group"></i><span>Xếp Khối HS</span>
                 </button>
@@ -8441,7 +9794,7 @@ const App = {
                   <select onchange="App.onStudentFilterInput('class', this.value)" class="bg-transparent font-bold text-slate-700 outline-none cursor-pointer">
                     <option value="ALL" ${(!this.state.studentClassFilter || this.state.studentClassFilter === 'ALL') ? 'selected' : ''}>Tất cả các lớp</option>
                     ${allClasses.map(c => `
-                      <option value="${c}" ${this.state.studentClassFilter === c ? 'selected' : ''}>Lớp ${c}</option>
+                      <option value="${this.escapeHtmlAttr(c)}" ${this.isSameClassName(this.state.studentClassFilter, c) ? 'selected' : ''}>Lớp ${c}</option>
                     `).join('')}
                   </select>
                 </div>
@@ -8530,33 +9883,65 @@ const App = {
           ` : ''}
 
           ${this.state.adminMainTab === 'homeworks' ? `
-          <!-- Section 3: Tài Liệu & Chuyên Đề -->
+          <!-- Section 3: Giao Bài Tập Về Nhà & Tài Liệu Theo Nhóm Lớp -->
           <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div class="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
+            <div class="p-5 sm:p-6 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
               <div>
-                <h3 class="text-lg font-bold text-slate-900 flex items-center">
-                  <i class="fa-solid fa-book-open text-indigo-600 mr-2"></i>
-                  Tài Liệu &amp; Chuyên Đề (${this.state.homeworks.length})
+                <h3 class="text-lg font-bold text-slate-900 flex flex-wrap items-center gap-2">
+                  <span><i class="fa-solid fa-house-laptop text-indigo-600 mr-2"></i>Giao Bài Tập Về Nhà &amp; Tài Liệu (${this.state.homeworks.length})</span>
+                  ${pendingHwGradeCount > 0 ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800 border border-amber-200">${pendingHwGradeCount} bài chờ chấm</span>` : ''}
                 </h3>
-                <p class="text-xs text-slate-500 mt-0.5">Phân chia theo Khối 6 – 12 • Tải lên tài liệu PDF chuyên đề, bài tập tự luyện và phân quyền học sinh</p>
+                <p class="text-xs text-slate-500 mt-0.5">Giao BTVN theo từng nhóm lớp (Chụp ảnh vở hoặc Điền đáp án trên PDF), theo dõi học sinh chưa nộp, chấm điểm &amp; quản lý tài liệu PDF</p>
               </div>
-              <button onclick="App.showAddHomeworkModal()" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center cursor-pointer">
-                <i class="fa-solid fa-file-circle-plus mr-2"></i>Thêm Tài Liệu Mới
-              </button>
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" onclick="App.showClassGroupsModal()" class="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer">
+                  <i class="fa-solid fa-people-roof"></i><span>Nhóm Lớp (${allClasses.length})</span>
+                </button>
+                <button type="button" onclick="App.showAddHomeworkModal({ itemKind: 'document' })" class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer">
+                  <i class="fa-solid fa-file-circle-plus text-indigo-600"></i><span>Thêm Tài Liệu PDF</span>
+                </button>
+                <button type="button" id="openAssignHwModalBtn" onclick="App.showAddHomeworkModal({ itemKind: 'homework' })" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition inline-flex items-center gap-1.5 cursor-pointer">
+                  <i class="fa-solid fa-paper-plane"></i><span>Giao Bài Tập Về Nhà</span>
+                </button>
+              </div>
             </div>
 
-            <!-- Thanh Phân Khối 6 – 12 & Tìm Kiếm Tài Liệu -->
+            <!-- Thanh Phân Khối 6 – 12, Lọc Loại (BTVN / Tài liệu), Lọc Nhóm Lớp & Tìm Kiếm -->
             <div class="p-5 sm:p-6 pt-4 pb-4 border-b border-slate-100 bg-slate-50/70 space-y-2.5">
               ${this.renderExamGradePillsHtml(this.state.homeworks, this.state.hwGradeFilter, 'App.onHwFilterInput')}
 
-              <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-2 border-t border-slate-200/70">
+              <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
+                <div class="inline-flex flex-wrap items-center gap-1.5">
+                  <button type="button" onclick="App.onHwFilterInput('kind', 'ALL')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${(!this.state.hwKindFilter || this.state.hwKindFilter === 'ALL') ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'}">
+                    Tất cả (${this.state.homeworks.length})
+                  </button>
+                  <button type="button" onclick="App.onHwFilterInput('kind', 'homework')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${this.state.hwKindFilter === 'homework' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-50'}">
+                    <i class="fa-solid fa-pen-to-square"></i><span>Bài tập về nhà (${hwOnlyCount})</span>
+                  </button>
+                  <button type="button" onclick="App.onHwFilterInput('kind', 'document')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${this.state.hwKindFilter === 'document' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-blue-800 border border-blue-200 hover:bg-blue-50'}">
+                    <i class="fa-solid fa-book-open"></i><span>Tài liệu PDF (${docOnlyCount})</span>
+                  </button>
+                </div>
+
+                <div class="flex items-center bg-white rounded-xl px-3 py-1.5 border border-slate-200 text-xs">
+                  <span class="text-slate-400 mr-1.5 font-medium"><i class="fa-solid fa-people-roof mr-1 text-indigo-500"></i>Nhóm lớp:</span>
+                  <select onchange="App.onHwFilterInput('class', this.value)" class="bg-transparent font-bold text-slate-700 outline-none cursor-pointer">
+                    <option value="ALL" ${(!this.state.hwClassFilter || this.state.hwClassFilter === 'ALL') ? 'selected' : ''}>Tất cả nhóm lớp</option>
+                    ${allClasses.map(c => `
+                      <option value="${this.escapeHtmlAttr(c)}" ${this.isSameClassName(this.state.hwClassFilter, c) ? 'selected' : ''}>Lớp ${c}</option>
+                    `).join('')}
+                  </select>
+                </div>
+              </div>
+
+              <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
                 <div class="flex-1 relative">
                   <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-2.5 text-slate-400 text-xs"></i>
                   <input
                     id="adminHwSearchInput"
                     type="text"
                     oninput="App.onHwFilterInput('query', this.value)"
-                    placeholder="Tìm tên chuyên đề, mô tả, khối lớp (Khối 6 – 12), tên file PDF, mã tài liệu..."
+                    placeholder="Tìm tên BTVN, chuyên đề, nhóm lớp (VD: 12A 2K9, 10B 2K11), mô tả, tên file PDF..."
                     value="${this.state.hwSearchQuery || ''}"
                     class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:border-indigo-500 outline-none transition"
                   />
@@ -8918,14 +10303,14 @@ const App = {
               </div>
               <div onclick="App.setAdminMainTab('homeworks')" class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:border-indigo-300 hover:shadow-md transition cursor-pointer group">
                 <div class="text-xs font-semibold text-slate-500 uppercase flex items-center justify-between">
-                  <span>Tài liệu &amp; Chuyên đề</span>
+                  <span>BTVN &amp; Tài liệu</span>
                   <i class="fa-solid fa-arrow-right text-[10px] text-slate-400 group-hover:text-indigo-600 transition"></i>
                 </div>
-                <div class="text-2xl font-bold text-blue-600 mt-1 font-mono">${this.state.homeworks.length} <span class="text-xs font-normal text-slate-400">tài liệu</span></div>
+                <div class="text-2xl font-bold text-blue-600 mt-1 font-mono">${hwOnlyCount} <span class="text-xs font-normal text-slate-400">BTVN • ${docOnlyCount} TL</span></div>
               </div>
               <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <div class="text-xs font-semibold text-slate-500 uppercase">Lượt nộp bài</div>
-                <div class="text-2xl font-bold text-emerald-600 mt-1 font-mono">${this.state.submissions.length} <span class="text-xs font-normal text-slate-400">lượt</span></div>
+                <div class="text-2xl font-bold text-emerald-600 mt-1 font-mono">${this.state.submissions.length} <span class="text-xs font-normal text-slate-400">lượt${pendingHwGradeCount > 0 ? ` (${pendingHwGradeCount} chờ chấm)` : ''}</span></div>
               </div>
             </div>
 
@@ -8936,20 +10321,26 @@ const App = {
                 <span>Thao tác nhanh:</span>
               </div>
               <div class="flex flex-wrap items-center gap-2">
+                <button onclick="App.showClassGroupsModal();" class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-amber-200 cursor-pointer">
+                  <i class="fa-solid fa-people-roof"></i><span>Nhóm lớp (${allClasses.length})</span>
+                </button>
+                <button onclick="App.setAdminMainTab('homeworks'); App.showAddHomeworkModal({ itemKind: 'homework' });" class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-emerald-200 cursor-pointer">
+                  <i class="fa-solid fa-paper-plane"></i><span>Giao BTVN theo lớp</span>
+                </button>
                 <button onclick="App.setAdminMainTab('students'); App.showAddStudentModal();" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-indigo-200 cursor-pointer">
                   <i class="fa-solid fa-user-plus"></i><span>Thêm học sinh</span>
                 </button>
-                <button onclick="App.setAdminMainTab('exams'); App.showCreateExamModal();" class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-emerald-200 cursor-pointer">
+                <button onclick="App.setAdminMainTab('exams'); App.showCreateExamModal();" class="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-teal-200 cursor-pointer">
                   <i class="fa-solid fa-cloud-arrow-up"></i><span>Thêm đề thi</span>
                 </button>
-                <button onclick="App.setAdminMainTab('homeworks'); App.showAddHomeworkModal();" class="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-blue-200 cursor-pointer">
+                <button onclick="App.setAdminMainTab('homeworks'); App.showAddHomeworkModal({ itemKind: 'document' });" class="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-blue-200 cursor-pointer">
                   <i class="fa-solid fa-file-circle-plus"></i><span>Thêm tài liệu</span>
                 </button>
                 <button onclick="App.setAdminMainTab('settings');" class="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-purple-200 cursor-pointer">
                   <i class="fa-solid fa-sliders"></i><span>Cài đặt &amp; bảo mật</span>
                 </button>
-                <button onclick="App.showIosAppModal(false, 'android');" class="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-teal-200 cursor-pointer">
-                  <i class="fa-brands fa-android"></i><span>Hướng dẫn App Android / iOS</span>
+                <button onclick="App.showIosAppModal(false, 'android');" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-slate-200 cursor-pointer">
+                  <i class="fa-brands fa-android"></i><span>App Android / iOS</span>
                 </button>
               </div>
             </div>
@@ -8987,7 +10378,7 @@ const App = {
                   <select id="adminClassFilterSelect" onchange="App.filterAdminGradebook(this.value)" class="bg-transparent font-bold text-slate-700 outline-none cursor-pointer py-0.5 pl-1 w-full min-w-0">
                     <option value="ALL" ${this.state.adminClassFilter === 'ALL' ? 'selected' : ''}>Tất cả các lớp</option>
                     ${allClasses.map(c => `
-                      <option value="${c}" ${this.state.adminClassFilter === c ? 'selected' : ''}>Lớp ${c}</option>
+                      <option value="${this.escapeHtmlAttr(c)}" ${this.isSameClassName(this.state.adminClassFilter, c) ? 'selected' : ''}>Lớp ${c}</option>
                     `).join('')}
                   </select>
                 </div>
@@ -9053,13 +10444,15 @@ const App = {
             &copy; 2026 Lớp Toán Anh Chí — <strong>Thầy Huỳnh Thanh Chí</strong> · Khối 6 – 12
           </div>
           <div class="flex items-center justify-center flex-wrap gap-2 sm:gap-3 text-[11px] text-slate-400 px-4">
-            <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Website chính thức</a>
+            <a href="${this.TEACHER_MAIN_WEB_URL}" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Website chính thức</a>
             <span>•</span>
-            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Lịch các lớp</a>
+            <a href="${this.TEACHER_MAIN_WEB_URL}#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Lịch các lớp</a>
             <span>•</span>
-            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Bảng vàng thành tích</a>
+            <a href="${this.TEACHER_MAIN_WEB_URL}#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Bảng vàng thành tích</a>
             <span>•</span>
-            <a href="https://thanhchi113.github.io/Chi-GV-Toan/#tai-lieu" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Kho tài liệu PDF</a>
+            <a href="${this.TEACHER_MAIN_WEB_URL}tai-lieu.html" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Kho tài liệu</a>
+            <span>•</span>
+            <a href="${this.TEACHER_ZALO_URL}" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Zalo: ${this.TEACHER_PHONE}</a>
           </div>
         </footer>
 
@@ -9257,7 +10650,12 @@ const App = {
           let accessLabel = 'Tất cả học sinh';
           let accessBadgeClass = 'bg-indigo-50 text-indigo-700 border-indigo-200';
           if (!ex.allowed_all) {
-            if (ex.access_type === 'grade') {
+            if (ex.access_type === 'class') {
+              accessIcon = 'fa-people-roof';
+              const cList = (ex.allowed_classes && ex.allowed_classes.length) ? ex.allowed_classes.join(', ') : 'Chưa chọn lớp';
+              accessLabel = `Theo lớp: ${cList}`;
+              accessBadgeClass = 'bg-teal-50 text-teal-700 border-teal-200';
+            } else if (ex.access_type === 'grade') {
               accessIcon = 'fa-layer-group';
               const gList = (ex.allowed_grades && ex.allowed_grades.length) ? ex.allowed_grades.join(', ') : (ex.grade || 12);
               accessLabel = `Theo khối: ${gList}`;
@@ -9400,9 +10798,11 @@ const App = {
     const existingModal = document.getElementById('examAccessModal');
     if (existingModal) existingModal.remove();
 
-    const currentMode = exam.allowed_all ? 'all' : (exam.access_type === 'grade' ? 'grade' : 'custom');
+    const currentMode = exam.allowed_all ? 'all' : (exam.access_type === 'class' ? 'class' : (exam.access_type === 'grade' ? 'grade' : 'custom'));
     const selectedGrades = Array.isArray(exam.allowed_grades) && exam.allowed_grades.length ? exam.allowed_grades.map(Number) : [Number(exam.grade || 12)];
+    const selectedClasses = Array.isArray(exam.allowed_classes) ? exam.allowed_classes : [];
     const selectedStudents = new Set(Array.isArray(exam.allowed_students) ? exam.allowed_students : []);
+    const classGroups = this.getClassGroups();
 
     const modal = document.createElement('div');
     modal.id = 'examAccessModal';
@@ -9460,27 +10860,58 @@ const App = {
               <span>Quyền tham gia bài thi (Cho phép ai được thi?)</span>
             </label>
             <input type="hidden" id="accessExamModeInput" value="${currentMode}">
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
               <button type="button" id="accessModeBtn_all" onclick="App.onAccessModeChange('all')" class="p-3 rounded-xl border text-left transition cursor-pointer ${currentMode === 'all' ? 'border-indigo-600 bg-indigo-50/80 ring-2 ring-indigo-500/20' : 'border-slate-200 bg-white hover:bg-slate-50'}">
                 <div class="font-extrabold text-slate-900 flex items-center gap-1.5">
                   <i class="fa-solid fa-users text-indigo-600"></i><span>Tất cả học sinh</span>
                 </div>
-                <div class="text-[11px] text-slate-500 mt-0.5">Mở cho toàn bộ học sinh trong hệ thống</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">Toàn bộ học sinh hệ thống</div>
+              </button>
+
+              <button type="button" id="accessModeBtn_class" onclick="App.onAccessModeChange('class')" class="p-3 rounded-xl border text-left transition cursor-pointer ${currentMode === 'class' ? 'border-indigo-600 bg-indigo-50/80 ring-2 ring-indigo-500/20' : 'border-slate-200 bg-white hover:bg-slate-50'}">
+                <div class="font-extrabold text-slate-900 flex items-center gap-1.5">
+                  <i class="fa-solid fa-people-roof text-teal-600"></i><span>Theo nhóm lớp</span>
+                </div>
+                <div class="text-[11px] text-slate-500 mt-0.5">Giao riêng 1 hoặc nhiều lớp</div>
               </button>
 
               <button type="button" id="accessModeBtn_grade" onclick="App.onAccessModeChange('grade')" class="p-3 rounded-xl border text-left transition cursor-pointer ${currentMode === 'grade' ? 'border-indigo-600 bg-indigo-50/80 ring-2 ring-indigo-500/20' : 'border-slate-200 bg-white hover:bg-slate-50'}">
                 <div class="font-extrabold text-slate-900 flex items-center gap-1.5">
                   <i class="fa-solid fa-layer-group text-blue-600"></i><span>Theo khối lớp</span>
                 </div>
-                <div class="text-[11px] text-slate-500 mt-0.5">Chỉ học sinh thuộc các khối được chọn</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">Mở theo Khối 6 – 12</div>
               </button>
 
               <button type="button" id="accessModeBtn_custom" onclick="App.onAccessModeChange('custom')" class="p-3 rounded-xl border text-left transition cursor-pointer ${currentMode === 'custom' ? 'border-indigo-600 bg-indigo-50/80 ring-2 ring-indigo-500/20' : 'border-slate-200 bg-white hover:bg-slate-50'}">
                 <div class="font-extrabold text-slate-900 flex items-center gap-1.5">
                   <i class="fa-solid fa-user-check text-amber-600"></i><span>Chỉ định học sinh</span>
                 </div>
-                <div class="text-[11px] text-slate-500 mt-0.5">Chọn đích danh từng học sinh được thi</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">Chọn từng học sinh cụ thể</div>
               </button>
+            </div>
+          </div>
+
+          <!-- Khung chọn Nhóm Lớp (hiện khi mode = class) -->
+          <div id="accessClassPanel" class="${currentMode === 'class' ? '' : 'hidden'} p-4 rounded-2xl bg-teal-50/50 border border-teal-200 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="font-bold text-teal-900">Chọn các nhóm lớp được phép dự thi:</div>
+              <button type="button" onclick="App.showClassGroupsModal()" class="text-[11px] font-bold text-teal-700 hover:underline cursor-pointer">
+                <i class="fa-solid fa-gear mr-1"></i>Quản lý nhóm lớp
+              </button>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              ${classGroups.map(cg => {
+                const checked = selectedClasses.some(c => this.isSameClassName(c, cg.name));
+                return `
+                  <label class="inline-flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-teal-200 cursor-pointer hover:bg-teal-50 font-bold text-slate-700">
+                    <span class="inline-flex items-center gap-1.5 truncate">
+                      <input type="checkbox" name="accessClassCheck" value="${this.escapeHtmlAttr(cg.name)}" ${checked ? 'checked' : ''} class="rounded text-teal-600">
+                      <span class="truncate">${cg.name}</span>
+                    </span>
+                    <span class="text-[10px] font-mono text-slate-400 shrink-0">${cg.studentCount} HS</span>
+                  </label>
+                `;
+              }).join('')}
             </div>
           </div>
 
@@ -9561,15 +10992,17 @@ const App = {
   onAccessModeChange(mode) {
     const input = document.getElementById('accessExamModeInput');
     if (input) input.value = mode;
-    ['all', 'grade', 'custom'].forEach(m => {
+    ['all', 'class', 'grade', 'custom'].forEach(m => {
       const btn = document.getElementById('accessModeBtn_' + m);
       if (!btn) return;
       btn.className = 'p-3 rounded-xl border text-left transition cursor-pointer ' + (
         m === mode ? 'border-indigo-600 bg-indigo-50/80 ring-2 ring-indigo-500/20' : 'border-slate-200 bg-white hover:bg-slate-50'
       );
     });
+    const classPanel = document.getElementById('accessClassPanel');
     const gradePanel = document.getElementById('accessGradePanel');
     const customPanel = document.getElementById('accessCustomPanel');
+    if (classPanel) classPanel.classList.toggle('hidden', mode !== 'class');
     if (gradePanel) gradePanel.classList.toggle('hidden', mode !== 'grade');
     if (customPanel) customPanel.classList.toggle('hidden', mode !== 'custom');
   },
@@ -9612,8 +11045,13 @@ const App = {
     const allowAnswers = document.getElementById('accessExamAllowAnswers').checked;
 
     const checkedGrades = Array.from(document.querySelectorAll('#examAccessModal input[name="accessGradeCheck"]:checked')).map(cb => parseInt(cb.value, 10));
+    const checkedClasses = Array.from(document.querySelectorAll('#examAccessModal input[name="accessClassCheck"]:checked')).map(cb => cb.value);
     const checkedStudents = Array.from(document.querySelectorAll('#examAccessModal input[name="accessStudentCheck"]:checked')).map(cb => cb.value);
 
+    if (mode === 'class' && checkedClasses.length === 0) {
+      this.notify('Vui lòng chọn ít nhất 1 nhóm lớp được phép dự thi!', 'warning', 'Chưa chọn nhóm lớp');
+      return;
+    }
     if (mode === 'grade' && checkedGrades.length === 0) {
       this.notify('Vui lòng chọn ít nhất 1 khối lớp được phép dự thi!', 'warning', 'Thiếu thông tin phân quyền');
       return;
@@ -9628,6 +11066,7 @@ const App = {
     exam.allow_view_answers = allowAnswers;
     exam.access_type = mode;
     exam.allowed_all = mode === 'all';
+    exam.allowed_classes = mode === 'class' ? checkedClasses : (exam.allowed_classes || []);
     exam.allowed_grades = mode === 'grade' ? checkedGrades : [grade];
     exam.allowed_students = mode === 'custom' ? checkedStudents : (exam.allowed_students || []);
 
@@ -9647,7 +11086,7 @@ const App = {
     const filtered = this.state.students.filter(st => {
       const stGrade = this.getStudentGrade(st);
       if (gradeFilter !== 'ALL' && String(stGrade) !== String(gradeFilter)) return false;
-      if (classFilter !== 'ALL' && (st.className || '12A1') !== classFilter) return false;
+      if (classFilter !== 'ALL' && !this.isSameClassName(st.className || '12A1', classFilter)) return false;
       if (statusFilter !== 'ALL') {
         const isActive = st.status === 'active';
         if (statusFilter === 'active' && !isActive) return false;
@@ -9696,7 +11135,9 @@ const App = {
           </thead>
           <tbody class="divide-y divide-slate-100 bg-white">
             ${filtered.map((st, idx) => {
-              const studentSubs = this.state.submissions.filter(s => s.studentId === st.studentId);
+              const allStudentSubs = this.state.submissions.filter(s => s.studentId === st.studentId);
+              const studentSubs = allStudentSubs.filter(s => !this.isHomeworkSubmission(s));
+              const studentHwSubs = allStudentSubs.filter(s => this.isHomeworkSubmission(s));
               const validScores = studentSubs.map(s => Number(s.scoreResult.totalScore));
               const avg = validScores.length > 0 ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1) : '--';
               const nameParts = (st.fullName || '').trim().split(' ').filter(Boolean);
@@ -9743,7 +11184,7 @@ const App = {
                   </td>
                   <td class="px-4 py-3.5 text-center align-middle whitespace-nowrap">
                     <div class="inline-flex items-center justify-center gap-1.5 text-xs">
-                      <span class="font-bold text-slate-800">${studentSubs.length} lượt</span>
+                      <span class="font-bold text-slate-800">${studentSubs.length} đề${studentHwSubs.length > 0 ? ` • ${studentHwSubs.length} BTVN` : ''}</span>
                       <span class="text-slate-300">•</span>
                       <span class="font-bold font-mono ${avg !== '--' ? (Number(avg) >= 8 ? 'text-emerald-600' : (Number(avg) >= 5 ? 'text-blue-600' : 'text-amber-600')) : 'text-slate-400'}">ĐTB: ${avg}</span>
                     </div>
@@ -9823,7 +11264,7 @@ const App = {
     const defaultTargetGrade = (this.state.studentGradeFilter && this.state.studentGradeFilter !== 'ALL')
       ? Number(this.state.studentGradeFilter)
       : 12;
-    const allClasses = [...new Set(this.state.students.map(s => s.className || '12A1'))];
+    const allClasses = this.getClassGroups().map(g => g.name);
 
     const modal = document.createElement('div');
     modal.id = 'bulkGradeModal';
@@ -9942,7 +11383,7 @@ const App = {
     document.querySelectorAll('#bulkGradeModal .bulk-grade-student-row').forEach(row => {
       const matchQ = !q || (row.getAttribute('data-search') || '').includes(q);
       const matchG = gFilter === 'ALL' || row.getAttribute('data-grade') === String(gFilter);
-      const matchC = cFilter === 'ALL' || row.getAttribute('data-class') === cFilter;
+      const matchC = cFilter === 'ALL' || this.isSameClassName(row.getAttribute('data-class') || '', cFilter);
       row.style.display = (matchQ && matchG && matchC) ? '' : 'none';
     });
   },
@@ -10047,7 +11488,8 @@ const App = {
             </div>
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Lớp / Nhóm học *</label>
-              <input type="text" id="newStudentClass" value="${defaultGrade}A1" oninput="App.syncGradeFromClassInput(this.value, 'newStudentGrade')" required placeholder="VD: 12A1, Ca 1..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+              <input type="text" id="newStudentClass" list="allClassGroupsDatalist" value="${(this.getClassGroups().find(g => g.grade === defaultGrade) || {}).name || `${defaultGrade}A1`}" oninput="App.syncGradeFromClassInput(this.value, 'newStudentGrade')" required placeholder="VD: 12A 2K9, 10B 2K11..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+              ${this.getClassGroupsDatalistHtml()}
             </div>
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Mật khẩu cấp *</label>
@@ -10186,7 +11628,8 @@ const App = {
             </div>
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Lớp / Nhóm học *</label>
-              <input type="text" id="editStudentClass" required value="${student.className || '12A1'}" placeholder="12A1" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+              <input type="text" id="editStudentClass" list="allClassGroupsDatalist" oninput="App.syncGradeFromClassInput(this.value, 'editStudentGrade')" required value="${this.escapeHtmlAttr(student.className || '12A1')}" placeholder="VD: 12A 2K9" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
+              ${this.getClassGroupsDatalistHtml()}
             </div>
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
@@ -11829,9 +13272,30 @@ const App = {
               <label class="block font-bold text-slate-700 mb-1">Quyền dự thi</label>
               <select id="newExamAccess" onchange="App.onNewExamAccessChange(this.value)" class="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white font-semibold text-slate-700 outline-none focus:border-indigo-500 cursor-pointer">
                 <option value="all">Tất cả học sinh</option>
+                <option value="class">Theo nhóm lớp được chọn</option>
                 <option value="grade">Theo khối lớp đã chọn</option>
                 <option value="custom">Chỉ học sinh được chọn</option>
               </select>
+            </div>
+          </div>
+
+          <div id="newExamClassesBox" class="hidden p-3.5 rounded-2xl bg-teal-50/50 border border-teal-200 space-y-2 text-xs">
+            <div class="flex items-center justify-between gap-2">
+              <div class="font-bold text-teal-900">Chọn nhóm lớp được tham gia đề thi này:</div>
+              <button type="button" onclick="App.showClassGroupsModal()" class="text-[11px] font-bold text-teal-700 hover:underline cursor-pointer">
+                <i class="fa-solid fa-gear mr-1"></i>Quản lý nhóm lớp
+              </button>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              ${this.getClassGroups().map(cg => `
+                <label class="inline-flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-teal-200 cursor-pointer hover:bg-teal-50 font-bold text-slate-700">
+                  <span class="inline-flex items-center gap-1.5 truncate">
+                    <input type="checkbox" name="newExamClassCheck" value="${this.escapeHtmlAttr(cg.name)}" class="rounded text-teal-600">
+                    <span class="truncate">${cg.name}</span>
+                  </span>
+                  <span class="text-[10px] font-mono text-slate-400 shrink-0">${cg.studentCount} HS</span>
+                </label>
+              `).join('')}
             </div>
           </div>
 
@@ -12031,7 +13495,9 @@ const App = {
   },
 
   onNewExamAccessChange(mode) {
+    const classBox = document.getElementById('newExamClassesBox');
     const box = document.getElementById('newExamCustomStudentsBox');
+    if (classBox) classBox.classList.toggle('hidden', mode !== 'class');
     if (box) box.classList.toggle('hidden', mode !== 'custom');
   },
 
@@ -12073,7 +13539,12 @@ const App = {
       const roundLabel = (document.getElementById('newExamRound')?.value || '').trim() || 'Đợt 1';
       const time = parseInt(document.getElementById('newExamTime').value, 10) || 90;
       const accessMode = document.getElementById('newExamAccess')?.value || 'all';
+      const checkedClasses = Array.from(document.querySelectorAll('#createExamModal input[name="newExamClassCheck"]:checked')).map(cb => cb.value);
       const checkedStudents = Array.from(document.querySelectorAll('#createExamModal input[name="newExamStudentCheck"]:checked')).map(cb => cb.value);
+      if (accessMode === 'class' && checkedClasses.length === 0) {
+        this.notify('Vui lòng chọn ít nhất 1 nhóm lớp được quyền dự thi!', 'warning', 'Chưa chọn nhóm lớp');
+        return;
+      }
       const examId = 'EXAM-' + Date.now();
       const localSaveJobs = [];
 
@@ -12135,6 +13606,7 @@ const App = {
         allow_view_answers: true,
         access_type: accessMode,
         allowed_all: accessMode === 'all',
+        allowed_classes: accessMode === 'class' ? checkedClasses : [],
         allowed_grades: [grade],
         allowed_students: accessMode === 'custom' ? checkedStudents : [],
         pdf_url: finalPdfUrl,
@@ -12178,6 +13650,13 @@ const App = {
     const ex = this.state.exams.find(e => e.id === id);
     if (ex) {
       ex.allow_view_answers = ex.allow_view_answers === false ? true : false;
+      this.saveData({ markAdminDirty: true });
+      this.render();
+      return;
+    }
+    const hw = (this.state.homeworks || []).find(h => h.id === id);
+    if (hw) {
+      hw.allowViewSolution = hw.allowViewSolution === false ? true : false;
       this.saveData({ markAdminDirty: true });
       this.render();
     }
@@ -12358,7 +13837,7 @@ const App = {
     const peerStudents = (this.state.students || []).filter(st => {
       if (this.getStudentGrade(st) !== myGrade) return false;
       if (scope === 'class') {
-        return String(st.className || '').trim() === myClass;
+        return this.isSameClassName(st.className, myClass);
       }
       return true;
     });
@@ -12576,12 +14055,14 @@ const App = {
     const subs = this.state.submissions
       .filter(s => s.studentId === studentId)
       .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+    const examOnlySubs = subs.filter(s => !this.isHomeworkSubmission(s));
+    const hwOnlySubs = subs.filter(s => this.isHomeworkSubmission(s));
 
-    const totalAttempts = subs.length;
-    const validScores = subs.map(s => Number(s.scoreResult.totalScore));
+    const totalAttempts = examOnlySubs.length;
+    const validScores = examOnlySubs.map(s => Number(s.scoreResult.totalScore));
     const avgScore = validScores.length > 0 ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2) : '--';
     const maxScore = validScores.length > 0 ? Math.max(...validScores).toFixed(2) : '--';
-    const totalViolations = subs.reduce((a, b) => a + (b.tabSwitches || 0), 0);
+    const totalViolations = examOnlySubs.reduce((a, b) => a + (b.tabSwitches || 0), 0);
 
     const wasOpen = Boolean(document.getElementById('studentDetailModal'));
     document.getElementById('studentDetailModal')?.remove();
@@ -12639,8 +14120,8 @@ const App = {
         <!-- Quick Metrics -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 py-3 flex-shrink-0">
           <div class="bg-indigo-50/60 p-4 rounded-2xl border border-indigo-100">
-            <div class="text-[11px] font-bold text-indigo-700 uppercase">Lượt thi đã nộp</div>
-            <div class="text-2xl font-extrabold text-indigo-900 mt-1">${totalAttempts}</div>
+            <div class="text-[11px] font-bold text-indigo-700 uppercase">Đề thi &amp; BTVN đã nộp</div>
+            <div class="text-2xl font-extrabold text-indigo-900 mt-1">${totalAttempts} <span class="text-xs font-semibold text-indigo-600">đề${hwOnlySubs.length > 0 ? ` • ${hwOnlySubs.length} BTVN` : ''}</span></div>
           </div>
           <div class="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100">
             <div class="text-[11px] font-bold text-emerald-700 uppercase">Điểm Trung Bình</div>
@@ -12697,16 +14178,26 @@ const App = {
                 </thead>
                 <tbody class="divide-y divide-slate-100 bg-white">
                   ${subs.map(sub => {
-                    const score = Number(sub.scoreResult.totalScore);
+                    const isHw = this.isHomeworkSubmission(sub);
+                    const isPhotoHw = isHw && sub.hwMode === 'photo';
+                    const score = Number(sub.scoreResult && sub.scoreResult.totalScore || 0);
+                    const maxTotal = Number(sub.scoreResult && sub.scoreResult.maxTotal || 10);
                     return `
                       <tr class="hover:bg-slate-50 transition">
                         <td class="px-4 py-3.5">
-                          <div class="font-bold text-slate-900">${sub.examTitle}</div>
-                          <div class="text-[10px] text-slate-400 font-mono">${sub.examId}</div>
+                          <div class="font-bold text-slate-900 flex flex-wrap items-center gap-1.5">
+                            ${isHw ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">BTVN</span>' : ''}
+                            <span>${sub.examTitle}</span>
+                          </div>
+                          <div class="text-[10px] text-slate-400 font-mono">${sub.examId}${sub.isLate ? ' • Nộp muộn' : ''}</div>
                         </td>
                         <td class="px-3 py-3.5 text-center font-bold text-indigo-700">Lần ${sub.attemptNumber || 1}</td>
                         <td class="px-3 py-3.5 text-center">
-                          ${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? `
+                          ${isHw ? `
+                            <span class="text-slate-500 font-medium inline-flex items-center gap-1">
+                              <i class="fa-solid ${isPhotoHw ? 'fa-camera' : 'fa-pen-to-square'} text-emerald-600"></i>${isPhotoHw ? `${(sub.photoImages || sub.homeworkImages || []).length} ảnh` : 'BTVN'}
+                            </span>
+                          ` : ((sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? `
                             <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
                               <i class="fa-solid ${(sub.screenshotCount || 0) > 0 ? 'fa-camera' : 'fa-triangle-exclamation'} mr-1"></i>${sub.tabSwitches || sub.screenshotCount} lần${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} chụp)` : ''}
                             </span>
@@ -12714,20 +14205,26 @@ const App = {
                             <span class="text-emerald-600 font-medium inline-flex items-center gap-1">
                               <i class="fa-solid fa-check"></i>Nghiêm túc
                             </span>
-                          `}
+                          `)}
                         </td>
                         <td class="px-4 py-3.5 text-slate-500">${new Date(sub.submittedAt).toLocaleString('vi-VN')}</td>
-                        <td class="px-3 py-3.5 text-center font-mono">${sub.scoreResult.part1.score}đ</td>
-                        <td class="px-3 py-3.5 text-center font-mono">${sub.scoreResult.part2.score}đ</td>
-                        <td class="px-3 py-3.5 text-center font-mono">${sub.scoreResult.part3.score}đ</td>
+                        <td class="px-3 py-3.5 text-center font-mono">${isPhotoHw ? '--' : `${sub.scoreResult.part1.score}đ`}</td>
+                        <td class="px-3 py-3.5 text-center font-mono">${isPhotoHw ? '--' : `${sub.scoreResult.part2.score}đ`}</td>
+                        <td class="px-3 py-3.5 text-center font-mono">${isPhotoHw ? '--' : `${sub.scoreResult.part3.score}đ`}</td>
                         <td class="px-3 py-3.5 text-center">
-                          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-bold font-mono text-xs ${score >= 8.0 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">
-                            ${score.toFixed(2)} / 10
-                          </span>
+                          ${sub.pendingManualGrade ? `
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-bold text-xs bg-amber-100 text-amber-800 border border-amber-200">
+                              Chờ chấm
+                            </span>
+                          ` : `
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-bold font-mono text-xs ${score >= 8.0 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">
+                              ${score.toFixed(2)} / ${maxTotal}
+                            </span>
+                          `}
                         </td>
                         <td class="px-4 py-3.5 text-right">
-                          <button onclick="document.getElementById('studentDetailModal').remove(); App.viewSubmissionDetail('${sub.id}');" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow-xs transition inline-flex items-center justify-center cursor-pointer">
-                            <i class="fa-solid fa-file-lines mr-1.5"></i>Xem Bài Làm
+                          <button onclick="document.getElementById('studentDetailModal').remove(); App.viewSubmissionDetail('${sub.id}');" class="px-3 py-1.5 ${sub.pendingManualGrade ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'} text-white rounded-lg font-bold text-xs shadow-xs transition inline-flex items-center justify-center cursor-pointer">
+                            <i class="fa-solid ${sub.pendingManualGrade ? 'fa-pen-nib' : 'fa-file-lines'} mr-1.5"></i>${sub.pendingManualGrade ? 'Chấm BTVN' : 'Xem Bài Làm'}
                           </button>
                         </td>
                       </tr>
@@ -12754,60 +14251,222 @@ const App = {
 
   cleanupUnusedHwPreupload() {
     this._preuploadedHwPdfUrl = '';
+    this._preuploadedHwSolPdfUrl = '';
     if (this._preuploadedHwPdfPromise) {
       const p = this._preuploadedHwPdfPromise;
       this._preuploadedHwPdfPromise = null;
       p.then(u => { if (u) this.deleteServerPdfByUrl(u); }).catch(() => {});
     }
+    if (this._preuploadedHwSolPdfPromise) {
+      const p = this._preuploadedHwSolPdfPromise;
+      this._preuploadedHwSolPdfPromise = null;
+      p.then(u => { if (u) this.deleteServerPdfByUrl(u); }).catch(() => {});
+    }
   },
 
-  showAddHomeworkModal() {
+  formatDatetimeLocalValue(isoStr) {
+    if (!isoStr) return '';
+    const d = new Date(isoStr);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  },
+
+  showAddHomeworkModal(opts = {}) {
     this.cleanupUnusedHwPreupload();
     this.state.tempSelectedHwFile = null;
+    this.state.tempSelectedHwSolFile = null;
     this._hwPdfUploadToken = null;
-    const defaultGrade = (this.state.hwGradeFilter && this.state.hwGradeFilter !== 'ALL') ? Number(this.state.hwGradeFilter) : 12;
+    this._hwSolPdfUploadToken = null;
+
+    const editHwId = opts && opts.editHwId ? String(opts.editHwId) : null;
+    const existingHw = editHwId ? (this.state.homeworks || []).find(h => h.id === editHwId) : null;
+    this._editingHomeworkId = existingHw ? existingHw.id : null;
+
+    const initKind = existingHw
+      ? (existingHw.itemKind === 'homework' ? 'homework' : 'document')
+      : (opts && opts.itemKind === 'homework' ? 'homework' : (opts && opts.itemKind === 'document' ? 'document' : (this.state.hwKindFilter === 'homework' ? 'homework' : 'document')));
+    const initHwMode = existingHw && existingHw.hwMode === 'interactive'
+      ? 'interactive'
+      : (opts && opts.hwMode === 'interactive' ? 'interactive' : 'photo');
+
+    if (existingHw && initHwMode === 'interactive') {
+      this.initAnswerKeyDraft(existingHw);
+    } else {
+      this.initAnswerKeyDraft(null);
+    }
+
+    const classGroups = this.getClassGroups();
+    const preClass = (opts && opts.preselectedClass)
+      || ((!existingHw && this.state.hwClassFilter && this.state.hwClassFilter !== 'ALL') ? this.state.hwClassFilter : '');
+    const preClassObj = preClass ? classGroups.find(g => this.isSameClassName(g.name, preClass)) : null;
+
+    const defaultGrade = existingHw
+      ? Number(existingHw.grade || 12)
+      : (opts && opts.grade
+        ? Number(opts.grade)
+        : (preClassObj ? preClassObj.grade : ((this.state.hwGradeFilter && this.state.hwGradeFilter !== 'ALL') ? Number(this.state.hwGradeFilter) : 12)));
+
+    const initAccess = existingHw
+      ? (existingHw.allowedAll || existingHw.accessType === 'all' ? 'all' : (existingHw.accessType || 'grade'))
+      : (preClass ? 'class' : (initKind === 'homework' ? 'class' : 'all'));
+
+    const initClasses = existingHw
+      ? (Array.isArray(existingHw.allowedClasses) ? existingHw.allowedClasses : [])
+      : (preClass ? [preClass] : []);
+    const initStudents = new Set(
+      existingHw && Array.isArray(existingHw.allowedStudents)
+        ? existingHw.allowedStudents
+        : this.state.students.map(s => s.studentId)
+    );
+    const initDueLocal = existingHw && existingHw.dueAt ? this.formatDatetimeLocalValue(existingHw.dueAt) : '';
+    const initMaxScore = existingHw ? (Number(existingHw.maxScore) || 10) : 10;
+    const initTimeMinutes = existingHw ? (Number(existingHw.time_minutes) || 0) : 0;
+    const initAllowResubmit = existingHw ? existingHw.allowResubmit !== false : true;
+    const initAllowViewSol = existingHw ? existingHw.allowViewSolution !== false : true;
+
+    const wasOpen = Boolean(document.getElementById('addHomeworkModal'));
+    document.getElementById('addHomeworkModal')?.remove();
+
     const modal = document.createElement('div');
     modal.id = 'addHomeworkModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl max-w-xl w-full border border-slate-200 shadow-2xl overflow-hidden my-2 sm:my-8">
-        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 flex items-center justify-between gap-2">
+      <div class="bg-white rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden my-2 sm:my-6">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50/80 via-white to-emerald-50/40 flex items-center justify-between gap-2 shrink-0">
           <div class="flex items-center space-x-3 min-w-0">
             <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
-              <i class="fa-solid fa-book-open text-base"></i>
+              <i class="fa-solid ${initKind === 'homework' ? 'fa-paper-plane' : 'fa-book-open'} text-base"></i>
             </div>
             <div class="min-w-0">
-              <h3 class="font-extrabold text-slate-900 text-sm sm:text-base">Thêm Tài Liệu &amp; Chuyên Đề Mới</h3>
-              <p class="text-xs text-slate-500 mt-0.5">Phân chia theo Khối 6 – 12, tự động lưu lên máy chủ và phân quyền học sinh</p>
+              <h3 id="addHwModalHeaderTitle" class="font-extrabold text-slate-900 text-sm sm:text-base">
+                ${existingHw ? `Chỉnh Sửa: ${existingHw.title}` : (initKind === 'homework' ? 'Giao Bài Tập Về Nhà Theo Nhóm Lớp' : 'Thêm Tài Liệu &amp; Chuyên Đề PDF')}
+              </h3>
+              <p class="text-xs text-slate-500 mt-0.5">Giao riêng theo từng nhóm lớp (12A 2K9, 10B 2K11...), tự động lưu đám mây cho điện thoại học sinh</p>
             </div>
           </div>
-          <button onclick="App.cleanupUnusedHwPreupload(); document.getElementById('addHomeworkModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition shrink-0"><i class="fa-solid fa-xmark text-base"></i></button>
+          <button type="button" onclick="App.cleanupUnusedHwPreupload(); document.getElementById('addHomeworkModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition shrink-0"><i class="fa-solid fa-xmark text-base"></i></button>
         </div>
 
-        <form onsubmit="event.preventDefault(); App.handleAddHomeworkSubmit();" class="p-4 sm:p-6 space-y-4 text-sm">
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+        <form id="addHomeworkForm" onsubmit="event.preventDefault(); App.handleAddHomeworkSubmit();" class="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1">
+          <!-- Chọn phân mục: Bài Tập Về Nhà vs Tài Liệu PDF -->
+          <input type="hidden" id="newHwItemKind" value="${initKind}">
+          <div class="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-2xl border border-slate-200">
+            <button type="button" id="hwKindBtn_homework" onclick="App.onHwFormKindOrModeChange('homework', null)" class="py-2.5 px-3 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${initKind === 'homework' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
+              <i class="fa-solid fa-paper-plane"></i><span>Bài Tập Về Nhà (Có nộp bài)</span>
+            </button>
+            <button type="button" id="hwKindBtn_document" onclick="App.onHwFormKindOrModeChange('document', null)" class="py-2.5 px-3 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${initKind === 'document' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
+              <i class="fa-solid fa-book-open"></i><span>Tài Liệu / Chuyên Đề PDF</span>
+            </button>
+          </div>
+
+          <!-- Cấu hình riêng cho Bài Tập Về Nhà -->
+          <div id="newHwAssignmentConfigBox" class="${initKind === 'homework' ? '' : 'hidden'} p-4 rounded-2xl bg-emerald-50/50 border border-emerald-200 space-y-3.5">
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Khối lớp (6 – 12) *</label>
+              <label class="block font-extrabold text-emerald-950 mb-1.5 uppercase tracking-wider text-[11px]">
+                <i class="fa-solid fa-laptop-file mr-1 text-emerald-600"></i>Hình thức học sinh làm &amp; nộp bài tập
+              </label>
+              <input type="hidden" id="newHwMode" value="${initHwMode}">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button type="button" id="hwModeBtn_photo" onclick="App.onHwFormKindOrModeChange(null, 'photo')" class="p-3 rounded-xl border text-left transition cursor-pointer ${initHwMode === 'photo' ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20' : 'border-emerald-200/80 bg-white/60 hover:bg-white'}">
+                  <div class="font-extrabold text-slate-900 flex items-center gap-1.5">
+                    <i class="fa-solid fa-camera text-emerald-600"></i><span>Nộp ảnh chụp vở / Tự luận</span>
+                  </div>
+                  <div class="text-[11px] text-slate-500 mt-0.5">HS chụp ảnh bài giải trong vở tải lên, Giáo viên chấm điểm &amp; nhận xét</div>
+                </button>
+                <button type="button" id="hwModeBtn_interactive" onclick="App.onHwFormKindOrModeChange(null, 'interactive')" class="p-3 rounded-xl border text-left transition cursor-pointer ${initHwMode === 'interactive' ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20' : 'border-emerald-200/80 bg-white/60 hover:bg-white'}">
+                  <div class="font-extrabold text-slate-900 flex items-center gap-1.5">
+                    <i class="fa-solid fa-bolt text-indigo-600"></i><span>Điền đáp án chấm tự động trên PDF</span>
+                  </div>
+                  <div class="text-[11px] text-slate-500 mt-0.5">HS mở đề PDF điền P.I / P.II / P.III, hệ thống tự chấm điểm ngay</div>
+                </button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Hạn nộp bài (Tùy chọn)</label>
+                <input type="datetime-local" id="newHwDueAt" value="${initDueLocal}" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:border-emerald-600 outline-none">
+              </div>
+              <div id="newHwMaxScoreWrap" class="${initHwMode === 'photo' ? '' : 'hidden'}">
+                <label class="block font-bold text-slate-700 mb-1">Thang điểm tối đa</label>
+                <input type="number" id="newHwMaxScore" min="1" max="100" step="0.5" value="${initMaxScore}" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-emerald-700 focus:border-emerald-600 outline-none">
+              </div>
+              <div id="newHwTimeMinutesWrap" class="${initHwMode === 'interactive' ? '' : 'hidden'}">
+                <label class="block font-bold text-slate-700 mb-1">Thời gian (0 = Tự do)</label>
+                <input type="number" id="newHwTimeMinutes" min="0" max="300" value="${initTimeMinutes}" placeholder="0 = Không giới hạn" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-indigo-700 focus:border-indigo-600 outline-none">
+              </div>
+              <div class="flex flex-col justify-center gap-1.5 pt-1">
+                <label class="inline-flex items-center gap-2 cursor-pointer font-semibold text-slate-700">
+                  <input type="checkbox" id="newHwAllowResubmit" ${initAllowResubmit ? 'checked' : ''} class="rounded text-emerald-600">
+                  <span>Cho phép nộp lại / bổ sung</span>
+                </label>
+                <label class="inline-flex items-center gap-2 cursor-pointer font-semibold text-slate-700">
+                  <input type="checkbox" id="newHwAllowViewSol" ${initAllowViewSol ? 'checked' : ''} class="rounded text-indigo-600">
+                  <span>Mở file giải sau khi nộp</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chọn Khối & Phân quyền Nhóm Lớp -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Khối lớp (6 – 12) *</label>
               <select id="newHwGrade" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-indigo-700 bg-white focus:border-indigo-600 outline-none cursor-pointer">
                 ${[6, 7, 8, 9, 10, 11, 12].map(g => `<option value="${g}" ${g === defaultGrade ? 'selected' : ''}>Khối ${g}</option>`).join('')}
               </select>
             </div>
             <div class="sm:col-span-2">
-              <label class="block text-xs font-bold text-slate-700 mb-1">Quyền truy cập *</label>
-              <select id="newHwAccess" onchange="const box = document.getElementById('newHwStudentPickBox'); if (box) box.classList.toggle('hidden', this.value !== 'selected');" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold bg-white focus:border-indigo-600 outline-none cursor-pointer">
-                <option value="all">Toàn bộ học sinh</option>
-                <option value="grade">Theo khối lớp của tài liệu</option>
-                <option value="selected">Chỉ định nhóm học sinh</option>
+              <label class="block font-bold text-slate-700 mb-1">Giao cho nhóm lớp / Đối tượng nhận *</label>
+              <select id="newHwAccess" onchange="App.onHwFormAccessChange(this.value)" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-bold bg-white text-slate-800 focus:border-indigo-600 outline-none cursor-pointer">
+                <option value="class" ${initAccess === 'class' ? 'selected' : ''}>Theo nhóm lớp được chọn (Khuyên dùng khi giao BTVN)</option>
+                <option value="grade" ${initAccess === 'grade' ? 'selected' : ''}>Toàn bộ học sinh thuộc Khối đã chọn</option>
+                <option value="all" ${initAccess === 'all' ? 'selected' : ''}>Tất cả học sinh toàn hệ thống</option>
+                <option value="selected" ${initAccess === 'selected' ? 'selected' : ''}>Chỉ định từng học sinh cụ thể</option>
               </select>
             </div>
           </div>
 
-          <div id="newHwStudentPickBox" class="hidden p-3 rounded-xl bg-slate-50 border border-slate-200 max-h-36 overflow-y-auto space-y-1.5">
-            <div class="text-[11px] font-bold text-slate-600 mb-1">Chọn học sinh được xem tài liệu:</div>
+          <!-- Bảng chọn Nhóm Lớp -->
+          <div id="newHwClassPickBox" class="${initAccess === 'class' ? '' : 'hidden'} p-3.5 rounded-2xl bg-amber-50/50 border border-amber-200 space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="font-bold text-amber-950 flex items-center gap-1.5">
+                <i class="fa-solid fa-people-roof text-amber-600"></i>
+                <span>Chọn nhóm lớp nhận bài (có thể chọn 1 hoặc nhiều lớp):</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="App.selectHwClassesByCurrentGrade()" class="px-2.5 py-1 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-[11px] font-bold text-amber-800 cursor-pointer">
+                  Chọn các lớp cùng Khối
+                </button>
+                <button type="button" onclick="App.showClassGroupsModal()" class="text-[11px] font-bold text-indigo-600 hover:underline cursor-pointer">
+                  <i class="fa-solid fa-gear mr-1"></i>Quản lý lớp
+                </button>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              ${classGroups.map(cg => {
+                const isChecked = initClasses.some(c => this.isSameClassName(c, cg.name));
+                return `
+                  <label class="inline-flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl bg-white border border-amber-200 cursor-pointer hover:border-amber-400 font-bold text-slate-800">
+                    <span class="inline-flex items-center gap-1.5 truncate">
+                      <input type="checkbox" name="newHwClassPick" data-grade="${cg.grade}" value="${this.escapeHtmlAttr(cg.name)}" onchange="App.syncHwGradeFromCheckedClass()" ${isChecked ? 'checked' : ''} class="rounded text-amber-600">
+                      <span class="truncate">${cg.name}</span>
+                    </span>
+                    <span class="text-[10px] font-mono text-slate-400 shrink-0">${cg.studentCount} HS</span>
+                  </label>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Bảng chọn từng Học Sinh -->
+          <div id="newHwStudentPickBox" class="${initAccess === 'selected' ? '' : 'hidden'} p-3 rounded-xl bg-slate-50 border border-slate-200 max-h-40 overflow-y-auto space-y-1.5">
+            <div class="text-[11px] font-bold text-slate-600 mb-1">Chọn học sinh được nhận:</div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               ${this.state.students.map(s => `
                 <label class="flex items-center space-x-2 text-xs bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 cursor-pointer hover:border-indigo-300">
-                  <input type="checkbox" name="newHwStudentPick" value="${s.studentId}" checked class="rounded text-indigo-600">
+                  <input type="checkbox" name="newHwStudentPick" value="${s.studentId}" ${initStudents.has(s.studentId) ? 'checked' : ''} class="rounded text-indigo-600">
                   <span class="truncate font-semibold text-slate-700">${s.fullName}</span>
                   <span class="text-[10px] font-mono text-slate-400">(K${this.getStudentGrade(s)} • ${s.className || '12'})</span>
                 </label>
@@ -12816,107 +14475,326 @@ const App = {
           </div>
 
           <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1">Tên chuyên đề / tài liệu *</label>
-            <input type="text" id="newHwTitle" required placeholder="VD: Chuyên đề Toán 11 — Hàm số Mũ & Lôgarit" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold focus:border-indigo-600 outline-none">
+            <label id="newHwTitleLabel" class="block font-bold text-slate-700 mb-1">${initKind === 'homework' ? 'Tiêu đề bài tập về nhà *' : 'Tên chuyên đề / tài liệu *'}</label>
+            <input type="text" id="newHwTitle" required value="${this.escapeHtmlAttr(existingHw ? existingHw.title : '')}" placeholder="${initKind === 'homework' ? 'VD: BTVN Tuần 8 — Khảo sát hàm số & Bài toán thực tế' : 'VD: Chuyên đề Toán 11 — Hàm số Mũ & Lôgarit'}" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold focus:border-indigo-600 outline-none">
           </div>
+
           <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1">Mô tả tóm tắt</label>
-            <textarea id="newHwDesc" rows="2" placeholder="Tóm tắt lý thuyết, dạng bài và câu hỏi rèn luyện..." class="w-full px-3.5 py-2 border border-slate-300 rounded-xl text-xs focus:border-indigo-600 outline-none"></textarea>
+            <label id="newHwDescLabel" class="block font-bold text-slate-700 mb-1">${initKind === 'homework' ? 'Yêu cầu / Dặn dò làm bài (hiện trực tiếp cho học sinh)' : 'Mô tả tóm tắt'}</label>
+            <textarea id="newHwDesc" rows="2" placeholder="${initKind === 'homework' ? 'VD: Làm chi tiết tự luận từ Câu 1 đến Câu 10 vào vở, chụp rõ nét các trang vở và nộp trước 21h00 Chủ nhật...' : 'Tóm tắt lý thuyết, dạng bài và câu hỏi rèn luyện...'}" class="w-full px-3.5 py-2 border border-slate-300 rounded-xl text-xs focus:border-indigo-600 outline-none">${existingHw ? (existingHw.description || '') : ''}</textarea>
           </div>
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1">File PDF chuyên đề từ máy tính</label>
-            <div id="newHwDropZone" data-drop-target="newHwFileInput" class="border-2 border-dashed border-indigo-200 rounded-xl p-4 text-center bg-indigo-50/40 hover:bg-indigo-50/80 transition cursor-pointer">
-              <input type="file" id="newHwFileInput" accept=".pdf,application/pdf" class="hidden" onchange="App.handleHwFileSelect(event)">
-              <label for="newHwFileInput" class="cursor-pointer block">
-                <i class="fa-solid fa-cloud-arrow-up text-2xl text-indigo-600 mb-1"></i>
-                <div class="text-xs font-bold text-slate-800">Kéo thả file PDF vào ô này hoặc bấm để chọn file</div>
-                <div id="newHwFileBadge" class="text-[11px] text-slate-500 mt-1">Tự động lưu trực tiếp lên máy chủ đám mây, học sinh xem ngay trên mọi thiết bị</div>
+
+          <div class="grid grid-cols-1 ${initKind === 'homework' ? 'sm:grid-cols-2' : ''} gap-3" id="newHwFilesGrid">
+            <!-- File PDF Đề bài / Tài liệu -->
+            <div>
+              <label id="newHwFileLabel" class="block font-bold text-slate-700 mb-1">
+                <i class="fa-solid fa-file-pdf text-red-500 mr-1"></i>${initKind === 'homework' ? (initHwMode === 'photo' ? 'File PDF Đề bài (Tùy chọn nếu đã ghi đề ở trên)' : 'File PDF Đề BTVN *') : 'File PDF chuyên đề / tài liệu *'}
               </label>
+              <div id="newHwDropZone" data-drop-target="newHwFileInput" class="border-2 border-dashed border-indigo-200 rounded-xl p-3.5 text-center bg-indigo-50/40 hover:bg-indigo-50/80 transition cursor-pointer">
+                <input type="file" id="newHwFileInput" accept=".pdf,application/pdf" class="hidden" onchange="App.handleHwFileSelect(event)">
+                <label for="newHwFileInput" class="cursor-pointer block">
+                  <i class="fa-solid fa-cloud-arrow-up text-xl text-indigo-600 mb-1"></i>
+                  <div class="text-xs font-bold text-slate-800">Kéo thả hoặc bấm chọn PDF Đề / Tài liệu</div>
+                  <div id="newHwFileBadge" class="text-[11px] text-slate-500 mt-1 truncate">${existingHw && existingHw.fileName ? `Đang dùng: ${existingHw.fileName}` : 'Tự động đồng bộ lên máy chủ đám mây'}</div>
+                </label>
+              </div>
+            </div>
+
+            <!-- File PDF Đáp án / Lời giải BTVN -->
+            <div id="newHwSolDropWrap" class="${initKind === 'homework' ? '' : 'hidden'}">
+              <label class="block font-bold text-slate-700 mb-1">
+                <i class="fa-solid fa-file-circle-check text-emerald-600 mr-1"></i>File PDF Lời giải / Hướng dẫn (Tùy chọn)
+              </label>
+              <div id="newHwSolDropZone" data-drop-target="newHwSolFileInput" class="border-2 border-dashed border-emerald-200 rounded-xl p-3.5 text-center bg-emerald-50/40 hover:bg-emerald-50/80 transition cursor-pointer">
+                <input type="file" id="newHwSolFileInput" accept=".pdf,application/pdf" class="hidden" onchange="App.handleHwSolFileSelect(event)">
+                <label for="newHwSolFileInput" class="cursor-pointer block">
+                  <i class="fa-solid fa-file-shield text-xl text-emerald-600 mb-1"></i>
+                  <div class="text-xs font-bold text-slate-800">Kéo thả hoặc bấm chọn PDF Lời giải</div>
+                  <div id="newHwSolFileBadge" class="text-[11px] text-slate-500 mt-1 truncate">${existingHw && existingHw.solutionFileName ? `Đang dùng: ${existingHw.solutionFileName}` : 'Học sinh được xem sau khi nộp bài'}</div>
+                </label>
+              </div>
             </div>
           </div>
 
-          <div class="pt-3 border-t border-slate-100 flex justify-end space-x-2.5">
-            <button type="button" onclick="App.cleanupUnusedHwPreupload(); document.getElementById('addHomeworkModal')?.remove()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-semibold text-slate-700 cursor-pointer transition">Hủy</button>
-            <button type="submit" id="addHomeworkSubmitBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition inline-flex items-center gap-1.5 cursor-pointer">
-              <i class="fa-solid fa-file-circle-plus"></i><span>Tải Lên Tài Liệu</span>
-            </button>
+          <!-- Bảng đáp án chấm tự động (chỉ hiện khi BTVN ở chế độ interactive) -->
+          <div id="newHwInteractiveKeyWrap" class="${initKind === 'homework' && initHwMode === 'interactive' ? '' : 'hidden'}">
+            <div id="answerKeyEditorHost" data-drop-target="ansKeyEditorSmart">
+              ${this.renderAnswerKeyEditorHtml()}
+            </div>
           </div>
         </form>
+
+        <div class="px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2.5 shrink-0">
+          <button type="button" onclick="App.cleanupUnusedHwPreupload(); document.getElementById('addHomeworkModal')?.remove()" class="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl text-xs font-semibold text-slate-700 cursor-pointer transition">Hủy</button>
+          <button type="submit" form="addHomeworkForm" id="addHomeworkSubmitBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition inline-flex items-center gap-1.5 cursor-pointer">
+            <i class="fa-solid ${initKind === 'homework' ? 'fa-paper-plane' : 'fa-file-circle-plus'}"></i>
+            <span id="addHwSubmitBtnText">${existingHw ? 'Lưu Cập Nhật' : (initKind === 'homework' ? 'Giao Bài Tập Ngay' : 'Tải Lên Tài Liệu')}</span>
+          </button>
+        </div>
       </div>
     `;
-    this.openModalElement(modal);
+    this.openModalElement(modal, wasOpen);
+  },
+
+  onHwFormKindOrModeChange(nextKind, nextMode) {
+    const kindInp = document.getElementById('newHwItemKind');
+    const modeInp = document.getElementById('newHwMode');
+    if (nextKind && kindInp) kindInp.value = nextKind;
+    if (nextMode && modeInp) modeInp.value = nextMode;
+    const kind = kindInp ? kindInp.value : 'homework';
+    const hwMode = modeInp ? modeInp.value : 'photo';
+
+    const btnHw = document.getElementById('hwKindBtn_homework');
+    const btnDoc = document.getElementById('hwKindBtn_document');
+    if (btnHw) btnHw.className = 'py-2.5 px-3 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ' + (kind === 'homework' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900');
+    if (btnDoc) btnDoc.className = 'py-2.5 px-3 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ' + (kind === 'document' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900');
+
+    const mPhoto = document.getElementById('hwModeBtn_photo');
+    const mInter = document.getElementById('hwModeBtn_interactive');
+    if (mPhoto) mPhoto.className = 'p-3 rounded-xl border text-left transition cursor-pointer ' + (hwMode === 'photo' ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20' : 'border-emerald-200/80 bg-white/60 hover:bg-white');
+    if (mInter) mInter.className = 'p-3 rounded-xl border text-left transition cursor-pointer ' + (hwMode === 'interactive' ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20' : 'border-emerald-200/80 bg-white/60 hover:bg-white');
+
+    document.getElementById('newHwAssignmentConfigBox')?.classList.toggle('hidden', kind !== 'homework');
+    document.getElementById('newHwMaxScoreWrap')?.classList.toggle('hidden', hwMode !== 'photo');
+    document.getElementById('newHwTimeMinutesWrap')?.classList.toggle('hidden', hwMode !== 'interactive');
+    document.getElementById('newHwSolDropWrap')?.classList.toggle('hidden', kind !== 'homework');
+    document.getElementById('newHwInteractiveKeyWrap')?.classList.toggle('hidden', !(kind === 'homework' && hwMode === 'interactive'));
+
+    const filesGrid = document.getElementById('newHwFilesGrid');
+    if (filesGrid) {
+      filesGrid.className = `grid grid-cols-1 ${kind === 'homework' ? 'sm:grid-cols-2' : ''} gap-3`;
+    }
+    const fileLbl = document.getElementById('newHwFileLabel');
+    if (fileLbl) {
+      fileLbl.innerHTML = `<i class="fa-solid fa-file-pdf text-red-500 mr-1"></i>${kind === 'homework' ? (hwMode === 'photo' ? 'File PDF Đề bài (Tùy chọn nếu đã ghi đề ở trên)' : 'File PDF Đề BTVN *') : 'File PDF chuyên đề / tài liệu *'}`;
+    }
+    const submitTxt = document.getElementById('addHwSubmitBtnText');
+    if (submitTxt && !this._editingHomeworkId) {
+      submitTxt.textContent = kind === 'homework' ? 'Giao Bài Tập Ngay' : 'Tải Lên Tài Liệu';
+    }
+    if (nextKind === 'homework' && !this._editingHomeworkId) {
+      const accSel = document.getElementById('newHwAccess');
+      if (accSel && accSel.value === 'all') {
+        accSel.value = 'class';
+        this.onHwFormAccessChange('class');
+      }
+    }
+  },
+
+  onHwFormAccessChange(val) {
+    document.getElementById('newHwClassPickBox')?.classList.toggle('hidden', val !== 'class');
+    document.getElementById('newHwStudentPickBox')?.classList.toggle('hidden', val !== 'selected');
+  },
+
+  selectHwClassesByCurrentGrade() {
+    const g = String(document.getElementById('newHwGrade')?.value || '12');
+    document.querySelectorAll('#addHomeworkModal input[name="newHwClassPick"]').forEach(cb => {
+      cb.checked = cb.getAttribute('data-grade') === g;
+    });
+  },
+
+  syncHwGradeFromCheckedClass() {
+    const checked = Array.from(document.querySelectorAll('#addHomeworkModal input[name="newHwClassPick"]:checked'));
+    if (checked.length === 1) {
+      const g = checked[0].getAttribute('data-grade');
+      const gradeSel = document.getElementById('newHwGrade');
+      if (g && gradeSel) gradeSel.value = g;
+    }
+  },
+
+  toggleHomeworkActive(hwId) {
+    const hw = (this.state.homeworks || []).find(h => h.id === hwId);
+    if (!hw) return;
+    hw.isActive = hw.isActive === false ? true : false;
+    this.saveData({ markAdminDirty: true });
+    this.renderPreservingScroll();
   },
 
   renderAdminHwGridHtml() {
     const gFilter = this.state.hwGradeFilter || 'ALL';
+    const kFilter = this.state.hwKindFilter || 'ALL';
+    const cFilter = this.state.hwClassFilter || 'ALL';
     const q = this.state.hwSearchQuery || '';
     const filtered = (this.state.homeworks || []).filter(hw => {
       if (gFilter !== 'ALL' && String(hw.grade || 12) !== String(gFilter)) return false;
+      const itemKind = hw.itemKind === 'homework' ? 'homework' : 'document';
+      if (kFilter !== 'ALL' && itemKind !== kFilter) return false;
+      if (cFilter !== 'ALL') {
+        const classes = Array.isArray(hw.allowedClasses) ? hw.allowedClasses : [];
+        if (hw.accessType === 'class') {
+          if (!classes.some(c => this.isSameClassName(c, cFilter))) return false;
+        } else {
+          const cg = this.getClassGroups().find(x => this.isSameClassName(x.name, cFilter));
+          if (cg && !hw.allowedAll && hw.accessType === 'grade' && Number(hw.grade || 12) !== cg.grade) return false;
+        }
+      }
       return this.matchHwSearch(hw, q);
     });
 
     if (filtered.length === 0) {
       return `
-        <div class="bg-slate-50 rounded-2xl p-8 text-center border border-dashed border-slate-200 text-slate-500 text-xs">
-          <i class="fa-solid fa-folder-open text-2xl text-slate-300 mb-2"></i>
-          <p class="font-semibold">${this.state.homeworks.length === 0 ? 'Chưa có tài liệu hoặc chuyên đề nào. Hãy tải lên file PDF đầu tiên!' : `Không có tài liệu nào phù hợp${gFilter !== 'ALL' ? ` trong Khối ${gFilter}` : ''}.`}</p>
+        <div class="bg-slate-50 rounded-2xl p-8 text-center border border-dashed border-slate-200 text-slate-500 text-xs space-y-2">
+          <i class="fa-solid fa-folder-open text-2xl text-slate-300"></i>
+          <p class="font-semibold">${this.state.homeworks.length === 0 ? 'Chưa có bài tập về nhà hoặc tài liệu nào.' : 'Không có BTVN / tài liệu nào khớp với bộ lọc hiện tại.'}</p>
+          <div class="flex items-center justify-center gap-2 pt-1">
+            <button type="button" onclick="App.resetHwFilter()" class="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl font-bold cursor-pointer">Đặt lại bộ lọc</button>
+            <button type="button" onclick="App.showAddHomeworkModal({ itemKind: 'homework' })" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold cursor-pointer"><i class="fa-solid fa-paper-plane mr-1"></i>Giao BTVN mới</button>
+          </div>
         </div>
       `;
     }
 
     return `
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         ${filtered.map(hw => {
           const curGrade = Number(hw.grade || 12);
+          const isHw = hw.itemKind === 'homework';
+          const isInteractive = isHw && hw.hwMode === 'interactive';
+          const dueMeta = this.getHomeworkDueStatus(hw);
+          const classList = Array.isArray(hw.allowedClasses) ? hw.allowedClasses : [];
           const accessBadge = (hw.allowedAll || hw.accessType === 'all')
-            ? '<span class="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg"><i class="fa-solid fa-users mr-1"></i>Tất cả học sinh</span>'
-            : (hw.accessType === 'grade'
-              ? `<span class="text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-lg"><i class="fa-solid fa-layer-group mr-1"></i>Học sinh Khối ${curGrade}</span>`
-              : `<span class="text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg"><i class="fa-solid fa-user-lock mr-1"></i>${(hw.allowedStudents || []).length} học sinh</span>`);
-          return `
-            <div class="p-5 rounded-2xl border border-slate-200 bg-white hover:border-indigo-200 hover:shadow-md transition flex flex-col justify-between space-y-3">
-              <div class="space-y-2.5">
-                <div class="flex items-center justify-between gap-2">
-                  <div class="flex flex-wrap items-center gap-1.5">
-                    <span class="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-600 text-white shadow-2xs">
-                      Khối ${curGrade}
-                    </span>
-                    <span class="px-2 py-0.5 rounded-lg text-[10px] font-mono text-slate-500 bg-slate-100">
-                      ${hw.id}
-                    </span>
-                    <span class="text-[11px] text-slate-400 font-mono">• ${hw.dateAdded || 'Hôm nay'}</span>
-                  </div>
-                  <div class="flex items-center gap-1 text-[11px] text-slate-500">
-                    <span class="hidden sm:inline font-medium">Chuyển khối:</span>
+            ? '<span class="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg inline-flex items-center gap-1"><i class="fa-solid fa-users"></i><span>Tất cả HS</span></span>'
+            : (hw.accessType === 'class'
+              ? `<span class="text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg inline-flex items-center gap-1"><i class="fa-solid fa-people-roof"></i><span>Lớp: ${classList.join(', ') || 'Chưa chọn'}</span></span>`
+              : (hw.accessType === 'grade'
+                ? `<span class="text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-lg inline-flex items-center gap-1"><i class="fa-solid fa-layer-group"></i><span>Khối ${curGrade}</span></span>`
+                : `<span class="text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg inline-flex items-center gap-1"><i class="fa-solid fa-user-lock"></i><span>${(hw.allowedStudents || []).length} HS</span></span>`));
+
+          if (!isHw) {
+            return `
+              <div class="p-5 rounded-2xl border border-slate-200 bg-white hover:border-indigo-200 hover:shadow-md transition flex flex-col justify-between space-y-3">
+                <div class="space-y-2.5">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-600 text-white shadow-2xs">Khối ${curGrade}</span>
+                      <span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200"><i class="fa-solid fa-book-open mr-1"></i>Tài liệu PDF</span>
+                      <span class="px-2 py-0.5 rounded-lg text-[10px] font-mono text-slate-500 bg-slate-100">${hw.id}</span>
+                    </div>
                     <select aria-label="Đổi khối tài liệu" onchange="App.updateHomeworkGrade('${hw.id}', this.value)" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-white text-[11px] font-bold text-indigo-700 outline-none cursor-pointer">
                       ${[6, 7, 8, 9, 10, 11, 12].map(g => `<option value="${g}" ${g === curGrade ? 'selected' : ''}>K${g}</option>`).join('')}
                     </select>
                   </div>
+
+                  <div class="flex items-start space-x-3">
+                    <div class="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-100 text-base">
+                      <i class="fa-solid fa-file-pdf"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <h4 class="font-bold text-slate-900 text-sm truncate" title="${this.escapeHtmlAttr(hw.title)}">${hw.title}</h4>
+                      <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">${hw.description}</p>
+                      <div class="mt-1.5 text-[11px] text-slate-400 font-mono truncate">
+                        <span>${hw.fileName || 'Chuyen_De.pdf'}</span> • <span>${hw.fileSize || 'PDF'}</span> • <span>${hw.dateAdded || ''}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div class="flex items-start space-x-3">
-                  <div class="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-100 text-base">
-                    <i class="fa-solid fa-file-pdf"></i>
+                <div class="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                  <span class="text-[11px] font-semibold">${accessBadge}</span>
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer" title="Chỉnh sửa hoặc phân quyền nhóm lớp">
+                      <i class="fa-solid fa-pen mr-1"></i>Sửa
+                    </button>
+                    <button type="button" onclick="App.openPdfModal('${this.escapeHtmlAttr(hw.title)}', '${hw.pdfUrl}', '${hw.id}')" class="px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold flex items-center transition cursor-pointer">
+                      <i class="fa-solid fa-file-pdf mr-1.5"></i>Xem PDF
+                    </button>
+                    <button type="button" onclick="App.deleteHomework('${hw.id}')" class="px-2.5 py-1.5 bg-red-50 border border-red-100 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold transition cursor-pointer">
+                      <i class="fa-solid fa-trash-can"></i>
+                    </button>
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <h4 class="font-bold text-slate-900 text-sm truncate" title="${hw.title}">${hw.title}</h4>
-                    <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">${hw.description}</p>
-                    <div class="mt-1.5 text-[11px] text-slate-400 font-mono truncate">
-                      <span>${hw.fileName || 'Chuyen_De.pdf'}</span> • <span>${hw.fileSize || '2 MB'}</span>
+                </div>
+              </div>
+            `;
+          }
+
+          const targetStudents = this.getHomeworkTargetStudents(hw);
+          const hwSubs = (this.state.submissions || []).filter(s => s.examId === hw.id);
+          const latestByStudent = new Map();
+          hwSubs.forEach(s => {
+            const cur = latestByStudent.get(s.studentId);
+            if (!cur || new Date(s.submittedAt) >= new Date(cur.submittedAt)) latestByStudent.set(s.studentId, s);
+          });
+          const submittedTargetCount = targetStudents.filter(st => latestByStudent.has(st.studentId)).length;
+          const missingCount = Math.max(0, targetStudents.length - submittedTargetCount);
+          const pendingGradeCount = Array.from(latestByStudent.values()).filter(s => s.pendingManualGrade).length;
+          const lateCount = Array.from(latestByStudent.values()).filter(s => s.isLate).length;
+          const pct = targetStudents.length > 0 ? Math.min(100, Math.round((submittedTargetCount / targetStudents.length) * 100)) : 0;
+
+          return `
+            <div class="p-5 rounded-2xl border-2 ${pendingGradeCount > 0 ? 'border-amber-300 bg-white' : 'border-emerald-200/80 bg-white'} hover:shadow-md transition flex flex-col justify-between space-y-3.5">
+              <div class="space-y-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-600 text-white">Khối ${curGrade}</span>
+                    <span class="px-2 py-0.5 rounded-lg text-[11px] font-extrabold ${isInteractive ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}">
+                      <i class="fa-solid ${isInteractive ? 'fa-bolt' : 'fa-camera'} mr-1"></i>${isInteractive ? 'BTVN • Chấm tự động' : 'BTVN • Chụp ảnh vở'}
+                    </span>
+                    ${dueMeta.hasDue ? `
+                      <span class="px-2 py-0.5 rounded-lg text-[11px] font-bold ${dueMeta.isOverdue ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}">
+                        <i class="fa-regular fa-clock mr-1"></i>${dueMeta.formatted}
+                      </span>
+                    ` : ''}
+                  </div>
+                  <button type="button" onclick="App.toggleHomeworkActive('${hw.id}')" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold cursor-pointer ${hw.isActive !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}">
+                    ${hw.isActive !== false ? 'Đang mở' : 'Đã đóng'}
+                  </button>
+                </div>
+
+                <div>
+                  <h4 onclick="App.showHomeworkSubmissionsModal('${hw.id}')" class="font-extrabold text-slate-900 hover:text-indigo-700 text-sm sm:text-base leading-snug cursor-pointer transition">${hw.title}</h4>
+                  <p class="text-xs text-slate-600 mt-1 line-clamp-2">${hw.description}</p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
+                  ${accessBadge}
+                  <span class="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 font-mono">Thang ${isInteractive ? GradingSystem.computeExamMaxSummary(hw).maxTotal : (hw.maxScore || 10)}đ</span>
+                </div>
+
+                <!-- Tiến độ học sinh nộp bài -->
+                <div onclick="App.showHomeworkSubmissionsModal('${hw.id}')" class="p-3 rounded-xl bg-slate-50 hover:bg-indigo-50/40 border border-slate-200/80 space-y-1.5 cursor-pointer transition">
+                  <div class="flex flex-wrap items-center justify-between gap-1 text-xs">
+                    <span class="font-extrabold text-slate-800">
+                      <i class="fa-solid fa-user-check text-emerald-600 mr-1"></i>Đã nộp: <span class="text-emerald-700 font-mono">${submittedTargetCount}/${targetStudents.length}</span> HS (${pct}%)
+                    </span>
+                    <div class="flex items-center gap-1.5 text-[11px] font-bold">
+                      ${missingCount > 0 ? `<span class="text-rose-600">${missingCount} chưa nộp</span>` : '<span class="text-emerald-600">Đủ 100%</span>'}
+                      ${lateCount > 0 ? `<span class="text-amber-600">• ${lateCount} muộn</span>` : ''}
+                      ${pendingGradeCount > 0 ? `<span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">${pendingGradeCount} chờ chấm</span>` : ''}
                     </div>
+                  </div>
+                  <div class="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+                    <div class="h-full bg-emerald-500 transition-all" style="width:${pct}%"></div>
                   </div>
                 </div>
               </div>
 
-              <div class="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                <span class="text-[11px] font-semibold">
-                  ${accessBadge}
-                </span>
-                <div class="flex items-center space-x-2">
-                  <button onclick="App.openPdfModal('${hw.title}', '${hw.pdfUrl}', '${hw.id}')" class="px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold flex items-center transition cursor-pointer">
-                    <i class="fa-solid fa-file-pdf mr-1.5"></i>Xem PDF
+              <div class="pt-3 border-t border-slate-100 space-y-2">
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <button type="button" onclick="App.showHomeworkSubmissionsModal('${hw.id}')" class="col-span-2 sm:col-span-1 ui-btn ${pendingGradeCount > 0 ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'} font-bold shadow-xs">
+                    <i class="fa-solid ${pendingGradeCount > 0 ? 'fa-pen-nib' : 'fa-list-check'}"></i>
+                    <span>${pendingGradeCount > 0 ? `Chấm bài (${pendingGradeCount})` : 'Theo dõi &amp; Chấm'}</span>
                   </button>
-                  <button onclick="App.deleteHomework('${hw.id}')" class="px-2.5 py-1.5 bg-red-50 border border-red-100 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold transition cursor-pointer">
+                  <button type="button" onclick="App.copyMissingHwStudentsList('${hw.id}')" class="ui-btn bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800" title="Sao chép danh sách học sinh chưa nộp để dán nhắc vào nhóm Zalo lớp">
+                    <i class="fa-regular fa-copy"></i><span>DS chưa nộp</span>
+                  </button>
+                  <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="ui-btn bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700">
+                    <i class="fa-solid fa-sliders"></i><span>Sửa / Giao lớp</span>
+                  </button>
+                </div>
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    ${hw.pdfUrl ? `
+                      <button type="button" onclick="App.openPdfModal('${this.escapeHtmlAttr(hw.title)} — Đề BTVN', '${hw.pdfUrl}', '${hw.id}')" class="px-2.5 py-1 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded-lg text-[11px] font-bold cursor-pointer">
+                        <i class="fa-solid fa-file-pdf mr-1"></i>Đề PDF
+                      </button>
+                    ` : ''}
+                    ${hw.solutionPdfUrl ? `
+                      <button type="button" onclick="App.openPdfModal('${this.escapeHtmlAttr(hw.title)} — Lời Giải BTVN', '${hw.solutionPdfUrl}', '${hw.id}_sol')" class="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-lg text-[11px] font-bold cursor-pointer">
+                        <i class="fa-solid fa-file-shield mr-1"></i>Lời giải PDF
+                      </button>
+                    ` : ''}
+                  </div>
+                  <button type="button" onclick="App.deleteHomework('${hw.id}')" class="px-2.5 py-1 bg-red-50 hover:bg-red-100 border border-red-100 text-red-600 rounded-lg text-[11px] font-bold cursor-pointer">
                     <i class="fa-solid fa-trash-can mr-1"></i>Xóa
                   </button>
                 </div>
@@ -12938,12 +14816,16 @@ const App = {
       }
     }
     if (field === 'grade') this.state.hwGradeFilter = val;
+    if (field === 'kind') this.state.hwKindFilter = val;
+    if (field === 'class') this.state.hwClassFilter = val;
     this.render();
   },
 
   resetHwFilter() {
     this.state.hwSearchQuery = '';
     this.state.hwGradeFilter = 'ALL';
+    this.state.hwKindFilter = 'ALL';
+    this.state.hwClassFilter = 'ALL';
     this.render();
   },
 
@@ -12974,7 +14856,7 @@ const App = {
       const token = Symbol('hwPdf');
       this._hwPdfUploadToken = token;
       if (badge) {
-        badge.innerHTML = `<span class="text-indigo-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-spinner fa-spin"></i>Đã chọn: ${file.name} (${sizeMb} MB) — Đang tải lên máy chủ <span id="hwPdfUploadPct">0%</span>...</span>`;
+        badge.innerHTML = `<span class="text-indigo-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-spinner fa-spin"></i>Đã chọn: ${file.name} (${sizeMb} MB) — Đang tải <span id="hwPdfUploadPct">0%</span>...</span>`;
       }
       this._preuploadedHwPdfPromise = this.uploadPdfToServer('HW_' + Date.now(), file, (pct) => {
         if (this._hwPdfUploadToken !== token) return;
@@ -12985,14 +14867,14 @@ const App = {
           if (this._hwPdfUploadToken === token) {
             this._preuploadedHwPdfUrl = serverUrl || '';
             const b = document.getElementById('newHwFileBadge');
-            if (b) b.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-cloud-arrow-up"></i>Đã lưu sẵn lên máy chủ: ${file.name} (${sizeMb} MB — 100%)</span>`;
+            if (b) b.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-cloud-arrow-up"></i>Đã lưu đám mây: ${file.name} (${sizeMb} MB)</span>`;
           }
           return serverUrl;
         })
         .catch(() => {
           if (this._hwPdfUploadToken === token) {
             const b = document.getElementById('newHwFileBadge');
-            if (b) b.innerHTML = `<span class="text-amber-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>Đã lưu tạm vào máy: ${file.name} (${sizeMb} MB) — Tự động đồng bộ khi có mạng</span>`;
+            if (b) b.innerHTML = `<span class="text-amber-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>Lưu tạm: ${file.name} (${sizeMb} MB)</span>`;
           }
           return '';
         });
@@ -13004,16 +14886,82 @@ const App = {
     }
   },
 
+  handleHwSolFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    this._preuploadedHwSolPdfUrl = '';
+    if (this._preuploadedHwSolPdfPromise) {
+      const oldP = this._preuploadedHwSolPdfPromise;
+      oldP.then(u => { if (u) this.deleteServerPdfByUrl(u); }).catch(() => {});
+    }
+    this.state.tempSelectedHwSolFile = file;
+    const sizeMb = (file.size / 1024 / 1024).toFixed(2);
+    const badge = document.getElementById('newHwSolFileBadge');
+    if (this.isServerSyncEnabled()) {
+      const token = Symbol('hwSolPdf');
+      this._hwSolPdfUploadToken = token;
+      if (badge) {
+        badge.innerHTML = `<span class="text-indigo-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-spinner fa-spin"></i>Đang tải lời giải: ${file.name} (${sizeMb} MB)...</span>`;
+      }
+      this._preuploadedHwSolPdfPromise = this.uploadPdfToServer('HWSOL_' + Date.now(), file)
+        .then((serverUrl) => {
+          if (this._hwSolPdfUploadToken === token) {
+            this._preuploadedHwSolPdfUrl = serverUrl || '';
+            const b = document.getElementById('newHwSolFileBadge');
+            if (b) b.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-cloud-arrow-up"></i>Đã lưu lời giải: ${file.name} (${sizeMb} MB)</span>`;
+          }
+          return serverUrl;
+        })
+        .catch(() => {
+          if (this._hwSolPdfUploadToken === token) {
+            const b = document.getElementById('newHwSolFileBadge');
+            if (b) b.innerHTML = `<span class="text-amber-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>Lưu tạm lời giải: ${file.name}</span>`;
+          }
+          return '';
+        });
+    } else {
+      this._preuploadedHwSolPdfPromise = null;
+      if (badge) {
+        badge.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>Đã chọn lời giải: ${file.name} (${sizeMb} MB)</span>`;
+      }
+    }
+  },
+
   async handleAddHomeworkSubmit() {
     if (this._addingHwInProgress) return;
-    const title = document.getElementById('newHwTitle').value.trim();
-    const desc = document.getElementById('newHwDesc').value.trim();
+    const existingHw = this._editingHomeworkId
+      ? (this.state.homeworks || []).find(h => h.id === this._editingHomeworkId)
+      : null;
+
+    const itemKind = document.getElementById('newHwItemKind')?.value === 'homework' ? 'homework' : 'document';
+    const hwMode = document.getElementById('newHwMode')?.value === 'interactive' ? 'interactive' : 'photo';
+    const title = (document.getElementById('newHwTitle')?.value || '').trim();
+    const desc = (document.getElementById('newHwDesc')?.value || '').trim();
     const grade = parseInt(document.getElementById('newHwGrade')?.value || '12', 10) || 12;
     const accessType = document.getElementById('newHwAccess')?.value || 'all';
-    const pickedIds = Array.from(document.querySelectorAll('input[name="newHwStudentPick"]:checked')).map(el => el.value);
+    const checkedClasses = Array.from(document.querySelectorAll('#addHomeworkModal input[name="newHwClassPick"]:checked')).map(el => el.value);
+    const pickedIds = Array.from(document.querySelectorAll('#addHomeworkModal input[name="newHwStudentPick"]:checked')).map(el => el.value);
+    const dueRaw = (document.getElementById('newHwDueAt')?.value || '').trim();
+    const dueAt = (itemKind === 'homework' && dueRaw) ? new Date(dueRaw).toISOString() : '';
+    const maxScore = Math.max(1, parseFloat(document.getElementById('newHwMaxScore')?.value || '10') || 10);
+    const timeMinutes = Math.max(0, parseInt(document.getElementById('newHwTimeMinutes')?.value || '0', 10) || 0);
+    const allowResubmit = document.getElementById('newHwAllowResubmit') ? document.getElementById('newHwAllowResubmit').checked : true;
+    const allowViewSolution = document.getElementById('newHwAllowViewSol') ? document.getElementById('newHwAllowViewSol').checked : true;
+
     const file = this.state.tempSelectedHwFile;
-    if (!file) {
-      this.notify('Vui lòng chọn file PDF chuyên đề/tài liệu từ máy tính trước khi tải lên!', 'warning', 'Chưa chọn file PDF');
+    const solFile = this.state.tempSelectedHwSolFile;
+
+    if (!title) {
+      this.notify('Vui lòng nhập tiêu đề bài tập hoặc tài liệu!', 'warning', 'Thiếu tiêu đề');
+      return;
+    }
+    if (accessType === 'class' && checkedClasses.length === 0) {
+      this.notify('Vui lòng tích chọn ít nhất 1 nhóm lớp để giao bài!', 'warning', 'Chưa chọn nhóm lớp');
+      return;
+    }
+    const needsPdf = (itemKind === 'document') || (itemKind === 'homework' && hwMode === 'interactive');
+    if (needsPdf && !file && !(existingHw && existingHw.pdfUrl)) {
+      this.notify('Vui lòng chọn file PDF từ máy tính cho mục này!', 'warning', 'Chưa chọn file PDF');
       return;
     }
 
@@ -13021,52 +14969,130 @@ const App = {
     const submitBtn = document.getElementById('addHomeworkSubmitBtn');
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Đang lưu tài liệu...</span>';
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Đang lưu &amp; đồng bộ...</span>';
     }
 
     try {
-      const hwId = 'HW-' + Date.now();
-      const fileName = file.name;
-      const fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB';
+      const hwId = existingHw ? existingHw.id : ('HW-' + Date.now());
+      let pdfUrl = existingHw ? (existingHw.pdfUrl || '') : '';
+      let fileName = existingHw ? (existingHw.fileName || '') : '';
+      let fileSize = existingHw ? (existingHw.fileSize || '') : '';
 
-      if (typeof PDFStorage !== 'undefined') {
-        await PDFStorage.savePdf(hwId, file);
+      if (file) {
+        if (existingHw && existingHw.pdfUrl && !String(existingHw.pdfUrl).startsWith('idb:')) {
+          this.deleteServerPdfByUrl(existingHw.pdfUrl);
+        }
+        fileName = file.name;
+        fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB';
+        if (typeof PDFStorage !== 'undefined') {
+          await PDFStorage.savePdf(hwId, file);
+        }
+        if (this._preuploadedHwPdfUrl) {
+          pdfUrl = this._preuploadedHwPdfUrl;
+        } else {
+          pdfUrl = (typeof PDFStorage !== 'undefined') ? ('idb:' + hwId) : '';
+          const inflightHw = this._preuploadedHwPdfPromise || (this.isServerSyncEnabled() ? this.uploadPdfToServer(hwId, file) : null);
+          if (inflightHw) this.registerInFlightSlotUpload(hwId, inflightHw);
+        }
+        if (pdfUrl) this.setPdfCacheVersion(hwId, pdfUrl);
       }
 
-      let pdfUrl = '';
-      if (this._preuploadedHwPdfUrl) {
-        pdfUrl = this._preuploadedHwPdfUrl;
-      } else {
-        pdfUrl = (typeof PDFStorage !== 'undefined') ? ('idb:' + hwId) : '';
-        const inflightHw = this._preuploadedHwPdfPromise || (this.isServerSyncEnabled() ? this.uploadPdfToServer(hwId, file) : null);
-        if (inflightHw) this.registerInFlightSlotUpload(hwId, inflightHw);
+      let solutionPdfUrl = existingHw ? (existingHw.solutionPdfUrl || '') : '';
+      let solutionFileName = existingHw ? (existingHw.solutionFileName || '') : '';
+      if (solFile) {
+        const solKey = hwId + '_sol';
+        if (existingHw && existingHw.solutionPdfUrl && !String(existingHw.solutionPdfUrl).startsWith('idb:')) {
+          this.deleteServerPdfByUrl(existingHw.solutionPdfUrl);
+        }
+        solutionFileName = solFile.name;
+        if (typeof PDFStorage !== 'undefined') {
+          await PDFStorage.savePdf(solKey, solFile);
+        }
+        if (this._preuploadedHwSolPdfUrl) {
+          solutionPdfUrl = this._preuploadedHwSolPdfUrl;
+        } else {
+          solutionPdfUrl = (typeof PDFStorage !== 'undefined') ? ('idb:' + solKey) : '';
+          const inflightSol = this._preuploadedHwSolPdfPromise || (this.isServerSyncEnabled() ? this.uploadPdfToServer(solKey, solFile) : null);
+          if (inflightSol) this.registerInFlightSlotUpload(solKey, inflightSol);
+        }
+        if (solutionPdfUrl) this.setPdfCacheVersion(solKey, solutionPdfUrl);
       }
-      if (pdfUrl) this.setPdfCacheVersion(hwId, pdfUrl);
 
-      const newHw = {
+      const parts = (itemKind === 'homework' && hwMode === 'interactive')
+        ? this.buildPartsFromDraft(this.state.answerKeyDraft)
+        : { scoring: {}, part1: [], part2: [], part3: [], part4: [] };
+
+      const record = this.normalizeHomeworkRecord({
+        ...(existingHw || {}),
         id: hwId,
-        title: title,
-        grade: grade,
-        description: desc || 'Tài liệu và bài tập rèn luyện chuyên đề.',
-        pdfUrl: pdfUrl,
-        fileName: fileName,
-        fileSize: fileSize,
-        dateAdded: new Date().toISOString().split('T')[0],
-        accessType: accessType,
+        itemKind,
+        hwMode: itemKind === 'homework' ? hwMode : 'none',
+        title,
+        grade,
+        description: desc || (itemKind === 'homework' ? 'Hoàn thành bài tập và nộp đúng hạn.' : 'Tài liệu và bài tập rèn luyện chuyên đề.'),
+        pdfUrl,
+        fileName,
+        fileSize,
+        solutionPdfUrl,
+        solutionFileName,
+        dueAt: itemKind === 'homework' ? dueAt : '',
+        maxScore,
+        time_minutes: timeMinutes,
+        allowResubmit,
+        allowViewSolution,
+        isActive: existingHw ? existingHw.isActive !== false : true,
+        dateAdded: existingHw && existingHw.dateAdded ? existingHw.dateAdded : new Date().toISOString().split('T')[0],
+        accessType,
         allowedAll: accessType === 'all',
-        allowedStudents: accessType === 'selected' ? pickedIds : this.state.students.map(s => s.studentId)
-      };
+        allowedClasses: accessType === 'class' ? checkedClasses : [],
+        allowedStudents: accessType === 'selected' ? pickedIds : [],
+        scoring: parts.scoring,
+        part1: parts.part1,
+        part2: parts.part2,
+        part3: parts.part3,
+        part4: parts.part4
+      });
 
-      this.state.homeworks.unshift(newHw);
+      if (existingHw) {
+        const idx = this.state.homeworks.findIndex(h => h.id === hwId);
+        if (idx !== -1) this.state.homeworks[idx] = record;
+        if (itemKind === 'homework' && hwMode === 'interactive') {
+          const examLike = this.getHomeworkAsExamObject(record);
+          const nowIso = new Date().toISOString();
+          (this.state.submissions || []).forEach(sub => {
+            if (sub.examId === hwId && sub.hwMode === 'interactive') {
+              sub.scoreResult = GradingSystem.grade(sub.answers || {}, examLike);
+              sub.updatedAt = nowIso;
+              this.pushStudentSubmissionToCloud(sub);
+            }
+          });
+        }
+      } else {
+        this.state.homeworks.unshift(record);
+      }
+
       this.saveData({ markAdminDirty: true, skipAutoPush: true });
       this.state.tempSelectedHwFile = null;
+      this.state.tempSelectedHwSolFile = null;
       this._preuploadedHwPdfPromise = null;
+      this._preuploadedHwSolPdfPromise = null;
       this._preuploadedHwPdfUrl = '';
-      const m = document.getElementById('addHomeworkModal');
-      if (m) m.remove();
+      this._preuploadedHwSolPdfUrl = '';
+      this._editingHomeworkId = null;
+      document.getElementById('addHomeworkModal')?.remove();
       this.renderPreservingScroll();
       this.pushAdminStateToCloud({ manual: false });
-      this.notify(`Đã thêm tức thì và tự động đồng bộ tài liệu chuyên đề "${title}" (Khối ${grade}) lên máy chủ!`, 'success', 'Đã lưu tài liệu siêu tốc');
+
+      const targetSummary = accessType === 'class' ? `cho lớp ${checkedClasses.join(', ')}` : `(Khối ${grade})`;
+      this.notify(
+        existingHw
+          ? `Đã cập nhật "${title}" ${targetSummary} thành công!`
+          : (itemKind === 'homework'
+            ? `Đã giao bài tập về nhà "${title}" ${targetSummary} thành công!`
+            : `Đã thêm tài liệu "${title}" ${targetSummary} thành công!`),
+        'success',
+        existingHw ? 'Đã lưu cập nhật' : (itemKind === 'homework' ? 'Đã giao BTVN theo lớp' : 'Đã lưu tài liệu')
+      );
     } finally {
       this._addingHwInProgress = false;
     }
@@ -13075,31 +15101,440 @@ const App = {
   deleteHomework(hwId) {
     const hw = this.state.homeworks.find(h => h.id === hwId);
     if (!hw) return;
+    const isHw = hw.itemKind === 'homework';
     this.confirmDialog(
-      `Bạn có chắc chắn muốn xóa tài liệu "${hw.title}" khỏi hệ thống?`,
+      `Bạn có chắc chắn muốn xóa ${isHw ? 'bài tập về nhà' : 'tài liệu'} "${hw.title}" khỏi hệ thống?`,
       () => {
         this.state.homeworks = this.state.homeworks.filter(h => h.id !== hwId);
         if (typeof PDFStorage !== 'undefined') {
           PDFStorage.deletePdf(hwId);
+          PDFStorage.deletePdf(hwId + '_sol');
         }
         this.deleteServerPdfByUrl(hw.pdfUrl);
+        this.deleteServerPdfByUrl(hw.solutionPdfUrl);
         this.markDeletedId(hwId);
         this.saveData({ markAdminDirty: true });
         this.render();
       },
       {
         type: 'danger',
-        title: 'Xóa tài liệu chuyên đề?',
-        confirmText: 'Xóa tài liệu',
+        title: isHw ? 'Xóa bài tập về nhà?' : 'Xóa tài liệu chuyên đề?',
+        confirmText: 'Xóa ngay',
         cancelText: 'Hủy'
       }
     );
   },
 
+  // --- THEO DÕI NỘP BTVN THEO NHÓM LỚP, COPY DS NHẮC ZALO & CHẤM ẢNH VỞ ---
+  showHomeworkSubmissionsModal(hwId, keepFilters = false) {
+    const hw = (this.state.homeworks || []).find(h => h.id === hwId);
+    if (!hw) return;
+    if (!keepFilters) {
+      this.state.hwSubModalClassFilter = 'ALL';
+      this.state.hwSubModalStatusFilter = 'ALL';
+    }
+
+    const targetStudents = this.getHomeworkTargetStudents(hw);
+    const targetIds = new Set(targetStudents.map(s => s.studentId));
+    const allHwSubs = (this.state.submissions || []).filter(s => s.examId === hw.id);
+    const latestByStudent = new Map();
+    allHwSubs.forEach(s => {
+      const cur = latestByStudent.get(s.studentId);
+      if (!cur || new Date(s.submittedAt) >= new Date(cur.submittedAt)) latestByStudent.set(s.studentId, s);
+    });
+
+    // Bao gồm cả học sinh ngoài danh sách dự kiến nếu đã nộp bài
+    const extraStudents = [];
+    latestByStudent.forEach((sub, sid) => {
+      if (!targetIds.has(sid)) {
+        const st = this.state.students.find(x => x.studentId === sid) || {
+          studentId: sid,
+          fullName: sub.studentName || sid,
+          className: sub.studentClass || sub.className || '',
+          grade: hw.grade || 12
+        };
+        extraStudents.push(st);
+      }
+    });
+    const combinedStudents = [...targetStudents, ...extraStudents];
+    const distinctClasses = [...new Set(combinedStudents.map(s => String(s.className || '').trim()).filter(Boolean))];
+
+    const cFilter = this.state.hwSubModalClassFilter || 'ALL';
+    const sFilter = this.state.hwSubModalStatusFilter || 'ALL';
+
+    const rows = combinedStudents.map(st => {
+      const sub = latestByStudent.get(st.studentId) || null;
+      return {
+        student: st,
+        sub,
+        isSubmitted: Boolean(sub),
+        isMissing: !sub,
+        isLate: Boolean(sub && sub.isLate),
+        isPending: Boolean(sub && sub.pendingManualGrade)
+      };
+    });
+
+    const submittedCount = rows.filter(r => r.isSubmitted).length;
+    const missingCount = rows.filter(r => r.isMissing).length;
+    const pendingCount = rows.filter(r => r.isPending).length;
+    const lateCount = rows.filter(r => r.isLate).length;
+
+    const filteredRows = rows.filter(r => {
+      if (cFilter !== 'ALL' && !this.isSameClassName(r.student.className || '', cFilter)) return false;
+      if (sFilter === 'submitted' && !r.isSubmitted) return false;
+      if (sFilter === 'missing' && !r.isMissing) return false;
+      if (sFilter === 'pending' && !r.isPending) return false;
+      if (sFilter === 'late' && !r.isLate) return false;
+      return true;
+    }).sort((a, b) => {
+      if (a.isPending !== b.isPending) return a.isPending ? -1 : 1;
+      if (a.isSubmitted !== b.isSubmitted) return a.isSubmitted ? -1 : 1;
+      return String(a.student.studentId).localeCompare(String(b.student.studentId));
+    });
+
+    const wasOpen = Boolean(document.getElementById('hwSubmissionsModal'));
+    document.getElementById('hwSubmissionsModal')?.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'hwSubmissionsModal';
+    modal.setAttribute('data-hw-id', hw.id);
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="px-4 sm:px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-emerald-50/70 via-white to-indigo-50/40 flex items-start justify-between gap-3 shrink-0">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-1.5 mb-1">
+              <span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-600 text-white">Khối ${hw.grade || 12}</span>
+              <span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-100 text-emerald-800">${hw.hwMode === 'interactive' ? 'Chấm tự động PDF' : 'Nộp ảnh chụp vở'}</span>
+              ${hw.dueAt ? `<span class="text-[11px] font-semibold text-slate-500">Hạn: ${new Date(hw.dueAt).toLocaleString('vi-VN')}</span>` : ''}
+            </div>
+            <h3 class="font-extrabold text-slate-900 text-sm sm:text-lg truncate">${hw.title}</h3>
+          </div>
+          <button type="button" onclick="document.getElementById('hwSubmissionsModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer shrink-0">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        <div class="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+          <!-- KPI Thống kê -->
+          <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+            <div class="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-center">
+              <div class="text-[10px] font-bold text-slate-500 uppercase">Được giao</div>
+              <div class="text-lg font-extrabold text-slate-900 font-mono mt-0.5">${rows.length}</div>
+            </div>
+            <div class="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-center">
+              <div class="text-[10px] font-bold text-emerald-700 uppercase">Đã nộp</div>
+              <div class="text-lg font-extrabold text-emerald-800 font-mono mt-0.5">${submittedCount}</div>
+            </div>
+            <div class="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-center">
+              <div class="text-[10px] font-bold text-rose-700 uppercase">Chưa nộp</div>
+              <div class="text-lg font-extrabold text-rose-800 font-mono mt-0.5">${missingCount}</div>
+            </div>
+            <div class="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-center">
+              <div class="text-[10px] font-bold text-amber-700 uppercase">Chờ chấm</div>
+              <div class="text-lg font-extrabold text-amber-800 font-mono mt-0.5">${pendingCount}</div>
+            </div>
+            <div class="col-span-2 sm:col-span-1 p-3 rounded-2xl bg-orange-50 border border-orange-200 text-center">
+              <div class="text-[10px] font-bold text-orange-700 uppercase">Nộp muộn</div>
+              <div class="text-lg font-extrabold text-orange-800 font-mono mt-0.5">${lateCount}</div>
+            </div>
+          </div>
+
+          <!-- Bộ lọc lớp + trạng thái + Nút copy nhắc Zalo -->
+          <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+            <div class="flex flex-wrap items-center gap-1.5">
+              ${[
+                { id: 'ALL', label: `Tất cả (${rows.length})` },
+                { id: 'pending', label: `Chờ chấm (${pendingCount})` },
+                { id: 'submitted', label: `Đã nộp (${submittedCount})` },
+                { id: 'missing', label: `Chưa nộp (${missingCount})` },
+                { id: 'late', label: `Nộp muộn (${lateCount})` }
+              ].map(f => `
+                <button type="button" onclick="App.state.hwSubModalStatusFilter='${f.id}'; App.showHomeworkSubmissionsModal('${hw.id}', true);" class="px-2.5 py-1.5 rounded-xl font-bold transition cursor-pointer ${sFilter === f.id ? 'bg-indigo-600 text-white shadow-2xs' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'}">
+                  ${f.label}
+                </button>
+              `).join('')}
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              ${distinctClasses.length > 1 ? `
+                <select onchange="App.state.hwSubModalClassFilter=this.value; App.showHomeworkSubmissionsModal('${hw.id}', true);" class="px-3 py-1.5 rounded-xl bg-white border border-slate-200 font-bold text-slate-700 outline-none cursor-pointer">
+                  <option value="ALL" ${cFilter === 'ALL' ? 'selected' : ''}>Tất cả lớp (${distinctClasses.length})</option>
+                  ${distinctClasses.map(c => `<option value="${this.escapeHtmlAttr(c)}" ${this.isSameClassName(cFilter, c) ? 'selected' : ''}>Lớp ${c}</option>`).join('')}
+                </select>
+              ` : ''}
+              <button type="button" onclick="App.copyMissingHwStudentsList('${hw.id}', '${this.escapeHtmlAttr(cFilter)}')" class="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-2xs">
+                <i class="fa-regular fa-copy"></i><span>Sao chép DS chưa nộp (Zalo)</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Bảng học sinh -->
+          ${filteredRows.length === 0 ? `
+            <div class="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+              Không có học sinh nào trong mục lọc này.
+            </div>
+          ` : `
+            <div class="rounded-2xl border border-slate-200 overflow-hidden">
+              <table class="min-w-full divide-y divide-slate-200 text-xs">
+                <thead class="bg-slate-100 text-slate-600 uppercase font-bold">
+                  <tr>
+                    <th class="px-4 py-3 text-left">Học Sinh</th>
+                    <th class="px-3 py-3 text-center">Nhóm Lớp</th>
+                    <th class="px-3 py-3 text-center">Trạng Thái Nộp</th>
+                    <th class="px-3 py-3 text-center">Điểm &amp; Nhận Xét</th>
+                    <th class="px-4 py-3 text-right">Thao Tác</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white">
+                  ${filteredRows.map(({ student, sub }) => `
+                    <tr class="hover:bg-slate-50/80 transition">
+                      <td class="px-4 py-3">
+                        <div class="font-bold text-slate-900">${student.fullName}</div>
+                        <div class="text-[11px] font-mono text-indigo-600">${student.studentId}${student.phone ? ` • <span class="text-slate-500">${student.phone}</span>` : ''}</div>
+                      </td>
+                      <td class="px-3 py-3 text-center">
+                        <span class="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 font-bold">${student.className || `K${hw.grade || 12}`}</span>
+                      </td>
+                      <td class="px-3 py-3 text-center">
+                        ${!sub ? `
+                          <span class="px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-bold">Chưa nộp</span>
+                        ` : `
+                          <div class="space-y-0.5">
+                            <div class="inline-flex items-center gap-1 font-bold ${sub.isLate ? 'text-amber-700' : 'text-emerald-700'}">
+                              <i class="fa-solid fa-circle-check"></i>
+                              <span>${sub.isLate ? 'Nộp muộn' : 'Đúng hạn'}</span>
+                              ${sub.hwMode === 'photo' ? `<span class="text-slate-500 font-mono">(${(sub.photoImages || sub.homeworkImages || []).length} ảnh)</span>` : ''}
+                            </div>
+                            <div class="text-[10px] text-slate-400">${new Date(sub.submittedAt).toLocaleString('vi-VN')}</div>
+                          </div>
+                        `}
+                      </td>
+                      <td class="px-3 py-3 text-center">
+                        ${!sub ? '<span class="text-slate-300">--</span>' : (
+                          sub.pendingManualGrade
+                            ? '<span class="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 font-bold">Chờ chấm điểm</span>'
+                            : `
+                              <div>
+                                <span class="font-mono font-extrabold text-indigo-700 text-sm">${sub.scoreResult.totalScore}/${sub.scoreResult.maxTotal || hw.maxScore || 10}đ</span>
+                                ${sub.teacherComment ? `<div class="text-[11px] text-slate-500 truncate max-w-[200px] mx-auto" title="${this.escapeHtmlAttr(sub.teacherComment)}">${sub.teacherComment}</div>` : ''}
+                              </div>
+                            `
+                        )}
+                      </td>
+                      <td class="px-4 py-3 text-right">
+                        ${sub ? `
+                          <button type="button" onclick="${sub.hwMode === 'photo' ? `App.showGradePhotoHomeworkModal('${sub.id}')` : `document.getElementById('hwSubmissionsModal')?.remove(); App.viewSubmissionDetail('${sub.id}')`}" class="px-3 py-1.5 rounded-xl font-bold inline-flex items-center gap-1.5 cursor-pointer transition ${sub.pendingManualGrade ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-2xs' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'}">
+                            <i class="fa-solid ${sub.pendingManualGrade ? 'fa-pen-nib' : 'fa-eye'}"></i>
+                            <span>${sub.pendingManualGrade ? 'Chấm ngay' : (sub.hwMode === 'photo' ? 'Xem / Sửa điểm' : 'Chi tiết')}</span>
+                          </button>
+                        ` : '<span class="text-[11px] text-slate-400 italic">Đợi HS nộp</span>'}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+    this.openModalElement(modal, wasOpen);
+  },
+
+  async copyMissingHwStudentsList(hwId, classFilter = 'ALL') {
+    const hw = (this.state.homeworks || []).find(h => h.id === hwId);
+    if (!hw) return;
+    const submittedIds = new Set(
+      (this.state.submissions || []).filter(s => s.examId === hw.id).map(s => s.studentId)
+    );
+    const missing = this.getHomeworkTargetStudents(hw).filter(st => {
+      if (submittedIds.has(st.studentId)) return false;
+      if (classFilter && classFilter !== 'ALL' && !this.isSameClassName(st.className || '', classFilter)) return false;
+      return true;
+    });
+
+    if (missing.length === 0) {
+      this.notify('Tuyệt vời! Tất cả học sinh trong nhóm đã nộp đủ bài tập này.', 'success', '100% đã nộp bài');
+      return;
+    }
+
+    const header = `[NHẮC NỘP BTVN] ${hw.title}${hw.dueAt ? ` (Hạn: ${new Date(hw.dueAt).toLocaleString('vi-VN')})` : ''}\nDanh sách ${missing.length} học sinh chưa nộp bài:\n`;
+    const body = missing.map((st, idx) => `${idx + 1}. ${st.fullName} (${st.studentId} - Lớp ${st.className || hw.grade})`).join('\n');
+    const footer = `\nCác em vào làm & nộp bài tại: ${this.PUBLIC_APP_URL}?tab=btvn`;
+    const fullText = header + body + footer;
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(fullText);
+      }
+      this.notify(`Đã sao chép danh sách ${missing.length} học sinh chưa nộp! Thầy có thể dán ngay vào nhóm Zalo lớp.`, 'success', 'Đã sao chép nhắc Zalo');
+    } catch (_) {
+      this.notify(fullText, 'info', `Danh sách ${missing.length} HS chưa nộp`);
+    }
+    return fullText;
+  },
+
+  showGradePhotoHomeworkModal(subId) {
+    const sub = (this.state.submissions || []).find(s => s.id === subId);
+    if (!sub) return;
+    const hw = (this.state.homeworks || []).find(h => h.id === sub.examId) || {
+      id: sub.examId,
+      title: sub.examTitle || 'Bài tập về nhà',
+      maxScore: (sub.scoreResult && sub.scoreResult.maxTotal) || 10
+    };
+    const maxScore = Number(hw.maxScore) || Number(sub.scoreResult && sub.scoreResult.maxTotal) || 10;
+    const curScore = (!sub.pendingManualGrade && sub.teacherScore !== null && sub.teacherScore !== undefined)
+      ? sub.teacherScore
+      : '';
+    const images = Array.isArray(sub.photoImages) && sub.photoImages.length
+      ? sub.photoImages
+      : (Array.isArray(sub.homeworkImages) ? sub.homeworkImages : []);
+    const quickChips = [
+      'Trình bày sạch đẹp, lập luận chặt chẽ!',
+      'Làm bài tốt, chú ý ghi đầy đủ điều kiện xác định.',
+      'Cần xem kỹ lại lời giải mẫu các câu sai nhé.',
+      'Nộp bài muộn, lần sau chú ý nộp đúng hạn nhé!'
+    ];
+
+    const wasOpen = Boolean(document.getElementById('gradePhotoHwModal'));
+    document.getElementById('gradePhotoHwModal')?.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'gradePhotoHwModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm overflow-y-auto';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="px-4 sm:px-6 py-3.5 border-b border-slate-100 bg-gradient-to-r from-amber-50/70 via-white to-emerald-50/40 flex items-center justify-between gap-2 shrink-0">
+          <div class="min-w-0">
+            <h3 class="font-extrabold text-slate-900 text-sm sm:text-base flex items-center gap-2">
+              <i class="fa-solid fa-pen-nib text-amber-600"></i>
+              <span>Chấm Bài Tập Về Nhà: ${sub.studentName} (${sub.studentId})</span>
+            </h3>
+            <p class="text-xs text-slate-500 mt-0.5 truncate">
+              Lớp <strong>${sub.studentClass || sub.className || ''}</strong> • ${hw.title} • Nộp lúc ${new Date(sub.submittedAt).toLocaleString('vi-VN')} ${sub.isLate ? '<strong class="text-rose-600">(Nộp muộn)</strong>' : '<strong class="text-emerald-600">(Đúng hạn)</strong>'}
+            </p>
+          </div>
+          <button type="button" onclick="document.getElementById('gradePhotoHwModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer shrink-0">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        <div class="p-4 sm:p-6 overflow-y-auto flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 text-xs">
+          <!-- Cột trái: Ảnh chụp vở học sinh -->
+          <div class="lg:col-span-7 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="font-extrabold text-slate-800 uppercase tracking-wider">
+                <i class="fa-solid fa-images text-indigo-600 mr-1.5"></i>Ảnh bài làm của học sinh (${images.length} trang)
+              </span>
+              <span class="text-[11px] text-slate-400">Bấm vào ảnh để phóng to toàn màn hình</span>
+            </div>
+
+            ${sub.studentNote ? `
+              <div class="p-3 rounded-xl bg-indigo-50/60 border border-indigo-100 text-slate-700">
+                <span class="font-bold text-indigo-800"><i class="fa-regular fa-comment-dots mr-1"></i>Lời nhắn của HS:</span> ${sub.studentNote}
+              </div>
+            ` : ''}
+
+            ${images.length === 0 ? `
+              <div class="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                Bài nộp này không có ảnh đính kèm.
+              </div>
+            ` : `
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[52vh] overflow-y-auto pr-1">
+                ${images.map((imgSrc, idx) => `
+                  <div class="group relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-950 cursor-pointer" onclick="App.previewFullImage('${imgSrc}')">
+                    <img src="${imgSrc}" alt="Trang ${idx + 1}" class="w-full h-56 object-contain bg-slate-900">
+                    <div class="absolute top-2 left-2 px-2 py-0.5 rounded-lg bg-black/65 text-white font-bold text-[11px]">Trang ${idx + 1}</div>
+                    <div class="absolute bottom-2 right-2 px-2.5 py-1 rounded-lg bg-black/65 text-white font-bold text-[11px] opacity-90 group-hover:bg-indigo-600 transition">
+                      <i class="fa-solid fa-magnifying-glass-plus mr-1"></i>Phóng to
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+
+          <!-- Cột phải: Chấm điểm & Nhận xét -->
+          <form id="gradePhotoHwForm" onsubmit="event.preventDefault(); App.savePhotoHomeworkGrade('${sub.id}');" class="lg:col-span-5 bg-slate-50 rounded-2xl p-4 border border-slate-200 flex flex-col justify-between space-y-4">
+            <div class="space-y-3.5">
+              <div>
+                <label class="block font-extrabold text-slate-800 mb-1">Điểm số (Thang ${maxScore} điểm) *</label>
+                <input type="number" id="gradePhotoScoreInput" required min="0" max="${maxScore}" step="0.25" value="${curScore}" placeholder="VD: ${maxScore}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white font-mono font-extrabold text-lg text-indigo-700 focus:border-indigo-600 outline-none">
+                <div class="flex flex-wrap gap-1.5 mt-2">
+                  ${[1, 0.9, 0.85, 0.8, 0.7, 0.5].map(r => {
+                    const v = +(maxScore * r).toFixed(2);
+                    return `<button type="button" onclick="document.getElementById('gradePhotoScoreInput').value='${v}'" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-50 border border-slate-200 font-mono font-bold text-slate-700 cursor-pointer">${v}đ</button>`;
+                  }).join('')}
+                </div>
+              </div>
+
+              <div>
+                <label class="block font-extrabold text-slate-800 mb-1">Nhận xét / Chữa bài cho học sinh</label>
+                <textarea id="gradePhotoCommentInput" rows="4" placeholder="Nhập nhận xét ưu điểm, lỗi sai cần sửa cho học sinh..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-xs text-slate-800 focus:border-indigo-600 outline-none">${sub.teacherComment || ''}</textarea>
+                <div class="flex flex-wrap gap-1.5 mt-2">
+                  ${quickChips.map(chip => `
+                    <button type="button" onclick="const ta=document.getElementById('gradePhotoCommentInput'); ta.value = ta.value ? (ta.value + ' ' + '${chip}') : '${chip}';" class="px-2.5 py-1 rounded-lg bg-white hover:bg-emerald-50 border border-slate-200 text-[11px] font-semibold text-slate-600 text-left cursor-pointer">
+                      + ${chip}
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+
+            <div class="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button type="button" onclick="document.getElementById('gradePhotoHwModal')?.remove()" class="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 font-bold text-slate-700 cursor-pointer">Đóng</button>
+              <button type="submit" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold shadow-sm inline-flex items-center gap-1.5 cursor-pointer">
+                <i class="fa-solid fa-floppy-disk"></i><span>Lưu Điểm &amp; Nhận Xét</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+    this.openModalElement(modal, wasOpen);
+  },
+
+  savePhotoHomeworkGrade(subId) {
+    const sub = (this.state.submissions || []).find(s => s.id === subId);
+    if (!sub) return;
+    const hw = (this.state.homeworks || []).find(h => h.id === sub.examId);
+    const maxScore = Number(hw && hw.maxScore) || Number(sub.scoreResult && sub.scoreResult.maxTotal) || 10;
+    const rawScore = parseFloat(String(document.getElementById('gradePhotoScoreInput')?.value || '').replace(',', '.'));
+    if (Number.isNaN(rawScore) || rawScore < 0 || rawScore > maxScore) {
+      this.notify(`Vui lòng nhập điểm hợp lệ từ 0 đến ${maxScore}!`, 'warning', 'Điểm chưa hợp lệ');
+      return;
+    }
+    const comment = (document.getElementById('gradePhotoCommentInput')?.value || '').trim();
+    const nowIso = new Date().toISOString();
+
+    sub.teacherScore = +rawScore.toFixed(2);
+    sub.teacherComment = comment;
+    sub.pendingManualGrade = false;
+    sub.gradedAt = nowIso;
+    sub.updatedAt = nowIso;
+    sub.scoreResult = this.buildPhotoHomeworkScoreResult(maxScore, sub.teacherScore, false);
+
+    this.saveData({ markAdminDirty: true });
+    this.pushStudentSubmissionToCloud(sub);
+    document.getElementById('gradePhotoHwModal')?.remove();
+
+    const trackerModal = document.getElementById('hwSubmissionsModal');
+    if (trackerModal && trackerModal.getAttribute('data-hw-id')) {
+      this.showHomeworkSubmissionsModal(trackerModal.getAttribute('data-hw-id'), true);
+    }
+    this.renderPreservingScroll();
+    this.notify(`Đã chấm ${sub.teacherScore}/${maxScore}đ cho học sinh ${sub.studentName}!`, 'success', 'Chấm BTVN thành công');
+  },
+
   exportResultsCSV() {
-    let csv = "Mã Học Sinh,Họ và Tên,Đề Thi,Thời Gian Nộp,Rời Tab,Phần I,Phần II,Phần III,Tổng Điểm,Xếp Loại\n";
+    let csv = "Mã Học Sinh,Họ và Tên,Loại Bài,Đề Thi / BTVN,Thời Gian Nộp,Rời Tab,Phần I,Phần II,Phần III,Tổng Điểm,Xếp Loại,Nhận Xét GV\n";
     this.state.submissions.forEach(s => {
-      csv += `"${s.studentId}","${s.studentName}","${s.examTitle}","${new Date(s.submittedAt).toLocaleString('vi-VN')}",${s.tabSwitches || 0},${s.scoreResult.part1.score},${s.scoreResult.part2.score},${s.scoreResult.part3.score},${s.scoreResult.totalScore},"${s.scoreResult.rank}"\n`;
+      const isHw = this.isHomeworkSubmission(s);
+      const isPhoto = isHw && s.hwMode === 'photo';
+      const totalStr = s.pendingManualGrade ? 'Chờ chấm' : s.scoreResult.totalScore;
+      const commentStr = String(s.teacherComment || '').replace(/"/g, '""');
+      csv += `"${s.studentId}","${s.studentName}","${isHw ? 'BTVN' : 'Đề thi'}","${String(s.examTitle || '').replace(/"/g, '""')}","${new Date(s.submittedAt).toLocaleString('vi-VN')}",${s.tabSwitches || 0},${isPhoto ? '--' : s.scoreResult.part1.score},${isPhoto ? '--' : s.scoreResult.part2.score},${isPhoto ? '--' : s.scoreResult.part3.score},"${totalStr}","${s.scoreResult.rank}","${commentStr}"\n`;
     });
 
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
@@ -14059,30 +16494,34 @@ const App = {
 
           <!-- Các mục trên Website chính thức -->
           <div class="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 space-y-3">
-            <div class="flex items-center justify-between">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <span class="text-xs font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
                 <i class="fa-solid fa-globe text-indigo-600"></i>
-                <span>Các Mục Tiện Ích Trên Website Thầy Chí</span>
+                <span>Hệ Sinh Thái Đồng Bộ Của Lớp Toán Anh Chí</span>
               </span>
-              <span class="text-[11px] font-mono font-bold text-indigo-600">thanhchi113.github.io/Chi-GV-Toan</span>
+              <span class="text-[11px] font-mono font-bold text-indigo-600">thanhchi113.github.io</span>
             </div>
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
-              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#lop-hoc" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-indigo-100/60 rounded-xl border border-indigo-100 text-slate-800 transition block">
+              <a href="${this.TEACHER_MAIN_WEB_URL}#lop-hoc" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-indigo-100/60 rounded-xl border border-indigo-100 text-slate-800 transition block">
                 <i class="fa-solid fa-calendar-days text-indigo-600 text-base mb-1 block"></i>
-                <span class="font-bold text-[11px]">Lịch Các Lớp</span>
+                <span class="font-bold text-[11px]">Lịch 13 Nhóm Lớp</span>
               </a>
-              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#thanh-tich" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-amber-100/60 rounded-xl border border-amber-100 text-slate-800 transition block">
+              <a href="${this.TEACHER_MAIN_WEB_URL}#thanh-tich" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-amber-100/60 rounded-xl border border-amber-100 text-slate-800 transition block">
                 <i class="fa-solid fa-trophy text-amber-600 text-base mb-1 block"></i>
                 <span class="font-bold text-[11px]">Bảng Vàng 9+</span>
               </a>
-              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#tai-lieu" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-emerald-100/60 rounded-xl border border-emerald-100 text-slate-800 transition block">
+              <a href="${this.TEACHER_MAIN_WEB_URL}tai-lieu.html" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-emerald-100/60 rounded-xl border border-emerald-100 text-slate-800 transition block">
                 <i class="fa-solid fa-book-bookmark text-emerald-600 text-base mb-1 block"></i>
-                <span class="font-bold text-[11px]">Tài Liệu PDF</span>
+                <span class="font-bold text-[11px]">Kho Tài Liệu</span>
               </a>
-              <a href="https://thanhchi113.github.io/Chi-GV-Toan/#tra-cuu-diem" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-blue-100/60 rounded-xl border border-blue-100 text-slate-800 transition block">
+              <a href="${this.TEACHER_MAIN_WEB_URL}#tra-cuu-diem" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-blue-100/60 rounded-xl border border-blue-100 text-slate-800 transition block">
                 <i class="fa-solid fa-magnifying-glass-chart text-blue-600 text-base mb-1 block"></i>
                 <span class="font-bold text-[11px]">Tra Cứu Điểm</span>
               </a>
+            </div>
+            <div class="pt-2 border-t border-indigo-100/80 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
+              <span><i class="fa-solid fa-phone text-emerald-600 mr-1"></i>Zalo / SĐT: <a href="${this.TEACHER_ZALO_URL}" target="_blank" rel="noopener noreferrer" class="font-bold text-indigo-700 hover:underline">${this.TEACHER_PHONE}</a></span>
+              <span><i class="fa-solid fa-envelope text-indigo-600 mr-1"></i>Email: <strong class="font-mono text-slate-800">${this.ADMIN_RECOVERY_EMAIL}</strong></span>
             </div>
           </div>
         </div>
@@ -14090,15 +16529,15 @@ const App = {
         <!-- Footer Hành động -->
         <div class="px-5 py-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div class="text-xs text-slate-500 text-center sm:text-left">
-            <span class="font-semibold text-slate-700">Lớp Toán Anh Chí</span> · Bứt phá điểm số môn Toán
+            <a href="${this.TEACHER_PORTFOLIO_URL}" target="_blank" rel="noopener noreferrer" class="font-semibold text-indigo-700 hover:underline"><i class="fa-solid fa-id-card-clip mr-1"></i>Hồ sơ giảng dạy Thầy Chí</a>
           </div>
           <div class="flex items-center gap-2 w-full sm:w-auto">
             <button type="button" onclick="document.getElementById('teacherIntroModal').remove()" class="flex-1 sm:flex-none px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-xl border border-slate-200 text-xs transition cursor-pointer">
               Đóng
             </button>
-            <a href="https://thanhchi113.github.io/Chi-GV-Toan/" target="_blank" rel="noopener noreferrer" class="flex-1 sm:flex-none ui-btn bg-[#650f12] hover:bg-[#4a090b] text-white font-bold text-xs shadow-md shadow-red-950/20">
+            <a href="${this.TEACHER_MAIN_WEB_URL}" target="_blank" rel="noopener noreferrer" class="flex-1 sm:flex-none ui-btn bg-[#650f12] hover:bg-[#4a090b] text-white font-bold text-xs shadow-md shadow-red-950/20">
               <i class="fa-solid fa-globe"></i>
-              <span>Mở Website Thầy Chí</span>
+              <span>Mở Website Chính Thức</span>
               <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
             </a>
           </div>
