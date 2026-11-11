@@ -1704,7 +1704,31 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.strictEqual(mergedSub.teacherScore, 9.25, 'Cloud merge preserves teacherScore 9.25');
 
   console.log('[OK] Test 27 Passed: Ecosystem data sync, 13 class groups & Photo/Interactive homework system verified 100%.');
-  console.log('[OK] TẤT CẢ 27 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
+
+  // Test 28: Tối ưu giao diện Điện thoại (320px - 390px): chống tràn viền, chống tràn/cắt chữ nút bấm & chống đè nút nổi
+  const indexHtmlSrc = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const cssSrc = fs.readFileSync(path.join(__dirname, '..', 'css', 'app.css'), 'utf8');
+  const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
+  const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
+
+  assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v21"), 'sw.js must bump shell cache to v21');
+  assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
+  assert.ok(/@media\s*\(max-width:\s*1023px\)\s*\{\s*\.scroll-top-fab\s*\{\s*display:\s*none\s*!important;/.test(cssSrc), 'app.css must hide floating .scroll-top-fab on mobile/tablet to prevent overlapping right-aligned buttons');
+  assert.ok(/body\.in-exam\s+\.scroll-top-fab\s*\{\s*display:\s*none\s*!important;/.test(cssSrc), 'app.css must hide .scroll-top-fab inside exam room');
+  assert.ok(cssSrc.includes('text-overflow: clip;') && cssSrc.includes('overflow-wrap: anywhere;'), 'app.css must allow mobile .ui-btn labels to wrap cleanly instead of chopping text');
+  assert.ok(!appJsLatest.includes('</button>\n            </button>') && !appJsLatest.includes('</button>\r\n            </button>'), 'renderExamRoom must not contain stray duplicate </button> after #examTopSubmitBtn');
+  assert.ok(appJsLatest.includes('id="examTopSubmitBtn"') && appJsLatest.includes('<span>Nộp<span class="hidden sm:inline"> Bài</span></span>'), '#examTopSubmitBtn must always show visible Nộp text on narrow phones');
+
+  // Kiểm tra bảng theo dõi nộp BTVN (#hwSubmissionsModal) bọc trong overflow-x-auto trên điện thoại
+  let hwTrackerModalNode = null;
+  global.document.body.appendChild = (node) => { hwTrackerModalNode = node; return node; };
+  App.state.currentUser = { username: 'ADMIN', role: 'admin', fullName: 'Thầy Chí' };
+  App.showHomeworkSubmissionsModal('HW-PHOTO-12AB');
+  assert.ok(hwTrackerModalNode && hwTrackerModalNode.innerHTML.includes('overflow-x-auto') && hwTrackerModalNode.innerHTML.includes('min-w-[580px]'), '#hwSubmissionsModal table must be wrapped in overflow-x-auto for horizontal swipe on mobile');
+
+  console.log('[OK] Test 28 Passed: Mobile anti-overflow, anti-chopped-button & zero-overlap layout verified 100%.');
+  console.log('[OK] TẤT CẢ 28 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

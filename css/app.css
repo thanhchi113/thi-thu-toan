@@ -110,11 +110,24 @@ body.in-exam {
 }
 @media (max-width: 639px) {
   .ui-btn {
-    padding: 0.4rem 0.55rem;
+    height: auto;
+    padding: 0.42rem 0.55rem;
     font-size: 0.72rem;
+    line-height: 1.22;
     gap: 0.25rem;
+    white-space: normal;
+    text-align: center;
   }
   .ui-btn > span {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+  header .ui-btn {
+    white-space: nowrap;
+  }
+  header .ui-btn > span {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -145,9 +158,12 @@ body.in-exam {
 }
 .ui-btn-lg {
   min-height: 44px;
+  max-width: 100%;
+  min-width: 0;
   padding: 0.65rem 1rem;
   border-radius: 0.75rem;
   font-size: 0.875rem;
+  line-height: 1.25;
   font-weight: 800;
   display: inline-flex;
   align-items: center;
@@ -159,6 +175,15 @@ body.in-exam {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.1s ease, box-shadow 0.14s ease;
+}
+@media (max-width: 639px) {
+  .ui-btn-lg {
+    padding: 0.55rem 0.75rem;
+    font-size: 0.8125rem;
+    gap: 0.375rem;
+    white-space: normal;
+    text-align: center;
+  }
 }
 
 /* Ô nhập Tài khoản đăng nhập luôn IN HOA (giữ nguyên chữ thường cho placeholder) */
@@ -963,12 +988,14 @@ select.ui-select-open:not(.bg-transparent) {
 .ui-select-popover {
   position: fixed;
   z-index: 9999;
+  max-width: calc(100vw - 1rem);
   background-color: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 0.9rem;
   padding: 0.35rem;
   box-shadow: 0 14px 34px -6px rgba(15, 23, 42, 0.18), 0 4px 12px -2px rgba(15, 23, 42, 0.08);
   max-height: 268px;
+  overflow-x: hidden;
   overflow-y: auto;
   animation: popInDialog 0.12s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
@@ -1185,6 +1212,8 @@ header.sticky.top-0 {
 #appSystemDialog.fixed.inset-0 > div {
   margin-top: auto !important;
   margin-bottom: auto !important;
+  max-width: min(100%, calc(100vw - 1.5rem));
+  min-width: 0;
 }
 
 [id$="Modal"].fixed.inset-0:not(#previewPdfModal) > div[class*="max-h-"] {
@@ -1215,6 +1244,23 @@ header.sticky.top-0 {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0) scale(1);
+}
+
+/* Ẩn nút nổi trên điện thoại/tablet & phòng thi để tuyệt đối không đè lên các nút thao tác sát lề phải */
+@media (max-width: 1023px) {
+  .scroll-top-fab {
+    display: none !important;
+  }
+}
+body.in-exam .scroll-top-fab {
+  display: none !important;
+}
+@media (max-width: 359px) {
+  .box-digit {
+    width: 2rem;
+    height: 2.55rem;
+    font-size: 1rem;
+  }
 }
 
 /* Print Stylesheet */

@@ -3516,15 +3516,16 @@ const App = {
 
     container.innerHTML = `
       <div class="min-h-screen bg-slate-50 flex flex-col justify-center py-6 sm:py-12 sm:px-6 lg:px-8 relative text-slate-900">
-        <!-- Thanh công cụ đồng bộ: gọn gàng trên điện thoại dọc & ngang, chỉ ghim góc phải trên màn hình rộng -->
-        <div class="w-full max-w-md mx-auto px-4 mb-5 lg:mb-0 lg:w-auto lg:px-0 lg:fixed lg:top-4 lg:right-4 z-30 flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2">
+        <!-- Thanh công cụ đồng bộ: tự động xuống dòng cân đối trên điện thoại nhỏ, ghim góc phải trên màn hình rộng -->
+        <div class="w-full max-w-md mx-auto px-4 mb-5 lg:mb-0 lg:w-auto lg:px-0 lg:fixed lg:top-4 lg:right-4 z-30 flex flex-wrap items-center justify-center sm:justify-end gap-1.5 sm:gap-2">
           <button type="button" id="loginTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="ui-btn bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 shadow-xs shrink-0" title="Giới thiệu Thầy Huỳnh Thanh Chí & Website Lớp Toán Anh Chí">
             <span class="w-4 h-4 rounded bg-[#650f12] text-[#fbf7ef] font-serif font-black text-[10px] flex items-center justify-center shrink-0">π</span>
             <span class="hidden sm:inline">Web Thầy Chí</span>
           </button>
-          <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex-1 sm:flex-initial min-w-0" title="Quét mã QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
+          <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shrink-0" title="Quét mã QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
             <i class="fa-solid fa-qrcode shrink-0"></i>
-            <span>Tạo App ĐT / QR</span>
+            <span class="xs:hidden">App / QR</span>
+            <span class="hidden xs:inline">Tạo App ĐT / QR</span>
           </button>
           <button type="button" id="loginLayoutBtn" onclick="App.showExamLayoutModal()" class="ui-btn bg-white border border-slate-200 shadow-xs hover:bg-indigo-50 text-indigo-700 shrink-0" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
             <i class="fa-solid fa-table-columns text-indigo-600 shrink-0"></i>
@@ -5109,8 +5110,8 @@ const App = {
                   Mã học sinh: <strong class="font-mono tracking-wider">${u.studentId}</strong>${u.nickname ? ` • Biệt danh: <strong>${u.nickname}</strong>` : ''} • Khối: <strong>Khối ${this.getStudentGrade(u)}</strong> • Lớp: <strong>${u.className || '12'}</strong>
                   ${u.phone ? ` • SĐT: <strong>${u.phone}</strong>` : ''}
                 </p>
-                <div class="mt-3.5 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
-                  <button type="button" onclick="App.showStudentSelfEditModal()" class="col-span-2 sm:col-span-1 ui-btn bg-white/20 hover:bg-white/30 text-white backdrop-blur-md border border-white/25 shadow-xs">
+                <div class="mt-3.5 grid grid-cols-1 xs:grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2">
+                  <button type="button" onclick="App.showStudentSelfEditModal()" class="xs:col-span-2 sm:col-span-1 ui-btn bg-white/20 hover:bg-white/30 text-white backdrop-blur-md border border-white/25 shadow-xs">
                     <i class="fa-solid fa-user-pen shrink-0"></i><span>Hồ sơ cá nhân &amp; Đổi mật khẩu</span>
                   </button>
                   <button type="button" id="studentBannerAndroidBtn" onclick="App.showIosAppModal(false, 'android')" class="ui-btn bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold shadow-sm">
@@ -5119,7 +5120,7 @@ const App = {
                   <button type="button" id="studentBannerIosBtn" onclick="App.showIosAppModal(false, 'ios')" class="ui-btn bg-white text-indigo-700 hover:bg-indigo-50 font-extrabold shadow-sm">
                     <i class="fa-brands fa-apple text-sm shrink-0"></i><span>Cài App iOS</span>
                   </button>
-                  <button type="button" onclick="App.logout()" class="col-span-2 sm:col-span-1 ui-btn bg-rose-600 hover:bg-rose-700 text-white font-extrabold shadow-sm">
+                  <button type="button" onclick="App.logout()" class="xs:col-span-2 sm:col-span-1 ui-btn bg-rose-600 hover:bg-rose-700 text-white font-extrabold shadow-sm">
                     <i class="fa-solid fa-right-from-bracket shrink-0"></i><span>Đăng xuất</span>
                   </button>
                 </div>
@@ -5187,10 +5188,11 @@ const App = {
                   type="button"
                   id="studentTabHomeworksBtn"
                   onclick="App.setStudentMainTab('homeworks')"
-                  class="ui-btn h-10 px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn min-h-[40px] px-1.5 xs:px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-book-open-reader shrink-0"></i>
-                  <span class="sm:hidden">BTVN &amp; TL</span>
+                  <span class="xs:hidden">BTVN</span>
+                  <span class="hidden xs:inline sm:hidden">BTVN &amp; TL</span>
                   <span class="hidden sm:inline">Bài Tập &amp; Tài Liệu</span>
                   <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${pendingBtvn.length > 0 ? 'bg-rose-600 text-white font-extrabold' : (this.state.studentMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs')}">
                     ${pendingBtvn.length > 0 ? `${pendingBtvn.length} mới` : allowedHomeworks.length}
@@ -5201,7 +5203,7 @@ const App = {
                   type="button"
                   id="studentTabGradesBtn"
                   onclick="App.setStudentMainTab('grades')"
-                  class="ui-btn h-10 px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'grades' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn min-h-[40px] px-1.5 xs:px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'grades' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-chart-simple shrink-0"></i>
                   <span class="sm:hidden">Kết Quả</span>
@@ -5215,10 +5217,10 @@ const App = {
                   type="button"
                   id="studentTabRewardsBtn"
                   onclick="App.setStudentMainTab('rewards')"
-                  class="ui-btn h-10 px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'rewards' ? 'bg-amber-500 text-white shadow-md shadow-amber-200 ring-2 ring-amber-400/30' : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'}"
+                  class="ui-btn min-h-[40px] px-1.5 xs:px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'rewards' ? 'bg-amber-500 text-white shadow-md shadow-amber-200 ring-2 ring-amber-400/30' : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'}"
                 >
                   <i class="fa-solid fa-gift shrink-0"></i>
-                  <span class="sm:hidden">Đổi Thưởng</span>
+                  <span class="sm:hidden">Đổi Quà</span>
                   <span class="hidden sm:inline">Tích Điểm &amp; Đổi Thưởng</span>
                   <span class="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold shrink-0 ${this.state.studentMainTab === 'rewards' ? 'bg-amber-700 text-white' : 'bg-white text-amber-800 shadow-2xs'}">
                     <span>${rewardStats.availablePoints}</span>
@@ -5230,11 +5232,11 @@ const App = {
                   type="button"
                   id="studentTabTeacherBtn"
                   onclick="App.showTeacherIntroModal()"
-                  class="ui-btn h-10 px-2 sm:px-3.5 min-w-0 bg-gradient-to-r from-red-50 to-amber-50 hover:from-red-100 hover:to-amber-100 text-[#650f12] border border-[#650f12]/20 font-bold"
+                  class="col-span-2 sm:col-span-1 ui-btn min-h-[40px] px-2 sm:px-3.5 min-w-0 bg-gradient-to-r from-red-50 to-amber-50 hover:from-red-100 hover:to-amber-100 text-[#650f12] border border-[#650f12]/20 font-bold"
                   title="Giới thiệu Thầy Huỳnh Thanh Chí & Website Lớp Toán Anh Chí"
                 >
                   <span class="w-4 h-4 rounded bg-[#650f12] text-[#fbf7ef] font-serif font-black text-[10px] flex items-center justify-center shrink-0">π</span>
-                  <span class="sm:hidden">Thầy Chí</span>
+                  <span class="sm:hidden">Về Thầy Chí &amp; Website Chính</span>
                   <span class="hidden sm:inline">Về Thầy Chí &amp; Web</span>
                 </button>
               </nav>
@@ -5272,13 +5274,13 @@ const App = {
                 </p>
               </div>
             </div>
-            <div class="flex items-center gap-2 shrink-0">
+            <div class="grid grid-cols-1 xs:grid-cols-2 md:flex items-stretch md:items-center gap-2 w-full md:w-auto shrink-0">
               <button type="button" onclick="App.showTeacherIntroModal()" class="ui-btn bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 shadow-xs text-xs font-bold">
-                <i class="fa-solid fa-address-card text-indigo-600"></i><span>Xem Giới Thiệu</span>
+                <i class="fa-solid fa-address-card text-indigo-600 shrink-0"></i><span>Xem Giới Thiệu</span>
               </button>
               <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="ui-btn bg-[#650f12] hover:bg-[#3d0709] text-white shadow-xs text-xs font-bold">
-                <i class="fa-solid fa-globe"></i><span>Mở Website Thầy Chí</span>
-                <i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-75"></i>
+                <i class="fa-solid fa-globe shrink-0"></i><span>Mở Website Thầy Chí</span>
+                <i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-75 shrink-0"></i>
               </a>
             </div>
           </div>
@@ -5788,6 +5790,11 @@ const App = {
             <span>•</span>
             <a href="https://thanhchi113.github.io/tai-lieu.html" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Kho tài liệu PDF</a>
           </div>
+          <div class="pt-1.5 lg:hidden">
+            <button type="button" onclick="App.scrollToTop()" class="px-3.5 py-1.5 rounded-full bg-white hover:bg-indigo-50 text-indigo-700 border border-slate-200 text-[11px] font-bold inline-flex items-center gap-1.5 shadow-2xs cursor-pointer">
+              <i class="fa-solid fa-arrow-up"></i><span>Lên đầu trang</span>
+            </button>
+          </div>
         </footer>
 
         <!-- Floating Scroll-To-Top Button (Chỉ hiện khi đã cuộn xuống, không bao giờ đè lên nút nội dung) -->
@@ -5989,20 +5996,20 @@ const App = {
 
               <div class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 ${attemptsCount > 0 ? `
-                  <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <div class="grid grid-cols-1 xs:grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 w-full sm:w-auto">
                     <button type="button" onclick="App.viewSubmissionDetail('${latestSub.id}')" class="min-w-0 ui-btn bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
                       <i class="fa-solid fa-eye shrink-0"></i><span>Xem lại (${latestSub.scoreResult.totalScore}đ)</span>
                     </button>
                     <button type="button" onclick="App.confirmRetakeExam('${ex.id}')" class="min-w-0 ui-btn text-white bg-amber-600 hover:bg-amber-700 shadow-xs">
                       <i class="fa-solid fa-rotate-right shrink-0"></i><span>Thi Lại (Lần ${attemptsCount + 1})</span>
                     </button>
-                    <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="col-span-2 sm:col-span-1 min-w-0 ui-btn bg-slate-50 hover:bg-indigo-50 text-indigo-700 border border-slate-200" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
+                    <button type="button" onclick="App.showExamLayoutModal('${ex.id}')" class="xs:col-span-2 sm:col-span-1 min-w-0 ui-btn bg-slate-50 hover:bg-indigo-50 text-indigo-700 border border-slate-200" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
                       <i class="fa-solid fa-table-columns shrink-0"></i><span>Bố cục thi</span>
                     </button>
                   </div>
                   <span class="text-[11px] text-slate-400 text-center sm:text-right">Gần nhất: ${new Date(latestSub.submittedAt).toLocaleDateString('vi-VN')}</span>
                 ` : `
-                  <div class="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
+                  <div class="grid grid-cols-1 xs:grid-cols-2 sm:flex items-stretch sm:items-center gap-2 w-full sm:w-auto">
                     <button type="button" onclick="App.startExam('${ex.id}')" class="min-w-0 ui-btn px-3 sm:px-4 text-white bg-indigo-600 hover:bg-indigo-700 shadow-xs">
                       <i class="fa-solid fa-play text-[10px] shrink-0"></i>
                       <span>Vào Làm Bài</span>
@@ -6085,8 +6092,8 @@ const App = {
           const safeTitleJs = String(hw.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
           if (!isBtvn) {
             return `
-              <div class="bg-white rounded-2xl p-5 border border-slate-200 hover:border-indigo-200 hover:shadow-md transition flex items-start space-x-4">
-                <div class="w-11 h-11 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-100">
+              <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 hover:border-indigo-200 hover:shadow-md transition flex items-start gap-3 sm:gap-4">
+                <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-100">
                   <i class="fa-solid fa-file-pdf text-lg"></i>
                 </div>
                 <div class="flex-1 min-w-0">
@@ -6104,12 +6111,12 @@ const App = {
                   <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">${hw.description || ''}</p>
                   <div class="mt-2 text-[11px] text-slate-400 font-mono truncate">${hw.fileName || 'Tai_Lieu.pdf'} • ${hw.fileSize || '2.0 MB'}</div>
 
-                  <div class="mt-3 grid grid-cols-2 sm:flex items-center gap-2">
+                  <div class="mt-3 flex flex-wrap items-center gap-2">
                     <button type="button" onclick="App.openPdfModal('${safeTitleJs}', '${hw.pdfUrl}', '${hw.id}')" class="ui-btn bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100">
-                      <i class="fa-solid fa-eye"></i><span>Xem trực tiếp</span>
+                      <i class="fa-solid fa-eye shrink-0"></i><span>Xem trực tiếp</span>
                     </button>
                     <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}')" class="ui-btn bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200/80">
-                      <i class="fa-solid fa-download"></i><span>Tải về</span>
+                      <i class="fa-solid fa-download shrink-0"></i><span>Tải về</span>
                     </button>
                   </div>
                 </div>
@@ -6977,10 +6984,9 @@ const App = {
             </div>
 
             <!-- Nộp bài Button -->
-            <button type="button" id="examTopSubmitBtn" onclick="App.confirmSubmitExam()" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-2 sm:px-4 shrink-0">
+            <button type="button" id="examTopSubmitBtn" onclick="App.confirmSubmitExam()" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm px-2.5 sm:px-4 shrink-0">
               <i class="fa-solid fa-paper-plane shrink-0"></i>
-              <span class="hidden xs:inline">Nộp</span><span class="hidden sm:inline"> Bài</span>
-            </button>
+              <span>Nộp<span class="hidden sm:inline"> Bài</span></span>
             </button>
           </div>
         </header>
@@ -7544,7 +7550,9 @@ const App = {
     }
     if (st.status === 'partial') {
       return {
-        row: 'p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2 transition',
+        row: (part === 'p2' || part === 'p4')
+          ? 'p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2 transition'
+          : 'p-2.5 bg-amber-50 border border-amber-200 rounded-xl flex flex-wrap items-center justify-between gap-2 transition',
         badge: 'px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-[10px] whitespace-nowrap'
       };
     }
@@ -9634,10 +9642,11 @@ const App = {
                   type="button"
                   id="adminTabHomeworksBtn"
                   onclick="App.setAdminMainTab('homeworks')"
-                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn min-h-[40px] px-1.5 xs:px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-house-laptop shrink-0"></i>
-                  <span class="sm:hidden">BTVN &amp; TL</span>
+                  <span class="xs:hidden">BTVN</span>
+                  <span class="hidden xs:inline sm:hidden">BTVN &amp; TL</span>
                   <span class="hidden sm:inline">Giao BTVN &amp; Tài Liệu</span>
                   <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
                     ${this.state.homeworks.length}
@@ -9709,18 +9718,18 @@ const App = {
                 </h3>
                 <p class="text-xs text-slate-500 mt-0.5">Xếp khối học sinh (Khối 6 – 12), quản lý hồ sơ, liên hệ phụ huynh, tài khoản đăng nhập và lịch sử thi</p>
               </div>
-              <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+              <div class="grid grid-cols-1 xs:grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2">
                 <button type="button" id="openClassGroupsModalBtn" onclick="App.showClassGroupsModal()" class="ui-btn bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
-                  <i class="fa-solid fa-people-roof"></i><span>Nhóm Lớp (${allClasses.length})</span>
+                  <i class="fa-solid fa-people-roof shrink-0"></i><span>Nhóm Lớp (${allClasses.length})</span>
                 </button>
                 <button type="button" id="openBulkMoveClassBtn" onclick="App.showBulkMoveClassModal()" class="ui-btn bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs">
-                  <i class="fa-solid fa-right-left"></i><span>Chuyển Nhóm Lớp</span>
+                  <i class="fa-solid fa-right-left shrink-0"></i><span>Chuyển Nhóm Lớp</span>
                 </button>
                 <button type="button" id="openBulkGradeModalBtn" onclick="App.showBulkGradeModal()" class="ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs">
-                  <i class="fa-solid fa-layer-group"></i><span>Xếp Khối HS</span>
+                  <i class="fa-solid fa-layer-group shrink-0"></i><span>Xếp Khối HS</span>
                 </button>
                 <button type="button" onclick="App.showAddStudentModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
-                  <i class="fa-solid fa-user-plus"></i><span>Thêm Học Sinh</span>
+                  <i class="fa-solid fa-user-plus shrink-0"></i><span>Thêm Học Sinh</span>
                 </button>
               </div>
             </div>
@@ -10054,8 +10063,8 @@ const App = {
                 </div>
 
                 <div class="pt-1 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2">
-                  <button type="button" onclick="App.requestAdminPasswordReset()" class="w-full sm:w-auto px-3.5 py-2 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition inline-flex items-center justify-center gap-1.5 cursor-pointer text-center">
-                    <i class="fa-solid fa-paper-plane shrink-0"></i><span class="truncate">Gửi link đặt lại về ${this.ADMIN_RECOVERY_EMAIL}</span>
+                  <button type="button" onclick="App.requestAdminPasswordReset()" class="w-full sm:w-auto px-3.5 py-2 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition inline-flex items-center justify-center gap-1.5 cursor-pointer text-center break-words">
+                    <i class="fa-solid fa-paper-plane shrink-0"></i><span>Gửi link đặt lại về ${this.ADMIN_RECOVERY_EMAIL}</span>
                   </button>
                   <button type="submit" class="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition inline-flex items-center justify-center gap-1.5 cursor-pointer">
                     <i class="fa-solid fa-shield-halved shrink-0"></i><span>Cập Nhật Mật Khẩu</span>
@@ -10454,6 +10463,11 @@ const App = {
             <span>•</span>
             <a href="${this.TEACHER_ZALO_URL}" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Zalo: ${this.TEACHER_PHONE}</a>
           </div>
+          <div class="pt-1.5 lg:hidden">
+            <button type="button" onclick="App.scrollToTop()" class="px-3.5 py-1.5 rounded-full bg-white hover:bg-indigo-50 text-indigo-700 border border-slate-200 text-[11px] font-bold inline-flex items-center gap-1.5 shadow-2xs cursor-pointer">
+              <i class="fa-solid fa-arrow-up"></i><span>Lên đầu trang</span>
+            </button>
+          </div>
         </footer>
 
         <!-- Floating Scroll-To-Top Button (Chỉ hiện khi đã cuộn xuống, không bao giờ đè lên nút nội dung) -->
@@ -10722,7 +10736,7 @@ const App = {
 
               <!-- Các nút thao tác sắp xếp gọn gàng theo lưới cân đối không tràn trên điện thoại -->
               <div class="pt-3 border-t border-slate-100 space-y-2">
-                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div class="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2">
                   <button type="button" onclick="App.previewAdminPdf('${ex.id}')" class="ui-btn bg-red-50 hover:bg-red-100 border border-red-200 text-red-700" title="Xem trực tiếp file PDF đề thi">
                     <i class="fa-solid fa-file-pdf shrink-0"></i><span>Xem PDF Đề</span>
                   </button>
@@ -10730,16 +10744,16 @@ const App = {
                     <i class="fa-solid fa-table-columns shrink-0"></i><span class="sm:hidden">Bố cục thi</span><span class="hidden sm:inline">Xem trước bố cục</span>
                   </button>
                   ${ex.solution_pdf_url ? `
-                    <button type="button" onclick="App.previewAdminSolutionPdf('${ex.id}')" class="col-span-2 sm:col-span-1 ui-btn bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700" title="Xem trực tiếp file PDF đáp án và lời giải">
+                    <button type="button" onclick="App.previewAdminSolutionPdf('${ex.id}')" class="xs:col-span-2 sm:col-span-1 ui-btn bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700" title="Xem trực tiếp file PDF đáp án và lời giải">
                       <i class="fa-solid fa-file-shield shrink-0"></i><span>PDF Đáp Án</span>
                     </button>
                   ` : `
-                    <button type="button" onclick="App.showUpdatePdfModal('${ex.id}')" class="col-span-2 sm:col-span-1 ui-btn bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 text-slate-600">
+                    <button type="button" onclick="App.showUpdatePdfModal('${ex.id}')" class="xs:col-span-2 sm:col-span-1 ui-btn bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 text-slate-600">
                       <i class="fa-solid fa-cloud-arrow-up shrink-0"></i><span>Up PDF ĐA</span>
                     </button>
                   `}
                 </div>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
                   <button type="button" onclick="App.showExamAccessModal('${ex.id}')" class="ui-btn bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700" title="Chọn ai được phép thi đề này">
                     <i class="fa-solid fa-user-check shrink-0"></i><span>Phân quyền</span>
                   </button>
@@ -13040,9 +13054,9 @@ const App = {
               <i class="fa-solid fa-sliders text-amber-600"></i>
               <span>Cách tính điểm (bỏ trống tổng phần = mặc định THPT QG môn Toán)</span>
             </div>
-            <div class="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-100">
-              <button type="button" onclick="App.setDraftScoringMode('equal')" class="px-2.5 py-1 rounded-md text-[11px] font-bold transition cursor-pointer ${!isCustomPts ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-600 hover:text-slate-800'}">Chia đều / Mặc định THPT QG</button>
-              <button type="button" onclick="App.setDraftScoringMode('custom')" class="px-2.5 py-1 rounded-md text-[11px] font-bold transition cursor-pointer ${isCustomPts ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-600 hover:text-slate-800'}">Nhập điểm riêng từng câu</button>
+            <div class="grid grid-cols-1 sm:inline-flex w-full sm:w-auto rounded-lg border border-slate-200 p-0.5 bg-slate-100 gap-0.5">
+              <button type="button" onclick="App.setDraftScoringMode('equal')" class="px-2.5 py-1.5 sm:py-1 rounded-md text-[11px] font-bold transition cursor-pointer ${!isCustomPts ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-600 hover:text-slate-800'}">Chia đều / Mặc định THPT QG</button>
+              <button type="button" onclick="App.setDraftScoringMode('custom')" class="px-2.5 py-1.5 sm:py-1 rounded-md text-[11px] font-bold transition cursor-pointer ${isCustomPts ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-600 hover:text-slate-800'}">Nhập điểm riêng từng câu</button>
             </div>
           </div>
 
@@ -14769,16 +14783,16 @@ const App = {
               </div>
 
               <div class="pt-3 border-t border-slate-100 space-y-2">
-                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  <button type="button" onclick="App.showHomeworkSubmissionsModal('${hw.id}')" class="col-span-2 sm:col-span-1 ui-btn ${pendingGradeCount > 0 ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'} font-bold shadow-xs">
-                    <i class="fa-solid ${pendingGradeCount > 0 ? 'fa-pen-nib' : 'fa-list-check'}"></i>
+                <div class="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2">
+                  <button type="button" onclick="App.showHomeworkSubmissionsModal('${hw.id}')" class="xs:col-span-2 sm:col-span-1 ui-btn ${pendingGradeCount > 0 ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'} font-bold shadow-xs">
+                    <i class="fa-solid ${pendingGradeCount > 0 ? 'fa-pen-nib' : 'fa-list-check'} shrink-0"></i>
                     <span>${pendingGradeCount > 0 ? `Chấm bài (${pendingGradeCount})` : 'Theo dõi &amp; Chấm'}</span>
                   </button>
                   <button type="button" onclick="App.copyMissingHwStudentsList('${hw.id}')" class="ui-btn bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800" title="Sao chép danh sách học sinh chưa nộp để dán nhắc vào nhóm Zalo lớp">
-                    <i class="fa-regular fa-copy"></i><span>DS chưa nộp</span>
+                    <i class="fa-regular fa-copy shrink-0"></i><span>DS chưa nộp</span>
                   </button>
                   <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="ui-btn bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700">
-                    <i class="fa-solid fa-sliders"></i><span>Sửa / Giao lớp</span>
+                    <i class="fa-solid fa-sliders shrink-0"></i><span>Sửa / Giao lớp</span>
                   </button>
                 </div>
                 <div class="flex flex-wrap items-center justify-between gap-2">
@@ -15276,64 +15290,66 @@ const App = {
             </div>
           ` : `
             <div class="rounded-2xl border border-slate-200 overflow-hidden">
-              <table class="min-w-full divide-y divide-slate-200 text-xs">
-                <thead class="bg-slate-100 text-slate-600 uppercase font-bold">
-                  <tr>
-                    <th class="px-4 py-3 text-left">Học Sinh</th>
-                    <th class="px-3 py-3 text-center">Nhóm Lớp</th>
-                    <th class="px-3 py-3 text-center">Trạng Thái Nộp</th>
-                    <th class="px-3 py-3 text-center">Điểm &amp; Nhận Xét</th>
-                    <th class="px-4 py-3 text-right">Thao Tác</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100 bg-white">
-                  ${filteredRows.map(({ student, sub }) => `
-                    <tr class="hover:bg-slate-50/80 transition">
-                      <td class="px-4 py-3">
-                        <div class="font-bold text-slate-900">${student.fullName}</div>
-                        <div class="text-[11px] font-mono text-indigo-600">${student.studentId}${student.phone ? ` • <span class="text-slate-500">${student.phone}</span>` : ''}</div>
-                      </td>
-                      <td class="px-3 py-3 text-center">
-                        <span class="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 font-bold">${student.className || `K${hw.grade || 12}`}</span>
-                      </td>
-                      <td class="px-3 py-3 text-center">
-                        ${!sub ? `
-                          <span class="px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-bold">Chưa nộp</span>
-                        ` : `
-                          <div class="space-y-0.5">
-                            <div class="inline-flex items-center gap-1 font-bold ${sub.isLate ? 'text-amber-700' : 'text-emerald-700'}">
-                              <i class="fa-solid fa-circle-check"></i>
-                              <span>${sub.isLate ? 'Nộp muộn' : 'Đúng hạn'}</span>
-                              ${sub.hwMode === 'photo' ? `<span class="text-slate-500 font-mono">(${(sub.photoImages || sub.homeworkImages || []).length} ảnh)</span>` : ''}
-                            </div>
-                            <div class="text-[10px] text-slate-400">${new Date(sub.submittedAt).toLocaleString('vi-VN')}</div>
-                          </div>
-                        `}
-                      </td>
-                      <td class="px-3 py-3 text-center">
-                        ${!sub ? '<span class="text-slate-300">--</span>' : (
-                          sub.pendingManualGrade
-                            ? '<span class="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 font-bold">Chờ chấm điểm</span>'
-                            : `
-                              <div>
-                                <span class="font-mono font-extrabold text-indigo-700 text-sm">${sub.scoreResult.totalScore}/${sub.scoreResult.maxTotal || hw.maxScore || 10}đ</span>
-                                ${sub.teacherComment ? `<div class="text-[11px] text-slate-500 truncate max-w-[200px] mx-auto" title="${this.escapeHtmlAttr(sub.teacherComment)}">${sub.teacherComment}</div>` : ''}
-                              </div>
-                            `
-                        )}
-                      </td>
-                      <td class="px-4 py-3 text-right">
-                        ${sub ? `
-                          <button type="button" onclick="${sub.hwMode === 'photo' ? `App.showGradePhotoHomeworkModal('${sub.id}')` : `document.getElementById('hwSubmissionsModal')?.remove(); App.viewSubmissionDetail('${sub.id}')`}" class="px-3 py-1.5 rounded-xl font-bold inline-flex items-center gap-1.5 cursor-pointer transition ${sub.pendingManualGrade ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-2xs' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'}">
-                            <i class="fa-solid ${sub.pendingManualGrade ? 'fa-pen-nib' : 'fa-eye'}"></i>
-                            <span>${sub.pendingManualGrade ? 'Chấm ngay' : (sub.hwMode === 'photo' ? 'Xem / Sửa điểm' : 'Chi tiết')}</span>
-                          </button>
-                        ` : '<span class="text-[11px] text-slate-400 italic">Đợi HS nộp</span>'}
-                      </td>
+              <div class="overflow-x-auto">
+                <table class="min-w-[580px] w-full divide-y divide-slate-200 text-xs">
+                  <thead class="bg-slate-100 text-slate-600 uppercase font-bold whitespace-nowrap">
+                    <tr>
+                      <th class="px-4 py-3 text-left">Học Sinh</th>
+                      <th class="px-3 py-3 text-center">Nhóm Lớp</th>
+                      <th class="px-3 py-3 text-center">Trạng Thái Nộp</th>
+                      <th class="px-3 py-3 text-center">Điểm &amp; Nhận Xét</th>
+                      <th class="px-4 py-3 text-right">Thao Tác</th>
                     </tr>
-                  `).join('')}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 bg-white">
+                    ${filteredRows.map(({ student, sub }) => `
+                      <tr class="hover:bg-slate-50/80 transition">
+                        <td class="px-4 py-3">
+                          <div class="font-bold text-slate-900">${student.fullName}</div>
+                          <div class="text-[11px] font-mono text-indigo-600">${student.studentId}${student.phone ? ` • <span class="text-slate-500">${student.phone}</span>` : ''}</div>
+                        </td>
+                        <td class="px-3 py-3 text-center whitespace-nowrap">
+                          <span class="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 font-bold">${student.className || `K${hw.grade || 12}`}</span>
+                        </td>
+                        <td class="px-3 py-3 text-center whitespace-nowrap">
+                          ${!sub ? `
+                            <span class="px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-bold">Chưa nộp</span>
+                          ` : `
+                            <div class="space-y-0.5">
+                              <div class="inline-flex items-center gap-1 font-bold ${sub.isLate ? 'text-amber-700' : 'text-emerald-700'}">
+                                <i class="fa-solid fa-circle-check"></i>
+                                <span>${sub.isLate ? 'Nộp muộn' : 'Đúng hạn'}</span>
+                                ${sub.hwMode === 'photo' ? `<span class="text-slate-500 font-mono">(${(sub.photoImages || sub.homeworkImages || []).length} ảnh)</span>` : ''}
+                              </div>
+                              <div class="text-[10px] text-slate-400">${new Date(sub.submittedAt).toLocaleString('vi-VN')}</div>
+                            </div>
+                          `}
+                        </td>
+                        <td class="px-3 py-3 text-center">
+                          ${!sub ? '<span class="text-slate-300">--</span>' : (
+                            sub.pendingManualGrade
+                              ? '<span class="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 font-bold whitespace-nowrap">Chờ chấm điểm</span>'
+                              : `
+                                <div>
+                                  <span class="font-mono font-extrabold text-indigo-700 text-sm whitespace-nowrap">${sub.scoreResult.totalScore}/${sub.scoreResult.maxTotal || hw.maxScore || 10}đ</span>
+                                  ${sub.teacherComment ? `<div class="text-[11px] text-slate-500 truncate max-w-[200px] mx-auto" title="${this.escapeHtmlAttr(sub.teacherComment)}">${sub.teacherComment}</div>` : ''}
+                                </div>
+                              `
+                          )}
+                        </td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap">
+                          ${sub ? `
+                            <button type="button" onclick="${sub.hwMode === 'photo' ? `App.showGradePhotoHomeworkModal('${sub.id}')` : `document.getElementById('hwSubmissionsModal')?.remove(); App.viewSubmissionDetail('${sub.id}')`}" class="px-3 py-1.5 rounded-xl font-bold inline-flex items-center gap-1.5 cursor-pointer transition ${sub.pendingManualGrade ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-2xs' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'}">
+                              <i class="fa-solid ${sub.pendingManualGrade ? 'fa-pen-nib' : 'fa-eye'}"></i>
+                              <span>${sub.pendingManualGrade ? 'Chấm ngay' : (sub.hwMode === 'photo' ? 'Xem / Sửa điểm' : 'Chi tiết')}</span>
+                            </button>
+                          ` : '<span class="text-[11px] text-slate-400 italic">Đợi HS nộp</span>'}
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
             </div>
           `}
         </div>
