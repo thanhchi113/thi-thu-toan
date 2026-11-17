@@ -1712,7 +1712,7 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v21"), 'sw.js must bump shell cache to v21');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v22"), 'sw.js must bump shell cache to v22');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
   assert.ok(/@media\s*\(max-width:\s*1023px\)\s*\{\s*\.scroll-top-fab\s*\{\s*display:\s*none\s*!important;/.test(cssSrc), 'app.css must hide floating .scroll-top-fab on mobile/tablet to prevent overlapping right-aligned buttons');
   assert.ok(/body\.in-exam\s+\.scroll-top-fab\s*\{\s*display:\s*none\s*!important;/.test(cssSrc), 'app.css must hide .scroll-top-fab inside exam room');
@@ -1728,7 +1728,58 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.ok(hwTrackerModalNode && hwTrackerModalNode.innerHTML.includes('overflow-x-auto') && hwTrackerModalNode.innerHTML.includes('min-w-[580px]'), '#hwSubmissionsModal table must be wrapped in overflow-x-auto for horizontal swipe on mobile');
 
   console.log('[OK] Test 28 Passed: Mobile anti-overflow, anti-chopped-button & zero-overlap layout verified 100%.');
-  console.log('[OK] TẤT CẢ 28 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
+
+  // Test 29: Đồng bộ 1:1 Giao diện Vở Ô Ly & Đỏ Đô Thầy Chí (#650f12) với Website Giới Thiệu (https://thanhchi113.github.io/)
+  console.log('--- TEST 29: Ruled Math Notebook & Crimson Academic UI Sync ---');
+  const manifestSrc = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'manifest.webmanifest'), 'utf8'));
+  assert.strictEqual(manifestSrc.theme_color, '#650f12', 'PWA manifest theme_color must be #650f12');
+  assert.strictEqual(manifestSrc.background_color, '#fbf7ef', 'PWA manifest background_color must be #fbf7ef');
+  assert.ok(indexHtmlSrc.includes('content="#650f12"'), 'index.html meta theme-color must be #650f12');
+
+  // Kiểm tra bộ màu mặc định & di trú tự động từ Indigo cũ sang Đỏ Đô Thầy Chí (#650f12)
+  App.resetAppearance();
+  assert.strictEqual(App.state.accentHex, '#650f12', 'Default accentHex must be #650f12');
+  assert.strictEqual(App.state.accentPreset, 'thaychi', 'Default accentPreset must be thaychi');
+  const crimsonScale = App.generateAccentScale('#650f12', false);
+  assert.strictEqual(crimsonScale['600'], '101 15 18', 'Crimson scale 600 stop must match exact #650f12 RGB');
+  assert.ok(crimsonScale._meta.primaryContrast >= 10, '#650f12 primary button contrast must exceed WCAG AAA (>=10:1)');
+
+  // Giả lập trình duyệt cũ lưu indigo mặc định chưa có cờ brandSyncedV2 -> tự động nâng cấp lên #650f12
+  const memLs = {};
+  global.localStorage = {
+    getItem: (k) => (Object.prototype.hasOwnProperty.call(memLs, k) ? memLs[k] : null),
+    setItem: (k, v) => { memLs[k] = String(v); },
+    removeItem: (k) => { delete memLs[k]; }
+  };
+  App.state.accentHex = '#4f46e5';
+  App.state.accentPreset = 'indigo';
+  global.localStorage.setItem('thpt_appearance', JSON.stringify({ theme: 'light', accentHex: '#4f46e5', accentPreset: 'indigo' }));
+  App.loadAppearance();
+  assert.strictEqual(App.state.accentHex, '#650f12', 'Legacy un-versioned indigo preference must auto-migrate to #650f12');
+  assert.strictEqual(App.state.accentPreset, 'thaychi', 'Legacy un-versioned preset must auto-migrate to thaychi');
+
+  // Kiểm tra CSS Vở kẻ ngang, con trỏ Retina WebP và các lớp đặc trưng (.ltac-topbar, .ltac-notebook-sheet, .ltac-crimson-banner, .hero-em-hl)
+  assert.ok(cssSrc.includes('--paper: #fbf7ef;') && cssSrc.includes('--rule: #d8e3ef;') && cssSrc.includes('--margin: #e8a9ab;'), 'app.css must define ruled math notebook paper tokens');
+  assert.ok(cssSrc.includes('.ltac-topbar') && cssSrc.includes('.ltac-notebook-sheet') && cssSrc.includes('.ltac-crimson-banner') && cssSrc.includes('.hero-em-hl'), 'app.css must define synchronized LTAC layout classes');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'cursor', 'arrow.webp')) && fs.existsSync(path.join(__dirname, '..', 'cursor-text.svg')), 'Retina custom cursor assets must exist');
+
+  // Kiểm tra cả 3 giao diện (Đăng nhập, Học sinh, Giáo viên) render đúng cấu trúc LTAC mới
+  const syncedLogin = { innerHTML: '' };
+  App.renderLoginView(syncedLogin);
+  assert.ok(syncedLogin.innerHTML.includes('ltac-topbar') && syncedLogin.innerHTML.includes('ltac-notebook-sheet') && syncedLogin.innerHTML.includes('hero-em-hl'), 'Login view renders LTAC topbar, notebook sheet & yellow swipe heading');
+
+  const syncedStudent = { innerHTML: '' };
+  App.state.currentUser = { username: 'HS901', fullName: 'Nguyễn Văn Minh', role: 'student', studentId: 'HS901', grade: 12, className: '12A1 VIP 2K9' };
+  App.renderStudentPortal(syncedStudent);
+  assert.ok(syncedStudent.innerHTML.includes('ltac-topbar') && syncedStudent.innerHTML.includes('ltac-crimson-banner'), 'Student portal renders LTAC topbar & crimson-gold banner');
+
+  const syncedAdmin = { innerHTML: '' };
+  App.state.currentUser = { username: 'ADMIN', role: 'admin', fullName: 'Thầy Chí' };
+  App.renderAdminDashboard(syncedAdmin);
+  assert.ok(syncedAdmin.innerHTML.includes('ltac-admin-header'), 'Admin dashboard renders LTAC crimson studio header');
+
+  console.log('[OK] Test 29 Passed: 1:1 Ruled Math Notebook & Crimson Academic UI sync verified 100%.');
+  console.log('[OK] TẤT CẢ 29 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

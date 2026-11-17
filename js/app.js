@@ -123,9 +123,9 @@ const App = {
     currentDetailSubId: null,
     activeSubmissionDetailId: null,
     activePart3Target: { qId: 1, boxIdx: 0 },
-    theme: 'light',           // 'light' | 'sepia' | 'dark'
-    accentHex: '#4f46e5',     // Mã màu chủ đạo (#RRGGBB)
-    accentPreset: 'indigo',   // ID bộ màu chọn sẵn hoặc 'custom'
+    theme: 'light',           // 'light' (Vở ô ly) | 'sepia' | 'dark'
+    accentHex: '#650f12',     // Mã màu chủ đạo (#650f12 — Đỏ Đô Thầy Chí)
+    accentPreset: 'thaychi',  // ID bộ màu chọn sẵn đồng bộ Web giới thiệu
     contrast: 'normal',       // 'normal' (WCAG AA+) | 'high' (WCAG AAA)
     fontSizeDelta: 0,
 
@@ -2741,7 +2741,34 @@ const App = {
   },
 
   generateAccentScale(hex, highContrast = false) {
-    const [r, g, b] = this.hexToRgb(hex);
+    const cleanHex = this.normalizeHex(hex);
+    if (cleanHex === '#650f12') {
+      const stops = {
+        50:  [252, 245, 244],
+        100: [246, 231, 229],
+        200: [235, 204, 201],
+        300: highContrast ? [244, 188, 185] : [228, 160, 156],
+        400: [186, 84, 88],
+        500: [143, 44, 48],
+        600: highContrast ? [88, 11, 14] : [101, 15, 18],
+        700: [77, 11, 13],
+        800: [61, 7, 9],
+        900: [43, 5, 6],
+        950: [28, 3, 4]
+      };
+      const result = {};
+      Object.keys(stops).forEach(k => {
+        result[k] = stops[k].join(' ');
+      });
+      result._meta = {
+        primaryHex: '#' + stops[600].map(v => v.toString(16).padStart(2, '0')).join(''),
+        primaryContrast: this.contrastRatio(stops[600], [255, 255, 255]),
+        darkTextContrast: this.contrastRatio(stops[300], [19, 28, 49])
+      };
+      return result;
+    }
+
+    const [r, g, b] = this.hexToRgb(cleanHex);
     const [h, s, l] = this.rgbToHsl(r, g, b);
     const sat = s < 8 ? s : Math.min(92, Math.max(s, 45));
 
@@ -2805,7 +2832,15 @@ const App = {
       const saved = JSON.parse(raw);
       if (['light', 'sepia', 'dark'].includes(saved.theme)) this.state.theme = saved.theme;
       if (['normal', 'high'].includes(saved.contrast)) this.state.contrast = saved.contrast;
-      if (saved.accentHex) {
+      const isLegacyDefaultIndigo = !saved.brandSyncedV2 && (
+        !saved.accentPreset ||
+        saved.accentPreset === 'indigo' ||
+        String(saved.accentHex || '').toLowerCase() === '#4f46e5'
+      );
+      if (isLegacyDefaultIndigo) {
+        this.state.accentHex = '#650f12';
+        this.state.accentPreset = 'thaychi';
+      } else if (saved.accentHex) {
         this.state.accentHex = this.normalizeHex(saved.accentHex);
         const match = this.ACCENT_PRESETS.find(p => p.hex.toLowerCase() === this.state.accentHex);
         this.state.accentPreset = saved.accentPreset || (match ? match.id : 'custom');
@@ -2824,6 +2859,7 @@ const App = {
   saveAppearance() {
     try {
       localStorage.setItem('thpt_appearance', JSON.stringify({
+        brandSyncedV2: true,
         theme: this.state.theme,
         accentHex: this.state.accentHex,
         accentPreset: this.state.accentPreset,
@@ -2835,26 +2871,31 @@ const App = {
   },
 
   applyAppearance() {
+    const scale = this.generateAccentScale(this.state.accentHex || '#650f12', this.state.contrast === 'high');
+    this._lastAccentMeta = scale._meta;
     if (typeof document === 'undefined') return;
     const th = this.state.theme || 'light';
     const ct = this.state.contrast || 'normal';
-    document.documentElement.setAttribute('data-theme', th);
-    document.documentElement.setAttribute('data-contrast', ct);
-    document.body.setAttribute('data-theme', th);
-    document.body.setAttribute('data-contrast', ct);
-    document.documentElement.style.fontSize = `${16 + (this.state.fontSizeDelta || 0)}px`;
-
-    const scale = this.generateAccentScale(this.state.accentHex || '#4f46e5', this.state.contrast === 'high');
-    ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'].forEach(k => {
-      document.documentElement.style.setProperty(`--accent-${k}`, scale[k]);
-    });
-    this._lastAccentMeta = scale._meta;
+    if (document.documentElement && document.documentElement.setAttribute) {
+      document.documentElement.setAttribute('data-theme', th);
+      document.documentElement.setAttribute('data-contrast', ct);
+      if (document.documentElement.style) {
+        document.documentElement.style.fontSize = `${16 + (this.state.fontSizeDelta || 0)}px`;
+        ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'].forEach(k => {
+          document.documentElement.style.setProperty(`--accent-${k}`, scale[k]);
+        });
+      }
+    }
+    if (document.body && document.body.setAttribute) {
+      document.body.setAttribute('data-theme', th);
+      document.body.setAttribute('data-contrast', ct);
+    }
   },
 
   getThemeMeta(th = this.state.theme) {
     if (th === 'dark') return { id: 'dark', label: 'Tối', icon: 'fa-moon' };
     if (th === 'sepia') return { id: 'sepia', label: 'Dịu mắt', icon: 'fa-book-open' };
-    return { id: 'light', label: 'Sáng', icon: 'fa-sun' };
+    return { id: 'light', label: 'Giấy vở', icon: 'fa-sun' };
   },
 
   refreshOpenThemeModal() {
@@ -2959,8 +3000,8 @@ const App = {
 
   resetAppearance() {
     this.state.theme = 'light';
-    this.state.accentHex = '#4f46e5';
-    this.state.accentPreset = 'indigo';
+    this.state.accentHex = '#650f12';
+    this.state.accentPreset = 'thaychi';
     this.state.contrast = 'normal';
     this.state.fontSizeDelta = 0;
     this.saveAppearance();
@@ -2976,9 +3017,9 @@ const App = {
     const fontPct = Math.round(((16 + (this.state.fontSizeDelta || 0)) / 16) * 100) + '%';
 
     const themes = [
-      { id: 'light', title: 'Sáng (Light)', desc: 'Nền trắng thanh thoát, rõ nét ban ngày', icon: 'fa-sun', previewBg: '#f8fafc', previewCard: '#ffffff', previewText: '#0f172a', previewBorder: '#cbd5e1' },
-      { id: 'sepia', title: 'Dịu mắt (Sepia)', desc: 'Giấy ấm chống mỏi mắt khi luyện đề lâu', icon: 'fa-book-open', previewBg: '#f4ecd8', previewCard: '#fdf9f0', previewText: '#241b10', previewBorder: '#d8c6a8' },
-      { id: 'dark',  title: 'Tối (Dark)', desc: 'Nền tối sâu giảm chói, tương phản cao', icon: 'fa-moon', previewBg: '#0b1120', previewCard: '#131c31', previewText: '#f8fafc', previewBorder: '#334155' }
+      { id: 'light', title: 'Vở Toán (Mặc định)', desc: 'Giấy kem kẻ ngang chuẩn Web Thầy Chí', icon: 'fa-sun', previewBg: '#fbf7ef', previewCard: '#fffdf8', previewText: '#2a211f', previewBorder: '#e6dbcd' },
+      { id: 'sepia', title: 'Dịu mắt (Sepia)', desc: 'Giấy ấm đậm hơn chống mỏi mắt khi luyện lâu', icon: 'fa-book-open', previewBg: '#f4ecd8', previewCard: '#fdf9f0', previewText: '#241b10', previewBorder: '#d8c6a8' },
+      { id: 'dark',  title: 'Tối (Dark)', desc: 'Nền tối sâu giảm chói ban đêm, tương phản cao', icon: 'fa-moon', previewBg: '#0b1120', previewCard: '#131c31', previewText: '#f8fafc', previewBorder: '#334155' }
     ];
 
     return `
@@ -3508,217 +3549,313 @@ const App = {
     }
   },
 
-  // --- VIEW: MÀN HÌNH ĐĂNG NHẬP ---
+  // --- VIEW: MÀN HÌNH ĐĂNG NHẬP (ĐỒNG BỘ 1:1 VỚI WEB GIỚI THIỆU https://thanhchi113.github.io/) ---
   renderLoginView(container) {
     const activeTab = this.state.loginTab === 'admin' ? 'admin' : 'student';
     const thMeta = this.getThemeMeta();
-    const swatchHex = (this._lastAccentMeta && this._lastAccentMeta.primaryHex) || this.state.accentHex || '#4f46e5';
+    const swatchHex = (this._lastAccentMeta && this._lastAccentMeta.primaryHex) || this.state.accentHex || '#650f12';
 
     container.innerHTML = `
-      <div class="min-h-screen bg-slate-50 flex flex-col justify-center py-6 sm:py-12 sm:px-6 lg:px-8 relative text-slate-900">
-        <!-- Thanh công cụ đồng bộ: tự động xuống dòng cân đối trên điện thoại nhỏ, ghim góc phải trên màn hình rộng -->
-        <div class="w-full max-w-md mx-auto px-4 mb-5 lg:mb-0 lg:w-auto lg:px-0 lg:fixed lg:top-4 lg:right-4 z-30 flex flex-wrap items-center justify-center sm:justify-end gap-1.5 sm:gap-2">
-          <button type="button" id="loginTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="ui-btn bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 shadow-xs shrink-0" title="Giới thiệu Thầy Huỳnh Thanh Chí & Website Lớp Toán Anh Chí">
-            <span class="w-4 h-4 rounded bg-[#650f12] text-[#fbf7ef] font-serif font-black text-[10px] flex items-center justify-center shrink-0">π</span>
-            <span class="hidden sm:inline">Web Thầy Chí</span>
-          </button>
-          <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shrink-0" title="Quét mã QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
-            <i class="fa-solid fa-qrcode shrink-0"></i>
-            <span class="xs:hidden">App / QR</span>
-            <span class="hidden xs:inline">Tạo App ĐT / QR</span>
-          </button>
-          <button type="button" id="loginLayoutBtn" onclick="App.showExamLayoutModal()" class="ui-btn bg-white border border-slate-200 shadow-xs hover:bg-indigo-50 text-indigo-700 shrink-0" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
-            <i class="fa-solid fa-table-columns text-indigo-600 shrink-0"></i>
-            <span>Bố cục thi</span>
-          </button>
-          <button type="button" id="loginQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn-icon sm:w-auto sm:px-3 bg-white border border-slate-200 shadow-xs hover:bg-slate-100 text-xs font-bold text-slate-700 sm:gap-1.5" title="Chuyển nhanh chế độ Sáng / Dịu mắt / Tối">
-            <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
-            <span class="hidden sm:inline">${thMeta.label}</span>
-          </button>
-          <button type="button" id="loginThemeBtn" onclick="App.showThemeModal()" class="ui-btn-icon sm:w-auto sm:px-3 bg-white border border-slate-200 shadow-xs hover:bg-slate-100 text-xs font-bold text-slate-700 sm:gap-1.5" title="Đổi bộ màu chủ đạo & mức độ tương phản">
-            <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-black/15 shrink-0" style="background:${swatchHex};"></span>
-            <span class="hidden sm:inline">Bộ màu</span>
-          </button>
-        </div>
+      <div class="min-h-screen bg-slate-50 flex flex-col justify-between text-slate-900">
+        <!-- Thanh Điều Hướng Cố Định Đồng Bộ 1:1 Với Website Giới Thiệu (https://thanhchi113.github.io/) -->
+        <header class="ltac-topbar sticky top-0 z-30">
+          <div class="w-full max-w-[1220px] mx-auto px-3.5 sm:px-6 h-15 sm:h-[66px] py-2 flex items-center justify-between gap-3">
+            <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="ltac-brand min-w-0 sm:shrink-0" title="Website chính thức Thầy Huỳnh Thanh Chí — Lớp Toán Anh Chí">
+              <span class="ltac-brand-badge">π</span>
+              <span class="min-w-0 truncate">
+                <span class="ltac-brand-title truncate">Thầy Huỳnh Thanh Chí</span>
+                <span class="ltac-brand-sub truncate">Lớp Toán Anh Chí · Khối 6 – 12</span>
+              </span>
+            </a>
 
-        <div class="sm:mx-auto sm:w-full sm:max-w-md text-center px-4">
-          <div class="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-[#650f12] text-[#fbf7ef] font-serif font-black text-3xl shadow-lg shadow-red-950/20 mb-3 border-2 border-amber-300/30">
-            π
-          </div>
-          <div class="text-xs font-bold text-[#650f12] tracking-wider uppercase mb-1">
-            Lớp Toán Anh Chí · Thầy Huỳnh Thanh Chí
-          </div>
-          <h1 class="text-xl sm:text-3xl font-extrabold tracking-tight text-slate-900 font-serif">
-            KHẢO THÍ &amp; LUYỆN ĐỀ TOÁN 6 – 12
-          </h1>
-          <p class="mt-1 text-xs sm:text-sm font-semibold text-slate-600">
-            Học hiểu bản chất • Đề 3 phần GDPT 2018 (GK, CK, Tuyển sinh 10 &amp; THPT QG)
-          </p>
-        </div>
+            <!-- Menu Liên Kết Hệ Sinh Thái (Desktop) -->
+            <nav class="hidden xl:flex items-center gap-4 text-[13.5px] font-medium text-slate-600 ml-auto mr-1">
+              <a href="https://thanhchi113.github.io/#gioi-thieu" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition whitespace-nowrap">Giới thiệu</a>
+              <a href="https://thanhchi113.github.io/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition whitespace-nowrap">Lớp học</a>
+              <a href="https://thanhchi113.github.io/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition whitespace-nowrap">Thành tích</a>
+              <a href="https://thanhchi113.github.io/tai-lieu.html" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition whitespace-nowrap">Tài liệu</a>
+              <a href="https://thanhchi113.github.io/#tra-cuu-diem" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition whitespace-nowrap">Tra cứu điểm</a>
+            </nav>
 
-        <div class="mt-5 sm:mt-7 sm:mx-auto sm:w-full sm:max-w-md px-4">
-          <div class="bg-white py-6 px-5 shadow-xl rounded-2xl border border-slate-200 sm:py-8 sm:px-10">
-            <div class="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200/80 mb-5">
-              <button type="button" id="tabStudentBtn" onclick="App.switchLoginTab('student')" class="h-10 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer ${activeTab === 'student' ? 'bg-indigo-600 text-white font-extrabold shadow-xs' : 'text-slate-600 hover:text-slate-900 font-semibold'}">
-                <i class="fa-solid fa-user-graduate"></i><span>Học sinh</span>
+            <!-- Cụm Nút Tiện Ích Đồng Bộ -->
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button type="button" id="loginTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="ui-btn bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs shrink-0" title="Giới thiệu Thầy Huỳnh Thanh Chí & Website Lớp Toán Anh Chí">
+                <i class="fa-solid fa-address-card text-indigo-600 shrink-0"></i>
+                <span class="hidden sm:inline xl:hidden 2xl:inline">Thầy Chí</span>
               </button>
-              <button type="button" id="tabAdminBtn" onclick="App.switchLoginTab('admin')" class="h-10 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer ${activeTab === 'admin' ? 'bg-emerald-600 text-white font-extrabold shadow-xs' : 'text-slate-600 hover:text-slate-900 font-semibold'}">
-                <i class="fa-solid fa-chalkboard-user"></i><span>Giáo viên</span>
+              <button type="button" id="loginIosAppBtn" onclick="App.showIosAppModal()" class="ui-btn bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shrink-0" title="Quét mã QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
+                <i class="fa-solid fa-qrcode shrink-0"></i>
+                <span class="xs:hidden">QR</span>
+                <span class="hidden xs:inline">App / QR</span>
+              </button>
+              <button type="button" id="loginLayoutBtn" onclick="App.showExamLayoutModal()" class="hidden md:inline-flex ui-btn bg-white border border-slate-200 shadow-2xs hover:bg-indigo-50 text-indigo-700 shrink-0" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án">
+                <i class="fa-solid fa-table-columns text-indigo-600 shrink-0"></i>
+                <span class="hidden md:inline">Bố cục</span>
+              </button>
+              <button type="button" id="loginQuickThemeBtn" onclick="App.cycleTheme()" class="ui-btn-icon bg-white border border-slate-200 shadow-2xs hover:bg-slate-100 text-xs font-bold text-slate-700" title="Chuyển nhanh chế độ Giấy vở / Dịu mắt / Tối (${thMeta.label})">
+                <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
+              </button>
+              <button type="button" id="loginThemeBtn" onclick="App.showThemeModal()" class="ui-btn-icon bg-white border border-slate-200 shadow-2xs hover:bg-slate-100 text-xs font-bold text-slate-700" title="Đổi bộ màu chủ đạo & mức độ tương phản">
+                <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-black/15 shrink-0" style="background:${swatchHex};"></span>
               </button>
             </div>
+          </div>
 
-            <!-- Form Học sinh -->
-            <form id="studentLoginForm" onsubmit="event.preventDefault(); App.handleStudentLogin();" class="space-y-4 ${activeTab === 'student' ? '' : 'hidden'}">
-              <div>
-                <div class="flex items-center justify-between">
-                  <label for="loginStudentId" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mã Học Sinh</label>
-                  <span class="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">Tự động IN HOA</span>
-                </div>
-                <div class="mt-1.5 relative">
-                  <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <i class="fa-solid fa-id-card"></i>
-                  </div>
-                  <input type="text" id="loginStudentId" placeholder="Nhập mã học sinh (VD: HS001)" required
-                    autocapitalize="characters" autocomplete="username" spellcheck="false"
-                    oninput="App.forceUppercaseInput(this)"
-                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono font-bold tracking-wide input-uppercase">
-                </div>
+          <!-- Dải Lối Tắt Nhanh Trên Điện Thoại & Tablet (Đồng bộ .mobile-quick-nav của Web giới thiệu) -->
+          <div class="xl:hidden flex items-center gap-1.5 overflow-x-auto no-scrollbar px-3.5 sm:px-6 pb-2 text-xs">
+            <a href="https://thanhchi113.github.io/#tra-cuu-diem" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-600 text-white font-bold shrink-0 whitespace-nowrap">
+              <i class="fa-solid fa-magnifying-glass text-[10px]"></i><span>Tra cứu điểm</span>
+            </a>
+            <button type="button" onclick="App.showExamLayoutModal()" class="md:hidden inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-800 font-semibold shrink-0 whitespace-nowrap cursor-pointer">
+              <i class="fa-solid fa-table-columns text-indigo-600 text-[10px]"></i><span>Bố cục thi</span>
+            </button>
+            <a href="https://thanhchi113.github.io/tai-lieu.html" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-800 font-semibold shrink-0 whitespace-nowrap">
+              <i class="fa-solid fa-book-open text-indigo-600 text-[10px]"></i><span>Tài liệu PDF</span>
+            </a>
+            <a href="https://thanhchi113.github.io/#lop-hoc" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-800 font-semibold shrink-0 whitespace-nowrap">
+              <i class="fa-regular fa-calendar text-indigo-600 text-[10px]"></i><span>Lịch 13 lớp</span>
+            </a>
+            <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-800 font-semibold shrink-0 whitespace-nowrap">
+              <i class="fa-solid fa-globe text-indigo-600 text-[10px]"></i><span>Web Giới Thiệu</span>
+            </a>
+          </div>
+        </header>
+
+        <!-- Phần Thân Chính: Hero Học Thuật + Tờ Giấy Vở Đăng Nhập -->
+        <main class="w-full max-w-[1180px] mx-auto px-3.5 sm:px-6 pt-5 sm:pt-10 pb-8 flex-1">
+          <!-- Tiêu đề gọn trên Điện thoại để vào thẳng ô đăng nhập ngay đầu màn hình -->
+          <div class="lg:hidden mb-4">
+            <span class="ltac-eyebrow">Thầy Huỳnh Thanh Chí · Lớp Toán Anh Chí</span>
+            <h1 class="mt-2 text-2xl xs:text-3xl font-extrabold tracking-tight text-slate-900 font-serif leading-[1.12]">
+              Phòng thi trực tuyến.<br><em class="hero-em-hl">Bứt phá điểm 9+ Toán.</em>
+            </h1>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 items-center">
+            <!-- Cột Trái (Desktop): Nội dung giới thiệu đồng bộ 1:1 với Hero trang chủ Thầy Chí -->
+            <div class="order-2 lg:order-1 lg:col-span-7 space-y-5">
+              <div class="hidden lg:block">
+                <span class="ltac-eyebrow">Thầy Huỳnh Thanh Chí · Lớp Toán Anh Chí</span>
+                <h1 class="mt-3.5 text-4xl xl:text-[50px] font-extrabold tracking-tight text-slate-900 font-serif leading-[1.06]">
+                  Phòng thi trực tuyến.<br><em class="hero-em-hl">Bứt phá điểm 9+ Toán.</em>
+                </h1>
               </div>
 
-              <div>
-                <label for="loginStudentPass" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mật khẩu</label>
-                <div class="mt-1.5 relative">
-                  <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <i class="fa-solid fa-lock"></i>
-                  </div>
-                  <input type="password" id="loginStudentPass" placeholder="Nhập mật khẩu" required
-                    autocomplete="current-password"
-                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
-                </div>
+              <p class="text-sm sm:text-base text-slate-600 leading-relaxed max-w-2xl">
+                Hệ thống khảo thí và nộp bài tập trực tuyến chính thức của <strong class="text-slate-900">Lớp Toán Anh Chí (Khối 6 – 12)</strong>. Làm chủ đề chuẩn cấu trúc mới (Trắc nghiệm ABCD, Đúng/Sai 4 ý, Trả lời ngắn &amp; Tự luận), nộp ảnh vở BTVN theo từng nhóm lớp và xem lời giải chi tiết chuẩn LaTeX – TikZ.
+              </p>
+
+              <!-- Ghi chú viết tay Patrick Hand giống trang giới thiệu -->
+              <div class="flex items-center gap-2 font-hand text-lg sm:text-xl text-indigo-700">
+                <svg class="w-8 h-5 shrink-0" viewBox="0 0 34 22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M2 12c6-5 14-8 26-6m-5-4 5 4-5 5"/></svg>
+                <span>Theo sát từng học sinh · Bám sát cấu trúc đề 3 phần GDPT 2018</span>
               </div>
 
-              <button type="submit" class="ui-btn-lg w-full mt-2 text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm">
-                <span>Đăng Nhập Cổng Học Sinh</span>
-                <i class="fa-solid fa-arrow-right text-xs"></i>
-              </button>
-            </form>
-
-            <!-- Form Giáo viên -->
-            <form id="adminLoginForm" onsubmit="event.preventDefault(); App.handleAdminLogin();" class="space-y-4 ${activeTab === 'admin' ? '' : 'hidden'}">
-              <div>
-                <div class="flex items-center justify-between">
-                  <label for="loginAdminUser" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Tài khoản Giáo viên</label>
-                  <span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">Tự động IN HOA</span>
-                </div>
-                <div class="mt-1.5 relative">
-                  <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <i class="fa-solid fa-user-shield"></i>
-                  </div>
-                  <input type="text" id="loginAdminUser" placeholder="Nhập tên đăng nhập (VD: ADMIN)" required
-                    autocapitalize="characters" autocomplete="username" spellcheck="false"
-                    oninput="App.forceUppercaseInput(this)"
-                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm font-mono font-bold tracking-wide input-uppercase">
-                </div>
+              <!-- 4 Nhãn Lộ Trình Khối 6 – 12 -->
+              <div class="flex flex-wrap gap-x-5 gap-y-2 text-xs sm:text-sm font-medium text-slate-600">
+                <span class="inline-flex items-center gap-1.5"><i class="fa-solid fa-layer-group text-indigo-600 text-xs"></i>Toán 6 – 8 nền tảng</span>
+                <span class="inline-flex items-center gap-1.5"><i class="fa-solid fa-circle-check text-indigo-600 text-xs"></i>Luyện thi 9 vào 10</span>
+                <span class="inline-flex items-center gap-1.5"><i class="fa-solid fa-chart-line text-indigo-600 text-xs"></i>Toán 10 – 11 chuyên sâu</span>
+                <span class="inline-flex items-center gap-1.5"><i class="fa-solid fa-star text-indigo-600 text-xs"></i>Luyện thi THPT Quốc Gia</span>
               </div>
 
-              <div>
-                <div class="flex items-center justify-between">
-                  <label for="loginAdminPass" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mật khẩu Quản trị</label>
-                  <button type="button" id="forgotAdminPassBtn" onclick="App.requestAdminPasswordReset()" class="text-xs font-bold text-emerald-700 hover:underline cursor-pointer">
-                    Quên mật khẩu?
+              <!-- Hộp mở nhanh Mã QR & Hướng dẫn Tạo App cho Điện thoại Android & iOS -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <button type="button" id="loginAndroidPromoCard" onclick="App.showIosAppModal(false, 'android')" class="ltac-card-hover w-full bg-white hover:bg-emerald-50/50 p-3.5 rounded-2xl border border-slate-200 shadow-2xs transition flex items-center justify-between gap-2.5 text-left cursor-pointer group">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 rounded-xl bg-emerald-700 text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <i class="fa-brands fa-android text-lg"></i>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-xs font-bold text-slate-900 font-serif truncate">Tạo App trên Android</div>
+                      <p class="text-[11px] text-slate-500 mt-0.5 truncate">Samsung, Oppo, Xiaomi • Quét QR</p>
+                    </div>
+                  </div>
+                  <div class="w-8 h-8 rounded-full bg-emerald-50 group-hover:bg-emerald-700 text-emerald-700 group-hover:text-white border border-emerald-200 flex items-center justify-center shrink-0 transition">
+                    <i class="fa-solid fa-qrcode text-xs"></i>
+                  </div>
+                </button>
+
+                <button type="button" id="loginIosPromoCard" onclick="App.showIosAppModal(false, 'ios')" class="ltac-card-hover w-full bg-white hover:bg-indigo-50/50 p-3.5 rounded-2xl border border-slate-200 shadow-2xs transition flex items-center justify-between gap-2.5 text-left cursor-pointer group">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <i class="fa-brands fa-apple text-lg"></i>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-xs font-bold text-slate-900 font-serif truncate">Tạo App trên iPhone / iPad</div>
+                      <p class="text-[11px] text-slate-500 mt-0.5 truncate">Safari iOS • Đọc PDF siêu nét</p>
+                    </div>
+                  </div>
+                  <div class="w-8 h-8 rounded-full bg-indigo-50 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white border border-indigo-200 flex items-center justify-center shrink-0 transition">
+                    <i class="fa-solid fa-qrcode text-xs"></i>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <!-- Cột Phải (Trên cùng ở Mobile): Tờ Giấy Vở Ô Ly Đăng Nhập (.ltac-notebook-sheet) -->
+            <div class="order-1 lg:order-2 lg:col-span-5">
+              <div class="ltac-notebook-sheet py-6 px-5 sm:py-7 sm:px-8">
+                <div class="flex items-center justify-between gap-2 pb-4 mb-5 border-b border-dashed border-slate-200">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <span class="ltac-brand-badge" style="width:32px;height:32px;font-size:18px;border-radius:9px;">π</span>
+                    <div class="min-w-0">
+                      <div class="font-serif font-bold text-sm sm:text-base text-slate-900 leading-tight truncate">Đăng Nhập Phòng Thi</div>
+                      <div class="text-[11px] text-slate-500 truncate">Nhận đề thi, nộp BTVN &amp; xem điểm</div>
+                    </div>
+                  </div>
+                  <span class="font-hand text-base sm:text-lg text-indigo-600 shrink-0 -rotate-2">Khối 6 – 12</span>
+                </div>
+
+                <!-- Chuyển Cổng Học Sinh / Giáo Viên dạng Pill -->
+                <div class="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-full border border-slate-200/90 mb-5">
+                  <button type="button" id="tabStudentBtn" onclick="App.switchLoginTab('student')" class="h-10 rounded-full text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer ${activeTab === 'student' ? 'bg-indigo-600 text-white font-extrabold shadow-xs' : 'text-slate-600 hover:text-slate-900 font-semibold'}">
+                    <i class="fa-solid fa-user-graduate"></i><span>Học sinh</span>
+                  </button>
+                  <button type="button" id="tabAdminBtn" onclick="App.switchLoginTab('admin')" class="h-10 rounded-full text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer ${activeTab === 'admin' ? 'bg-[#3d0709] text-[#ffe27d] font-extrabold shadow-xs' : 'text-slate-600 hover:text-slate-900 font-semibold'}">
+                    <i class="fa-solid fa-chalkboard-user"></i><span>Giáo viên</span>
                   </button>
                 </div>
-                <div class="mt-1.5 relative">
-                  <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <i class="fa-solid fa-key"></i>
+
+                <!-- Form Học sinh -->
+                <form id="studentLoginForm" onsubmit="event.preventDefault(); App.handleStudentLogin();" class="space-y-4 ${activeTab === 'student' ? '' : 'hidden'}">
+                  <div>
+                    <div class="flex items-center justify-between gap-2">
+                      <label for="loginStudentId" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mã Học Sinh</label>
+                      <span class="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">Tự động IN HOA</span>
+                    </div>
+                    <div class="mt-1.5 relative">
+                      <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <i class="fa-solid fa-id-card"></i>
+                      </div>
+                      <input type="text" id="loginStudentId" placeholder="Nhập mã học sinh (VD: HS001)" required
+                        autocapitalize="characters" autocomplete="username" spellcheck="false"
+                        oninput="App.forceUppercaseInput(this)"
+                        class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono font-bold tracking-wide input-uppercase">
+                    </div>
                   </div>
-                  <input type="password" id="loginAdminPass" placeholder="Nhập mật khẩu quản trị" required
-                    autocomplete="current-password"
-                    class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm font-medium">
-                </div>
-              </div>
 
-              <button type="submit" class="ui-btn-lg w-full mt-2 text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm">
-                <span>Đăng Nhập Cổng Giáo Viên</span>
-                <i class="fa-solid fa-arrow-right text-xs"></i>
-              </button>
-            </form>
-          </div>
+                  <div>
+                    <label for="loginStudentPass" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mật khẩu</label>
+                    <div class="mt-1.5 relative">
+                      <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <i class="fa-solid fa-lock"></i>
+                      </div>
+                      <input type="password" id="loginStudentPass" placeholder="Nhập mật khẩu được cấp" required
+                        autocomplete="current-password"
+                        class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
+                    </div>
+                  </div>
 
-          <!-- Hộp mở nhanh Mã QR & Hướng dẫn Tạo App cho Điện thoại Android & iOS -->
-          <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <button type="button" id="loginAndroidPromoCard" onclick="App.showIosAppModal(false, 'android')" class="w-full bg-white hover:bg-emerald-50/60 p-3.5 rounded-2xl border border-emerald-200 shadow-sm transition flex items-center justify-between gap-2.5 text-left cursor-pointer group">
-              <div class="flex items-center gap-2.5 min-w-0">
-                <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                  <i class="fa-brands fa-android text-lg"></i>
-                </div>
-                <div class="min-w-0">
-                  <div class="text-xs font-extrabold text-slate-900 truncate">Tạo App trên Android</div>
-                  <p class="text-[11px] text-slate-500 mt-0.5 truncate">Samsung, Oppo, Xiaomi • 4 bước</p>
-                </div>
-              </div>
-              <div class="w-8 h-8 rounded-xl bg-emerald-50 group-hover:bg-emerald-600 text-emerald-600 group-hover:text-white border border-emerald-200 flex items-center justify-center shrink-0 transition">
-                <i class="fa-solid fa-qrcode text-sm"></i>
-              </div>
-            </button>
+                  <button type="submit" class="ui-btn-lg w-full mt-2 text-white bg-indigo-600 hover:bg-indigo-700">
+                    <span>Vào Phòng Thi &amp; BTVN</span>
+                    <i class="fa-solid fa-arrow-right text-xs"></i>
+                  </button>
+                </form>
 
-            <button type="button" id="loginIosPromoCard" onclick="App.showIosAppModal(false, 'ios')" class="w-full bg-white hover:bg-indigo-50/60 p-3.5 rounded-2xl border border-indigo-200 shadow-sm transition flex items-center justify-between gap-2.5 text-left cursor-pointer group">
-              <div class="flex items-center gap-2.5 min-w-0">
-                <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                  <i class="fa-brands fa-apple text-lg"></i>
-                </div>
-                <div class="min-w-0">
-                  <div class="text-xs font-extrabold text-slate-900 truncate">Tạo App trên iOS</div>
-                  <p class="text-[11px] text-slate-500 mt-0.5 truncate">iPhone / iPad (Safari) • 4 bước</p>
-                </div>
-              </div>
-              <div class="w-8 h-8 rounded-xl bg-indigo-50 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white border border-indigo-200 flex items-center justify-center shrink-0 transition">
-                <i class="fa-solid fa-qrcode text-sm"></i>
-              </div>
-            </button>
-          </div>
+                <!-- Form Giáo viên -->
+                <form id="adminLoginForm" onsubmit="event.preventDefault(); App.handleAdminLogin();" class="space-y-4 ${activeTab === 'admin' ? '' : 'hidden'}">
+                  <div>
+                    <div class="flex items-center justify-between gap-2">
+                      <label for="loginAdminUser" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Tài khoản Giáo viên</label>
+                      <span class="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">Tự động IN HOA</span>
+                    </div>
+                    <div class="mt-1.5 relative">
+                      <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <i class="fa-solid fa-user-shield"></i>
+                      </div>
+                      <input type="text" id="loginAdminUser" placeholder="Nhập tên đăng nhập (VD: ADMIN)" required
+                        autocapitalize="characters" autocomplete="username" spellcheck="false"
+                        oninput="App.forceUppercaseInput(this)"
+                        class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono font-bold tracking-wide input-uppercase">
+                    </div>
+                  </div>
 
-          <!-- Card Giới thiệu Website Thầy Huỳnh Thanh Chí (https://thanhchi113.github.io/) -->
-          <div class="mt-4 bg-gradient-to-r from-amber-50/90 via-white to-red-50/70 p-4 rounded-2xl border border-amber-200/80 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left">
-            <div class="flex items-center gap-3 min-w-0">
-              <div class="w-11 h-11 rounded-2xl bg-[#650f12] text-[#fbf7ef] flex items-center justify-center font-serif font-black text-xl shadow-md shrink-0 border border-amber-300/40">
-                π
-              </div>
-              <div class="min-w-0">
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="font-bold text-xs text-slate-900 font-serif">Thầy Huỳnh Thanh Chí</span>
-                  <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-200">Lớp Toán Anh Chí</span>
+                  <div>
+                    <div class="flex items-center justify-between gap-2">
+                      <label for="loginAdminPass" class="block text-xs font-bold uppercase tracking-wider text-slate-700">Mật khẩu Quản trị</label>
+                      <button type="button" id="forgotAdminPassBtn" onclick="App.requestAdminPasswordReset()" class="text-xs font-bold text-indigo-700 hover:underline cursor-pointer">
+                        Quên mật khẩu?
+                      </button>
+                    </div>
+                    <div class="mt-1.5 relative">
+                      <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <i class="fa-solid fa-key"></i>
+                      </div>
+                      <input type="password" id="loginAdminPass" placeholder="Nhập mật khẩu quản trị" required
+                        autocomplete="current-password"
+                        class="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium">
+                    </div>
+                  </div>
+
+                  <button type="submit" class="ui-btn-lg w-full mt-2 text-[#ffe27d] bg-[#3d0709] hover:bg-[#650f12] border border-[#8e2329]">
+                    <span>Đăng Nhập Quản Trị Giáo Viên</span>
+                    <i class="fa-solid fa-arrow-right text-xs"></i>
+                  </button>
+                </form>
+
+                <div class="mt-5 pt-3.5 border-t border-dashed border-slate-200 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                  <span>Chưa có mã HS? Nhắn Zalo Thầy Chí</span>
+                  <a href="https://zalo.me/0905957716" target="_blank" rel="noopener noreferrer" class="font-bold text-indigo-700 hover:underline whitespace-nowrap">${this.TEACHER_PHONE}</a>
                 </div>
-                <p class="text-[11px] text-slate-600 mt-0.5">Website chính thức: Lịch 13 ca lớp Toán 6–12, BTVN theo nhóm lớp &amp; tài liệu PDF • Zalo ${this.TEACHER_PHONE}</p>
               </div>
             </div>
-            <div class="flex items-center gap-2 w-full sm:w-auto shrink-0">
-              <button type="button" onclick="App.showTeacherIntroModal()" class="flex-1 sm:flex-none ui-btn bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs">
-                <i class="fa-solid fa-circle-info text-indigo-600"></i><span>Giới thiệu</span>
-              </button>
-              <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="flex-1 sm:flex-none ui-btn bg-[#650f12] hover:bg-[#4d0b0d] text-white text-xs font-bold shadow-xs">
-                <i class="fa-solid fa-globe"></i><span>Mở Website</span>
-                <i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-75"></i>
+          </div>
+
+          <!-- Dải Thống Kê Đỏ Đô & Vàng Học Thuật (Đồng bộ #stats-container của Web giới thiệu) -->
+          <div class="ltac-crimson-banner rounded-2xl sm:rounded-[20px] mt-7 sm:mt-10 grid grid-cols-2 lg:grid-cols-4 overflow-hidden">
+            <div class="p-4 sm:p-6">
+              <b class="block font-serif font-extrabold text-2xl sm:text-4xl text-[#ffe27d] leading-none">130+</b>
+              <span class="block text-xs sm:text-sm text-[#f7ebe0] mt-1.5 leading-snug opacity-95">học sinh đang theo học Khối 6 – 12</span>
+            </div>
+            <div class="p-4 sm:p-6 border-l border-dashed border-white/20">
+              <b class="block font-serif font-extrabold text-2xl sm:text-4xl text-[#ffe27d] leading-none">13</b>
+              <span class="block text-xs sm:text-sm text-[#f7ebe0] mt-1.5 leading-snug opacity-95">nhóm lớp &amp; ca học phân hóa năng lực</span>
+            </div>
+            <div class="p-4 sm:p-6 border-t lg:border-t-0 lg:border-l border-dashed border-white/20">
+              <b class="block font-serif font-extrabold text-2xl sm:text-4xl text-[#ffe27d] leading-none">3 – 4</b>
+              <span class="block text-xs sm:text-sm text-[#f7ebe0] mt-1.5 leading-snug opacity-95">phần đề thi chuẩn cấu trúc Bộ GD&amp;ĐT</span>
+            </div>
+            <div class="p-4 sm:p-6 border-t lg:border-t-0 border-l border-dashed border-white/20">
+              <b class="block font-serif font-extrabold text-2xl sm:text-4xl text-[#ffe27d] leading-none">24/7</b>
+              <span class="block text-xs sm:text-sm text-[#f7ebe0] mt-1.5 leading-snug opacity-95">chấm điểm tự động &amp; xem lời giải PDF</span>
+            </div>
+          </div>
+        </main>
+
+        <!-- Chân Trang Học Thuật Đồng Bộ Với Website Giới Thiệu (https://thanhchi113.github.io/) -->
+        <footer class="border-t border-slate-200 bg-slate-100/80 py-6 px-3.5 sm:px-6 text-xs text-slate-600">
+          <div class="w-full max-w-[1180px] mx-auto space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="ltac-brand">
+                <span class="ltac-brand-badge" style="width:30px;height:30px;font-size:17px;border-radius:8px;">π</span>
+                <span class="font-serif font-bold text-sm sm:text-base text-indigo-700">Thầy Huỳnh Thanh Chí — Lớp Toán Anh Chí</span>
               </a>
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-medium text-slate-600">
+                <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 hover:underline">Website chính thức</a>
+                <a href="https://thanhchi113.github.io/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 hover:underline">Lịch các lớp</a>
+                <a href="https://thanhchi113.github.io/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 hover:underline">Bảng vàng 9+</a>
+                <a href="https://thanhchi113.github.io/tai-lieu.html" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 hover:underline">Kho tài liệu PDF</a>
+                <a href="https://thanhchi113.github.io/#tra-cuu-diem" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 hover:underline">Tra cứu điểm</a>
+              </div>
+            </div>
+
+            <div class="pt-3.5 border-t border-dashed border-slate-300/80 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2.5">
+                <span class="font-hand text-base sm:text-lg text-indigo-700 mr-1">Liên hệ trực tiếp với Thầy Chí:</span>
+                <a href="https://zalo.me/0905957716" target="_blank" rel="noopener noreferrer" class="ltac-contact-pill">
+                  <span class="w-6 h-6 rounded-full bg-[#0068ff] text-white inline-flex items-center justify-center text-[11px] shrink-0"><i class="fa-solid fa-comment-dots"></i></span>
+                  <span><strong>Zalo:</strong> ${this.TEACHER_PHONE}</span>
+                </a>
+                <a href="mailto:${this.ADMIN_RECOVERY_EMAIL}" class="ltac-contact-pill">
+                  <span class="w-6 h-6 rounded-full bg-[#650f12] text-white inline-flex items-center justify-center text-[11px] shrink-0"><i class="fa-solid fa-envelope"></i></span>
+                  <span class="break-all"><strong>Email:</strong> ${this.ADMIN_RECOVERY_EMAIL}</span>
+                </a>
+              </div>
+              <span class="text-[11px] text-slate-500">&copy; 2026 Lớp Toán Anh Chí · Toán 6 – 12</span>
             </div>
           </div>
-
-          <!-- Footer Liên kết Website Thầy Chí -->
-          <footer class="mt-6 text-center text-xs text-slate-500 space-y-1">
-            <div>
-              &copy; 2026 Lớp Toán Anh Chí — <strong>Thầy Huỳnh Thanh Chí</strong> · Khối 6 – 12 · Zalo: <a href="https://zalo.me/0905957716" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 font-semibold">${this.TEACHER_PHONE}</a>
-            </div>
-            <div class="flex items-center justify-center flex-wrap gap-2.5 text-[11px] text-slate-400">
-              <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Website chính thức</a>
-              <span>•</span>
-              <a href="https://thanhchi113.github.io/#lop-hoc" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Lịch các lớp</a>
-              <span>•</span>
-              <a href="https://thanhchi113.github.io/#thanh-tich" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Bảng vàng 9+</a>
-              <span>•</span>
-              <a href="https://thanhchi113.github.io/tai-lieu.html" target="_blank" rel="noopener noreferrer" class="hover:text-indigo-600 transition underline">Tài liệu PDF</a>
-            </div>
-          </footer>
-        </div>
+        </footer>
       </div>
     `;
   },
@@ -3731,14 +3868,14 @@ const App = {
     const aForm = document.getElementById('adminLoginForm');
     if (!sBtn || !aBtn || !sForm || !aForm) return;
 
-    const baseTab = 'h-10 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer';
+    const baseTab = 'h-10 rounded-full text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer';
     if (this.state.loginTab === 'student') {
       sBtn.className = `${baseTab} bg-indigo-600 text-white font-extrabold shadow-xs`;
       aBtn.className = `${baseTab} text-slate-600 hover:text-slate-900 font-semibold`;
       sForm.classList.remove('hidden');
       aForm.classList.add('hidden');
     } else {
-      aBtn.className = `${baseTab} bg-emerald-600 text-white font-extrabold shadow-xs`;
+      aBtn.className = `${baseTab} bg-[#3d0709] text-[#ffe27d] font-extrabold shadow-xs`;
       sBtn.className = `${baseTab} text-slate-600 hover:text-slate-900 font-semibold`;
       aForm.classList.remove('hidden');
       sForm.classList.add('hidden');
@@ -5018,76 +5155,68 @@ const App = {
     const rewardStats = this.getStudentRewardStats(u.studentId);
     if (!this.state.studentMainTab) this.state.studentMainTab = 'exams';
     const thMeta = this.getThemeMeta();
-    const swatchHex = (this._lastAccentMeta && this._lastAccentMeta.primaryHex) || this.state.accentHex || '#4f46e5';
+    const swatchHex = (this._lastAccentMeta && this._lastAccentMeta.primaryHex) || this.state.accentHex || '#650f12';
 
     container.innerHTML = `
       <div class="min-h-screen bg-slate-50 flex flex-col">
-        <!-- Header -->
-        <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+        <!-- Header Đồng Bộ Nhận Diện Lớp Toán Anh Chí -->
+        <header class="ltac-topbar sticky top-0 z-30">
           <div class="w-full max-w-[97%] mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
-            <div class="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer min-w-0" onclick="App.goHome()" title="Về trang chủ">
-              <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-200 shrink-0">
-                <i class="fa-solid fa-graduation-cap text-sm sm:text-base"></i>
-              </div>
+            <div class="ltac-brand cursor-pointer min-w-0 sm:shrink-0" onclick="App.goHome()" title="Về trang chủ Cổng Học Sinh">
+              <span class="ltac-brand-badge">π</span>
               <div class="min-w-0">
-                <span class="block text-[10px] sm:text-xs font-bold text-indigo-600 uppercase tracking-wider leading-tight truncate">Cổng Học Sinh</span>
-                <h1 class="text-sm sm:text-lg font-extrabold text-slate-800 leading-tight truncate">Toán 6 – 12</h1>
+                <span class="ltac-brand-title text-sm sm:text-lg truncate">Lớp Toán Anh Chí</span>
+                <span class="ltac-brand-sub truncate">Cổng Học Sinh · Toán 6 – 12</span>
               </div>
             </div>
 
-            <div class="flex items-center gap-1 sm:gap-2 shrink-0">
+            <div class="flex items-center gap-1.5 shrink-0">
               <!-- Nút Giới thiệu Website Thầy Huỳnh Thanh Chí -->
-              <button type="button" id="studentTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="ui-btn bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 shadow-xs shrink-0" title="Giới thiệu Thầy Huỳnh Thanh Chí & Website Lớp Toán Anh Chí">
-                <span class="w-4 h-4 rounded bg-[#650f12] text-[#fbf7ef] font-serif font-black text-[10px] flex items-center justify-center shrink-0">π</span>
+              <button type="button" id="studentTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="ui-btn bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs shrink-0" title="Giới thiệu Thầy Huỳnh Thanh Chí & Website Lớp Toán Anh Chí">
+                <i class="fa-solid fa-address-card text-indigo-600 shrink-0"></i>
                 <span class="hidden sm:inline">Thầy Chí</span>
               </button>
 
-              <!-- Nút Về Trang Chủ (ẩn trên điện thoại vì bấm vào logo đã về trang chủ) -->
-              <button type="button" onclick="App.goHome()" class="hidden md:inline-flex ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-xs" title="Về trang chủ">
-                <i class="fa-solid fa-house"></i>
-                <span>Trang chủ</span>
-              </button>
-
-              <!-- Nút Tải đề thi & tài liệu mới nhất cho điện thoại -->
-              <button type="button" id="studentSyncBtn" onclick="App.syncFromCloud({ manual: true })" class="ui-btn-icon sm:w-auto sm:px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold border border-emerald-200 shadow-xs sm:gap-1.5" title="Tải đề thi & tài liệu mới nhất từ Giáo viên">
+              <!-- Nút Tải đề thi & tài liệu mới nhất -->
+              <button type="button" id="studentSyncBtn" onclick="App.syncFromCloud({ manual: true })" class="ui-btn-icon sm:w-auto sm:px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold border border-emerald-200 shadow-2xs sm:gap-1.5" title="Tải đề thi & tài liệu mới nhất từ Giáo viên">
                 <i class="fa-solid fa-arrows-rotate ${this.state.cloudSyncStatus === 'syncing' ? 'fa-spin' : ''} text-emerald-600"></i>
                 <span class="hidden sm:inline">Tải đề mới</span>
               </button>
 
-              <!-- Nút Xem trước & Chọn Bố cục Đề PDF + Ô điền đáp án ngay trên Trang Chủ (máy tính & tablet) -->
-              <button type="button" id="studentLayoutBtn" onclick="App.showExamLayoutModal()" class="hidden md:inline-flex ui-btn-icon md:w-auto md:px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold border border-indigo-200 shadow-xs md:gap-1.5" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án (${this.getExamLayoutMeta().shortLabel})">
+              <!-- Nút Xem trước & Chọn Bố cục Đề PDF + Ô điền đáp án -->
+              <button type="button" id="studentLayoutBtn" onclick="App.showExamLayoutModal()" class="hidden md:inline-flex ui-btn bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold border border-indigo-200 shadow-2xs" title="Xem trước & chọn cách hiển thị Đề PDF và Ô điền đáp án (${this.getExamLayoutMeta().shortLabel})">
                 <i class="fa-solid ${this.getExamLayoutMeta().icon} text-indigo-600"></i>
-                <span class="hidden md:inline">Bố cục: ${this.getExamLayoutMeta().shortLabel}</span>
+                <span class="hidden 2xl:inline">Bố cục: ${this.getExamLayoutMeta().shortLabel}</span>
+                <span class="hidden md:inline 2xl:hidden">Bố cục thi</span>
               </button>
 
-              <!-- Nút Quét QR / Tạo App Điện thoại (trên điện thoại đã có nút lớn ở Banner ngay bên dưới) -->
-              <button type="button" id="studentIosAppBtn" onclick="App.showIosAppModal()" class="hidden sm:inline-flex ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs md:gap-1.5" title="Quét QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
+              <!-- Nút Quét QR / Tạo App Điện thoại -->
+              <button type="button" id="studentIosAppBtn" onclick="App.showIosAppModal()" class="hidden sm:inline-flex ui-btn-icon xl:w-auto xl:px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs xl:gap-1.5" title="Quét QR & Hướng dẫn tạo App trên điện thoại Android & iOS">
                 <i class="fa-solid fa-qrcode"></i>
-                <span class="hidden md:inline">App ĐT / QR</span>
+                <span class="hidden xl:inline">App / QR</span>
               </button>
 
               <!-- Nút Chuyển Nhanh Sáng/Tối & Bảng Màu -->
-              <button type="button" id="studentQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-xs" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
+              <button type="button" id="studentQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-2xs" title="Chuyển nhanh chế độ: Giấy vở / Dịu mắt / Tối">
                 <i class="fa-solid ${thMeta.icon} text-indigo-600"></i>
               </button>
-              <button type="button" id="studentThemeBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex ui-btn-icon md:w-auto md:px-3 bg-white hover:bg-indigo-50 text-slate-700 text-xs font-bold border border-slate-200 shadow-xs md:gap-1.5" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
+              <button type="button" id="studentThemeBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex ui-btn-icon bg-white hover:bg-indigo-50 text-slate-700 text-xs font-bold border border-slate-200 shadow-2xs" title="Tùy chỉnh Giấy vở/Tối, Bộ màu & Độ tương phản">
                 <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-black/15 shrink-0" style="background:${swatchHex};"></span>
-                <span class="hidden md:inline">Giao diện</span>
               </button>
 
-              <!-- Nút Hồ Sơ Cá Nhân / Đổi Mật Khẩu (trên điện thoại đã có nút lớn ngay dưới banner) -->
-              <button type="button" onclick="App.showStudentSelfEditModal()" class="hidden sm:inline-flex ui-btn-icon lg:w-auto lg:px-3 bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-bold border border-slate-200 shadow-xs lg:gap-1.5" title="Hồ sơ cá nhân & Đổi mật khẩu">
+              <!-- Nút Hồ Sơ Cá Nhân / Đổi Mật Khẩu -->
+              <button type="button" onclick="App.showStudentSelfEditModal()" class="hidden sm:inline-flex ui-btn-icon 2xl:w-auto 2xl:px-3 bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-bold border border-slate-200 shadow-2xs 2xl:gap-1.5" title="Hồ sơ cá nhân & Đổi mật khẩu">
                 <i class="fa-solid fa-user-pen text-indigo-600"></i>
-                <span class="hidden lg:inline">Hồ sơ cá nhân</span>
+                <span class="hidden 2xl:inline">Hồ sơ</span>
               </button>
 
-              <div class="h-6 w-px bg-slate-200 hidden sm:block"></div>
+              <div class="h-6 w-px bg-slate-200 hidden lg:block"></div>
 
-              <div class="text-right hidden sm:block">
-                <div class="text-sm font-bold text-slate-800">${u.fullName}${u.nickname ? ` <span class="text-xs font-semibold text-amber-600">(${u.nickname})</span>` : ''}</div>
+              <div class="text-right hidden lg:block">
+                <div class="text-sm font-bold text-slate-800 font-serif">${u.fullName}${u.nickname ? ` <span class="text-xs font-sans font-semibold text-amber-700">(${u.nickname})</span>` : ''}</div>
                 <div class="text-xs text-slate-500">Mã HS: <span class="font-mono font-semibold text-indigo-600">${u.studentId}</span> • Khối ${this.getStudentGrade(u)} • Lớp ${u.className || '12'}</div>
               </div>
-              <button type="button" onclick="App.logout()" class="ui-btn px-2.5 sm:px-3 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 shadow-xs text-xs font-bold" title="Đăng xuất khỏi hệ thống">
+              <button type="button" onclick="App.logout()" class="ui-btn px-2.5 sm:px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 shadow-2xs text-xs font-bold" title="Đăng xuất khỏi hệ thống">
                 <i class="fa-solid fa-right-from-bracket"></i>
                 <span class="hidden sm:inline">Đăng xuất</span>
               </button>
@@ -5097,52 +5226,52 @@ const App = {
 
         <!-- Main Body -->
         <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 pt-5 sm:pt-8 pb-20 sm:pb-12 flex-1 space-y-5 sm:space-y-6">
-          <!-- Student Banner -->
-          <div class="bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-800 rounded-2xl p-4 sm:p-6 text-white shadow-xl relative overflow-hidden">
+          <!-- Student Banner Đồng Bộ Phong Cách Đỏ Đô & Ánh Vàng Trang Giới Thiệu -->
+          <div class="ltac-crimson-banner rounded-2xl sm:rounded-[22px] p-4 sm:p-6 text-white relative overflow-hidden">
             <div class="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <div class="inline-flex items-center space-x-2 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold mb-2.5">
+                <div class="inline-flex items-center space-x-2 bg-white/15 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold text-[#ffe27d] border border-white/15 mb-2.5">
                   <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>Tài khoản đang hoạt động</span>
+                  <span>Lớp Toán Anh Chí · Tài khoản đang hoạt động</span>
                 </div>
-                <h2 class="text-xl sm:text-3xl font-extrabold">Xin chào, ${u.fullName}${u.nickname ? ` (${u.nickname})` : ''}!</h2>
-                <p class="text-indigo-100 text-xs sm:text-sm mt-1">
-                  Mã học sinh: <strong class="font-mono tracking-wider">${u.studentId}</strong>${u.nickname ? ` • Biệt danh: <strong>${u.nickname}</strong>` : ''} • Khối: <strong>Khối ${this.getStudentGrade(u)}</strong> • Lớp: <strong>${u.className || '12'}</strong>
+                <h2 class="text-xl sm:text-3xl font-extrabold font-serif tracking-tight text-white">Xin chào, ${u.fullName}${u.nickname ? ` (${u.nickname})` : ''}!</h2>
+                <p class="text-[#f7ebe0]/90 text-xs sm:text-sm mt-1">
+                  Mã học sinh: <strong class="font-mono tracking-wider text-[#ffe27d]">${u.studentId}</strong>${u.nickname ? ` • Biệt danh: <strong>${u.nickname}</strong>` : ''} • Khối: <strong>Khối ${this.getStudentGrade(u)}</strong> • Lớp: <strong>${u.className || '12'}</strong>
                   ${u.phone ? ` • SĐT: <strong>${u.phone}</strong>` : ''}
                 </p>
                 <div class="mt-3.5 grid grid-cols-1 xs:grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2">
-                  <button type="button" onclick="App.showStudentSelfEditModal()" class="xs:col-span-2 sm:col-span-1 ui-btn bg-white/20 hover:bg-white/30 text-white backdrop-blur-md border border-white/25 shadow-xs">
+                  <button type="button" onclick="App.showStudentSelfEditModal()" class="xs:col-span-2 sm:col-span-1 ui-btn bg-white/15 hover:bg-white/25 text-white backdrop-blur-md border border-white/25 shadow-xs">
                     <i class="fa-solid fa-user-pen shrink-0"></i><span>Hồ sơ cá nhân &amp; Đổi mật khẩu</span>
                   </button>
-                  <button type="button" id="studentBannerAndroidBtn" onclick="App.showIosAppModal(false, 'android')" class="ui-btn bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold shadow-sm">
+                  <button type="button" id="studentBannerAndroidBtn" onclick="App.showIosAppModal(false, 'android')" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold shadow-sm border border-emerald-400/30">
                     <i class="fa-brands fa-android text-sm shrink-0"></i><span>Cài App Android</span>
                   </button>
-                  <button type="button" id="studentBannerIosBtn" onclick="App.showIosAppModal(false, 'ios')" class="ui-btn bg-white text-indigo-700 hover:bg-indigo-50 font-extrabold shadow-sm">
+                  <button type="button" id="studentBannerIosBtn" onclick="App.showIosAppModal(false, 'ios')" class="ui-btn bg-[#fbf7ef] text-[#650f12] hover:bg-white font-extrabold shadow-sm">
                     <i class="fa-brands fa-apple text-sm shrink-0"></i><span>Cài App iOS</span>
                   </button>
-                  <button type="button" onclick="App.logout()" class="xs:col-span-2 sm:col-span-1 ui-btn bg-rose-600 hover:bg-rose-700 text-white font-extrabold shadow-sm">
+                  <button type="button" onclick="App.logout()" class="xs:col-span-2 sm:col-span-1 ui-btn bg-white/10 hover:bg-rose-600 text-[#ffd9d2] hover:text-white border border-white/20 font-bold shadow-sm">
                     <i class="fa-solid fa-right-from-bracket shrink-0"></i><span>Đăng xuất</span>
                   </button>
                 </div>
               </div>
               <div class="grid grid-cols-2 sm:flex gap-2 sm:gap-3">
-                <div class="bg-white/10 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[84px]">
-                  <div class="text-[11px] sm:text-xs text-indigo-200 truncate">Đề mở</div>
-                  <div class="text-xl sm:text-2xl font-bold font-mono">${allowedExams.length}</div>
+                <div class="bg-black/20 backdrop-blur-md rounded-2xl p-2.5 sm:p-3.5 text-center sm:min-w-[88px] border border-white/12">
+                  <div class="text-[11px] sm:text-xs text-[#f7ebe0]/85 truncate">Đề mở</div>
+                  <div class="text-xl sm:text-2xl font-extrabold font-serif text-[#ffe27d]">${allowedExams.length}</div>
                 </div>
-                <button type="button" onclick="App.state.studentHwKindFilter='homework'; App.setStudentMainTab('homeworks');" class="bg-white/15 hover:bg-white/25 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[92px] transition cursor-pointer border ${pendingBtvn.length > 0 ? 'border-amber-300/60' : 'border-white/10'}" title="Xem bài tập về nhà theo nhóm lớp">
-                  <div class="text-[11px] sm:text-xs text-indigo-100 truncate">BTVN cần làm</div>
-                  <div class="text-xl sm:text-2xl font-extrabold font-mono ${pendingBtvn.length > 0 ? 'text-amber-300' : 'text-white'}">${pendingBtvn.length}<span class="text-xs font-normal opacity-80">/${assignedBtvn.length}</span></div>
+                <button type="button" onclick="App.state.studentHwKindFilter='homework'; App.setStudentMainTab('homeworks');" class="bg-black/20 hover:bg-white/15 backdrop-blur-md rounded-2xl p-2.5 sm:p-3.5 text-center sm:min-w-[96px] transition cursor-pointer border ${pendingBtvn.length > 0 ? 'border-[#ffe27d]/70' : 'border-white/12'}" title="Xem bài tập về nhà theo nhóm lớp">
+                  <div class="text-[11px] sm:text-xs text-[#f7ebe0]/90 truncate">BTVN cần làm</div>
+                  <div class="text-xl sm:text-2xl font-extrabold font-serif ${pendingBtvn.length > 0 ? 'text-[#ffe27d]' : 'text-white'}">${pendingBtvn.length}<span class="text-xs font-sans font-normal opacity-80">/${assignedBtvn.length}</span></div>
                 </button>
-                <div class="bg-white/10 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[84px]">
-                  <div class="text-[11px] sm:text-xs text-indigo-200 truncate">Đã nộp</div>
-                  <div class="text-xl sm:text-2xl font-bold font-mono">${mySubmissions.length}</div>
+                <div class="bg-black/20 backdrop-blur-md rounded-2xl p-2.5 sm:p-3.5 text-center sm:min-w-[88px] border border-white/12">
+                  <div class="text-[11px] sm:text-xs text-[#f7ebe0]/85 truncate">Đã nộp</div>
+                  <div class="text-xl sm:text-2xl font-extrabold font-serif text-[#ffe27d]">${mySubmissions.length}</div>
                 </div>
-                <button type="button" onclick="App.setStudentMainTab('rewards')" class="bg-amber-400/20 hover:bg-amber-400/30 border border-amber-300/40 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center sm:min-w-[96px] transition cursor-pointer" title="Xem điểm tích lũy & đổi phần thưởng">
-                  <div class="text-[11px] sm:text-xs text-amber-200 font-semibold truncate">Điểm thưởng</div>
-                  <div class="text-xl sm:text-2xl font-extrabold font-mono text-amber-300 inline-flex items-center justify-center gap-1">
+                <button type="button" onclick="App.setStudentMainTab('rewards')" class="bg-[#ffe27d]/15 hover:bg-[#ffe27d]/25 border border-[#ffe27d]/45 backdrop-blur-md rounded-2xl p-2.5 sm:p-3.5 text-center sm:min-w-[98px] transition cursor-pointer" title="Xem điểm tích lũy & đổi phần thưởng">
+                  <div class="text-[11px] sm:text-xs text-[#ffe27d] font-semibold truncate">Điểm thưởng</div>
+                  <div class="text-xl sm:text-2xl font-extrabold font-serif text-[#ffe27d] inline-flex items-center justify-center gap-1">
                     <span>${rewardStats.availablePoints}</span>
-                    <i class="fa-solid fa-star text-sm text-amber-300"></i>
+                    <i class="fa-solid fa-star text-xs text-[#ffe27d]"></i>
                   </div>
                 </button>
               </div>
@@ -5966,7 +6095,7 @@ const App = {
           const displayFileName = ex.pdf_name || ex.pdf_url || '';
           const catMeta = this.getExamCategoryMeta(ex.category || this.inferExamCategory(ex));
           return `
-            <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:shadow-md hover:border-indigo-200 transition flex flex-col justify-between space-y-3">
+            <div class="ltac-card-hover bg-white rounded-2xl p-5 border border-slate-200 shadow-xs transition flex flex-col justify-between space-y-3">
               <div>
                 <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                   <div class="flex items-center flex-wrap gap-1.5">
@@ -5985,7 +6114,7 @@ const App = {
                     <span class="inline-flex items-center font-semibold whitespace-nowrap"><i class="fa-regular fa-clock mr-1 text-slate-400"></i>${ex.time_minutes || 90} phút</span>
                   </div>
                 </div>
-                <h4 class="text-sm sm:text-base font-bold text-slate-900 mb-1.5 leading-snug line-clamp-2" title="${ex.title}">${ex.title}</h4>
+                <h4 class="text-sm sm:text-base font-bold font-serif text-slate-900 mb-1.5 leading-snug line-clamp-2" title="${ex.title}">${ex.title}</h4>
                 <p class="text-xs text-slate-500 mb-2 line-clamp-2">${ex.description || 'Cấu trúc 3 phần: Phần I (12 câu), Phần II (4 câu Đúng/Sai), Phần III (6 câu Trả lời ngắn).'}</p>
                 ${displayFileName ? `
                   <div class="text-[11px] text-slate-400 font-mono truncate" title="${displayFileName}">
@@ -6092,8 +6221,8 @@ const App = {
           const safeTitleJs = String(hw.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
           if (!isBtvn) {
             return `
-              <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 hover:border-indigo-200 hover:shadow-md transition flex items-start gap-3 sm:gap-4">
-                <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-100">
+              <div class="ltac-card-hover bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 transition flex items-start gap-3 sm:gap-4">
+                <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0 border border-indigo-100">
                   <i class="fa-solid fa-file-pdf text-lg"></i>
                 </div>
                 <div class="flex-1 min-w-0">
@@ -6107,7 +6236,7 @@ const App = {
                       ${hw.dateAdded || 'Mới cập nhật'}
                     </span>
                   </div>
-                  <h4 class="text-sm font-bold text-slate-900 truncate" title="${this.escapeHtmlAttr(hw.title)}">${hw.title}</h4>
+                  <h4 class="text-sm sm:text-base font-bold font-serif text-slate-900 truncate" title="${this.escapeHtmlAttr(hw.title)}">${hw.title}</h4>
                   <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">${hw.description || ''}</p>
                   <div class="mt-2 text-[11px] text-slate-400 font-mono truncate">${hw.fileName || 'Tai_Lieu.pdf'} • ${hw.fileSize || '2.0 MB'}</div>
 
@@ -6142,7 +6271,7 @@ const App = {
           }
 
           return `
-            <div class="bg-white rounded-2xl p-5 border-2 ${!latestSub ? 'border-amber-200/90 hover:border-amber-400' : 'border-emerald-200/80 hover:border-indigo-300'} hover:shadow-md transition flex flex-col justify-between space-y-3.5">
+            <div class="ltac-card-hover bg-white rounded-2xl p-5 border-2 ${!latestSub ? 'border-amber-200/90 hover:border-amber-400' : 'border-emerald-200/80 hover:border-indigo-300'} transition flex flex-col justify-between space-y-3.5">
               <div class="space-y-2">
                 <div class="flex flex-wrap items-center justify-between gap-1.5">
                   <div class="flex flex-wrap items-center gap-1.5">
@@ -6154,7 +6283,7 @@ const App = {
                   ${statusBadge}
                 </div>
 
-                <h4 class="text-sm sm:text-base font-extrabold text-slate-900 leading-snug">${hw.title}</h4>
+                <h4 class="text-sm sm:text-base font-extrabold font-serif text-slate-900 leading-snug">${hw.title}</h4>
                 ${hw.description ? `<p class="text-xs text-slate-600 leading-relaxed whitespace-pre-line">${this.escapeHtmlAttr(hw.description)}</p>` : ''}
 
                 <div class="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px]">
@@ -6687,7 +6816,7 @@ const App = {
   },
 
   getMobilePaneBtnClass(isActive) {
-    return `min-w-0 h-11 sm:h-9 px-1 sm:px-2 rounded-xl text-[10px] sm:text-[11px] leading-tight font-bold transition flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 cursor-pointer whitespace-nowrap ${isActive ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`;
+    return `min-w-0 h-11 sm:h-9 px-1 sm:px-2 rounded-xl text-[10px] sm:text-[11px] leading-tight font-bold transition flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 cursor-pointer whitespace-nowrap ${isActive ? 'bg-[#ffe27d] text-[#3d0709] shadow font-extrabold' : 'bg-white/10 text-[#f7ebe0] hover:bg-white/18 border border-white/10'}`;
   },
 
   setSectionTab(tab) {
@@ -6904,11 +7033,11 @@ const App = {
     container.innerHTML = `
       <div class="fixed inset-0 flex flex-col bg-slate-100 overflow-hidden select-none z-10">
         ${this.renderExamWatermarkHtml(u)}
-        <!-- Top Sticky Header -->
-        <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 px-2.5 sm:px-6 py-2 flex items-center justify-between gap-2 shrink-0 z-30 shadow-xs sticky top-0">
+        <!-- Top Sticky Header Đồng Bộ Nhận Diện Lớp Toán Anh Chí -->
+        <header class="ltac-topbar px-2.5 sm:px-6 py-2 flex items-center justify-between gap-2 shrink-0 z-30 sticky top-0">
           <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
             <!-- Nút Về Trang Chủ / Thoát rõ ràng trên cả Điện thoại & Máy tính -->
-            <button type="button" id="examExitHomeBtn" onclick="App.confirmExitExam()" class="ui-btn px-2 sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 border border-slate-200 text-xs font-bold shadow-xs shrink-0" title="Quay về trang chủ">
+            <button type="button" id="examExitHomeBtn" onclick="App.confirmExitExam()" class="ui-btn px-2 sm:px-3 bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 text-xs font-bold shadow-2xs shrink-0" title="Quay về trang chủ">
               <i class="fa-solid fa-arrow-left sm:hidden text-indigo-600"></i>
               <i class="fa-solid fa-house hidden sm:inline text-indigo-600"></i>
               <span class="sm:hidden">Thoát</span>
@@ -6917,11 +7046,9 @@ const App = {
 
             <div class="h-5 w-px bg-slate-200 hidden sm:block shrink-0"></div>
 
-            <span class="hidden sm:flex w-9 h-9 rounded-xl bg-indigo-600 text-white items-center justify-center font-bold text-sm shadow-sm shrink-0">
-              <i class="fa-solid fa-pen-ruler text-xs"></i>
-            </span>
+            <span class="hidden sm:inline-grid ltac-brand-badge" style="width:34px;height:34px;font-size:19px;">π</span>
             <div class="min-w-0 flex-1 overflow-hidden">
-              <h2 class="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[120px] xs:max-w-[180px] sm:max-w-none">${ex.title}</h2>
+              <h2 class="text-xs sm:text-sm font-bold font-serif text-slate-900 truncate max-w-[120px] xs:max-w-[180px] sm:max-w-none">${ex.title}</h2>
               <div class="text-[11px] text-slate-500 flex items-center gap-x-1.5 overflow-hidden mt-0.5">
                 <span class="hidden sm:inline truncate">Học sinh: <strong>${u.fullName}</strong> (${u.studentId})</span>
                 <span id="examHeaderMobStuCode" class="${guardOn && vCount > 0 ? 'hidden' : ''} sm:hidden font-mono font-bold text-slate-700 truncate">${u.studentId}</span>
@@ -6997,21 +7124,21 @@ const App = {
         </div>
 
         <!-- Thanh chuyển chế độ Đề PDF / Phiếu trả lời / Bố cục / Quá trình gọn gàng 5 cột không tràn trên Điện thoại -->
-        <div class="lg:hidden bg-slate-900 border-b border-slate-800 px-1.5 py-1.5 grid grid-cols-5 gap-1 shrink-0 z-20">
+        <div class="lg:hidden ltac-admin-header px-1.5 py-1.5 grid grid-cols-5 gap-1 shrink-0 z-20">
           <button type="button" id="mobPaneBtn_pdf" onclick="App.setMobileExamPane('pdf')" class="${this.getMobilePaneBtnClass((this.state.mobileExamPane || 'both') === 'pdf')}">
-            <i class="fa-solid fa-file-pdf text-red-400 text-xs"></i><span class="truncate max-w-full">Đề PDF</span>
+            <i class="fa-solid fa-file-pdf text-xs"></i><span class="truncate max-w-full">Đề PDF</span>
           </button>
           <button type="button" id="mobPaneBtn_both" onclick="App.setMobileExamPane('both')" class="${this.getMobilePaneBtnClass((this.state.mobileExamPane || 'both') === 'both')}">
-            <i class="fa-solid fa-table-columns text-indigo-300 text-xs"></i><span class="truncate max-w-full">Đề+Phiếu</span>
+            <i class="fa-solid fa-table-columns text-xs"></i><span class="truncate max-w-full">Đề+Phiếu</span>
           </button>
           <button type="button" id="mobPaneBtn_sheet" onclick="App.setMobileExamPane('sheet')" class="${this.getMobilePaneBtnClass((this.state.mobileExamPane || 'both') === 'sheet')}">
-            <i class="fa-solid fa-pen-to-square text-emerald-300 text-xs"></i><span class="truncate max-w-full">Phiếu <span class="exam-mobile-ans-short">${progress.answered}/${progress.total}</span></span>
+            <i class="fa-solid fa-pen-to-square text-xs"></i><span class="truncate max-w-full">Phiếu <span class="exam-mobile-ans-short">${progress.answered}/${progress.total}</span></span>
           </button>
-          <button type="button" id="mobLayoutSwitchBtn" onclick="App.showExamLayoutModal()" class="min-w-0 h-11 sm:h-9 px-1 sm:px-2 rounded-xl text-[10px] sm:text-[11px] leading-tight font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 cursor-pointer whitespace-nowrap" title="Đổi bố cục Đề & Đáp án">
+          <button type="button" id="mobLayoutSwitchBtn" onclick="App.showExamLayoutModal()" class="min-w-0 h-11 sm:h-9 px-1 sm:px-2 rounded-xl text-[10px] sm:text-[11px] leading-tight font-bold bg-white/10 hover:bg-white/18 text-[#ffe27d] border border-white/15 transition flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 cursor-pointer whitespace-nowrap" title="Đổi bố cục Đề & Đáp án">
             <i class="fa-solid fa-table-list text-xs"></i><span class="truncate max-w-full">Bố cục</span>
           </button>
-          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="min-w-0 h-11 sm:h-9 px-1 sm:px-2 rounded-xl text-[10px] sm:text-[11px] leading-tight font-bold bg-indigo-950/90 hover:bg-indigo-900 text-indigo-200 border border-indigo-700 transition flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 cursor-pointer whitespace-nowrap" title="Xem quá trình đã làm & câu đã tích chọn">
-            <i class="fa-solid fa-list-check text-xs"></i><span id="mobilePaletteBtnText" class="truncate max-w-full">Quá trình</span>
+          <button type="button" id="mobilePaletteTriggerBtn" onclick="App.toggleMobileDrawer()" class="min-w-0 h-11 sm:h-9 px-1 sm:px-2 rounded-xl text-[10px] sm:text-[11px] leading-tight font-bold bg-white/15 hover:bg-white/25 text-white border border-[#ffe27d]/35 transition flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 cursor-pointer whitespace-nowrap" title="Xem quá trình đã làm & câu đã tích chọn">
+            <i class="fa-solid fa-list-check text-xs text-[#ffe27d]"></i><span id="mobilePaletteBtnText" class="truncate max-w-full">Quá trình</span>
           </button>
         </div>
 
@@ -9518,71 +9645,71 @@ const App = {
     const examsList = this.state.exams;
     if (!this.state.adminMainTab) this.state.adminMainTab = 'main';
     const thMeta = this.getThemeMeta();
-    const swatchHex = (this._lastAccentMeta && this._lastAccentMeta.primaryHex) || this.state.accentHex || '#4f46e5';
+    const swatchHex = (this._lastAccentMeta && this._lastAccentMeta.primaryHex) || this.state.accentHex || '#650f12';
     const isCloudSyncing = this.state.cloudSyncStatus === 'syncing';
 
     container.innerHTML = `
       <div class="min-h-screen bg-slate-100 flex flex-col">
-        <!-- Top Nav -->
-        <header class="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30">
+        <!-- Top Nav Đỏ Đô Học Thuật Đồng Bộ Lớp Toán Anh Chí -->
+        <header class="ltac-admin-header text-[#fbf7ef] sticky top-0 z-30">
           <div class="w-full max-w-[97%] mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
-            <div class="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer min-w-0" onclick="App.goHome()" title="Về trang chủ">
-              <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-500/25 shrink-0">
-                <i class="fa-solid fa-chalkboard-user text-sm sm:text-base"></i>
+            <div class="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer min-w-0 sm:shrink-0" onclick="App.goHome()" title="Về trang chủ">
+              <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#fbf7ef] text-[#650f12] flex items-center justify-center font-serif italic font-black text-xl shadow-md border border-[#ffe27d]/50 shrink-0">
+                π
               </div>
               <div class="min-w-0">
-                <span class="block text-[10px] sm:text-xs font-bold text-indigo-400 uppercase tracking-wider leading-tight">Cổng Giáo Viên</span>
-                <h1 class="text-sm sm:text-lg font-extrabold leading-tight truncate">Toán 6 – 12</h1>
+                <span class="block text-[10px] sm:text-xs font-bold text-[#ffe27d] uppercase tracking-wider leading-tight truncate">Cổng Giáo Viên · Toán 6 – 12</span>
+                <h1 class="text-sm sm:text-lg font-extrabold font-serif text-white leading-tight truncate">Lớp Toán Anh Chí</h1>
               </div>
             </div>
 
-            <div class="flex items-center gap-1 sm:gap-2 shrink-0">
-              <!-- Chỉ báo tự động lưu Server (không cần bấm nút) -->
-              <span id="adminAutoCloudBadge" class="hidden lg:inline-flex items-center gap-1.5 h-9 px-3 rounded-xl text-[11px] font-bold border ${isCloudSyncing ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30' : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'}" title="Mọi đề thi, file PDF và cài đặt được tự động lưu lên máy chủ ngay khi tải lên">
+            <div class="flex items-center gap-1.5 shrink-0">
+              <!-- Chỉ báo tự động lưu Server -->
+              <span id="adminAutoCloudBadge" class="hidden 2xl:inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[11px] font-bold border ${isCloudSyncing ? 'bg-amber-400/20 text-[#ffe27d] border-[#ffe27d]/40' : 'bg-emerald-500/20 text-emerald-200 border-emerald-400/35'}" title="Mọi đề thi, file PDF và cài đặt được tự động lưu lên máy chủ ngay khi tải lên">
                 <i class="fa-solid ${isCloudSyncing ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-up'}"></i>
-                <span>${isCloudSyncing ? 'Đang tự động lưu...' : 'Tự động lưu Server'}</span>
+                <span>${isCloudSyncing ? 'Đang lưu...' : 'Tự động lưu'}</span>
               </span>
 
-              <!-- Nút Về Trang Chủ (ẩn trên điện thoại vì bấm vào logo đã về trang chủ) -->
-              <button type="button" onclick="App.goHome()" class="hidden md:inline-flex ui-btn bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 shadow-xs" title="Về trang chủ">
-                <i class="fa-solid fa-house text-indigo-400"></i>
+              <!-- Nút Về Trang Chủ -->
+              <button type="button" onclick="App.goHome()" class="hidden xl:inline-flex ui-btn bg-white/10 hover:bg-white/20 text-[#fbf7ef] border border-white/15 shadow-xs" title="Về trang chủ">
+                <i class="fa-solid fa-house text-[#ffe27d]"></i>
                 <span>Trang chủ</span>
               </button>
 
               <!-- Nút Xem trước & Chọn Bố cục Đề PDF + Ô Đáp Án -->
-              <button type="button" id="adminLayoutBtn" onclick="App.showExamLayoutModal()" class="hidden sm:inline-flex ui-btn-icon md:w-auto md:px-3 bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold border border-slate-700 shadow-xs md:gap-1.5" title="Xem trước & chọn bố cục hiển thị Đề PDF và Ô điền đáp án">
-                <i class="fa-solid ${this.getExamLayoutMeta().icon} text-indigo-400"></i>
-                <span class="hidden md:inline">Bố cục thi</span>
+              <button type="button" id="adminLayoutBtn" onclick="App.showExamLayoutModal()" class="hidden sm:inline-flex ui-btn-icon lg:w-auto lg:px-3 bg-white/10 hover:bg-white/20 text-[#fbf7ef] text-xs font-bold border border-white/15 shadow-xs lg:gap-1.5" title="Xem trước & chọn bố cục hiển thị Đề PDF và Ô điền đáp án">
+                <i class="fa-solid ${this.getExamLayoutMeta().icon} text-[#ffe27d]"></i>
+                <span class="hidden lg:inline">Bố cục</span>
               </button>
 
-              <!-- Nút Quét QR Tạo App Điện Thoại (Android & iOS) cho Học Sinh -->
-              <button type="button" id="adminIosAppBtn" onclick="App.showIosAppModal()" class="hidden sm:inline-flex ui-btn-icon md:w-auto md:px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold border border-indigo-500 shadow-xs md:gap-1.5" title="Hiển thị mã QR để học sinh quét tạo App trên điện thoại Android & iOS">
+              <!-- Nút Quét QR Tạo App Điện Thoại (Android & iOS) -->
+              <button type="button" id="adminIosAppBtn" onclick="App.showIosAppModal()" class="hidden sm:inline-flex ui-btn-icon md:w-auto md:px-3 bg-[#ffe27d] hover:bg-amber-200 text-[#3d0709] text-xs font-extrabold shadow-xs md:gap-1.5" title="Hiển thị mã QR để học sinh quét tạo App trên điện thoại Android & iOS">
                 <i class="fa-solid fa-qrcode"></i>
-                <span class="hidden md:inline">App ĐT / QR</span>
+                <span class="hidden md:inline">App / QR</span>
               </button>
 
               <!-- Nút Giới Thiệu Web Thầy Chí -->
-              <button type="button" id="adminTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="hidden md:inline-flex ui-btn-icon lg:w-auto lg:px-3 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-slate-700 shadow-xs lg:gap-1.5" title="Giới thiệu & liên kết trang web Thầy Chí (Lớp Toán Anh Chí)">
-                <i class="fa-solid fa-graduation-cap text-amber-400"></i>
-                <span class="hidden lg:inline">Web Thầy Chí</span>
+              <button type="button" id="adminTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="hidden md:inline-flex ui-btn-icon xl:w-auto xl:px-3 bg-white/10 hover:bg-white/20 text-[#ffe27d] text-xs font-bold border border-white/15 shadow-xs xl:gap-1.5" title="Giới thiệu & liên kết trang web Thầy Chí (Lớp Toán Anh Chí)">
+                <i class="fa-solid fa-graduation-cap text-[#ffe27d]"></i>
+                <span class="hidden xl:inline">Web Thầy Chí</span>
               </button>
 
               <!-- Chuyển nhanh Sáng/Tối & Bảng màu -->
-              <button type="button" id="adminQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700" title="Chuyển nhanh chế độ: Sáng / Dịu mắt / Tối">
-                <i class="fa-solid ${thMeta.icon} text-indigo-400"></i>
+              <button type="button" id="adminQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-white/10 hover:bg-white/20 text-[#fbf7ef] border border-white/15" title="Chuyển nhanh chế độ: Giấy vở / Dịu mắt / Tối">
+                <i class="fa-solid ${thMeta.icon} text-[#ffe27d]"></i>
               </button>
-              <button type="button" id="adminThemeHeaderBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex ui-btn-icon lg:w-auto lg:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 lg:gap-1.5" title="Tùy chỉnh Sáng/Tối, Bộ màu & Độ tương phản">
-                <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-white/25 shrink-0" style="background:${swatchHex};"></span>
-                <span class="hidden lg:inline">Giao diện</span>
+              <button type="button" id="adminThemeHeaderBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex ui-btn-icon 2xl:w-auto 2xl:px-3 bg-white/10 hover:bg-white/20 text-[#fbf7ef] text-xs font-bold border border-white/15 2xl:gap-1.5" title="Tùy chỉnh Giấy vở/Tối, Bộ màu & Độ tương phản">
+                <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-white/40 shrink-0" style="background:${swatchHex};"></span>
+                <span class="hidden 2xl:inline">Giao diện</span>
               </button>
 
-              <div class="h-6 w-px bg-slate-800 hidden sm:block"></div>
+              <div class="h-6 w-px bg-white/15 hidden sm:block"></div>
 
-              <button type="button" id="adminProfileHeaderBtn" onclick="App.showAdminProfileModal()" class="ui-btn-icon sm:w-auto sm:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 sm:gap-1.5" title="Hồ sơ giáo viên, đổi tên hiển thị & mật khẩu">
-                <i class="fa-solid fa-user-gear text-emerald-400"></i>
+              <button type="button" id="adminProfileHeaderBtn" onclick="App.showAdminProfileModal()" class="ui-btn-icon sm:w-auto sm:px-3 bg-white/10 hover:bg-white/20 text-[#fbf7ef] text-xs font-bold border border-white/15 sm:gap-1.5" title="Hồ sơ giáo viên, đổi tên hiển thị & mật khẩu">
+                <i class="fa-solid fa-user-gear text-[#ffe27d]"></i>
                 <span class="hidden sm:inline">${u.fullName}</span>
               </button>
-              <button type="button" onclick="App.logout()" class="ui-btn px-2.5 sm:px-3 bg-slate-800 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 border border-slate-700 text-xs font-bold" title="Đăng xuất khỏi hệ thống">
+              <button type="button" onclick="App.logout()" class="ui-btn px-2.5 sm:px-3 bg-white/10 hover:bg-rose-600 text-[#ffd9d2] hover:text-white border border-white/15 text-xs font-bold" title="Đăng xuất khỏi hệ thống">
                 <i class="fa-solid fa-right-from-bracket"></i>
                 <span class="hidden sm:inline">Đăng xuất</span>
               </button>
@@ -13948,38 +14075,36 @@ const App = {
 
     const modal = document.createElement('div');
     modal.id = 'previewPdfModal';
-    modal.className = 'fixed inset-0 z-50 flex flex-col bg-slate-900/85 backdrop-blur-sm p-2 sm:p-5 transition-all';
+    modal.className = 'fixed inset-0 z-50 flex flex-col bg-[#2b0506]/75 backdrop-blur-sm p-2 sm:p-5 transition-all';
     modal.innerHTML = `
-      <div class="bg-slate-900 rounded-2xl shadow-2xl flex-1 flex flex-col overflow-hidden border border-slate-700 max-w-6xl w-full mx-auto">
-        <!-- Header -->
-        <div class="px-2.5 sm:px-5 py-2.5 sm:py-3.5 bg-slate-800 border-b border-slate-700 flex items-center justify-between gap-2 text-white shrink-0">
+      <div class="bg-white rounded-2xl sm:rounded-3xl shadow-2xl flex-1 flex flex-col overflow-hidden border-2 border-[#650f12] max-w-6xl w-full mx-auto">
+        <!-- Header Đỏ Đô & Vàng Học Thuật -->
+        <div class="px-2.5 sm:px-5 py-2.5 sm:py-3 ltac-admin-header flex items-center justify-between gap-2 text-[#fbf7ef] shrink-0">
           <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
-            <button type="button" onclick="App.closePdfModal()" class="sm:hidden px-2.5 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer" title="Quay lại">
+            <button type="button" onclick="App.closePdfModal()" class="sm:hidden px-2.5 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer border border-white/15" title="Quay lại">
               <i class="fa-solid fa-arrow-left text-[11px]"></i><span>Quay lại</span>
             </button>
-            <span class="hidden sm:flex w-8 h-8 rounded-lg bg-red-600 items-center justify-center font-bold text-sm shrink-0 shadow-sm">
-              <i class="fa-solid fa-file-pdf"></i>
-            </span>
+            <span class="hidden sm:inline-grid ltac-brand-badge" style="width:32px;height:32px;font-size:17px;background:#fbf7ef;color:#650f12;">π</span>
             <div class="min-w-0 truncate">
-              <h3 class="text-xs sm:text-sm font-bold text-white truncate">${title}</h3>
-              <p class="text-[11px] text-slate-400 truncate hidden sm:block">Tệp nguồn: <span class="font-mono text-indigo-300">${pdfUrl || 'IndexedDB'}</span></p>
+              <h3 class="text-xs sm:text-sm font-bold font-serif text-white truncate">${title}</h3>
+              <p class="text-[11px] text-[#f7ebe0]/80 truncate hidden sm:block">Tệp nguồn: <span class="font-mono text-[#ffe27d]">${pdfUrl || 'IndexedDB'}</span></p>
             </div>
           </div>
           <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <button type="button" id="pdfModalLayoutBtn" onclick="App.showExamLayoutModal('${String(storageId || '').replace(/_sol$/, '')}')" class="px-2.5 sm:px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1.5 transition cursor-pointer shadow-xs whitespace-nowrap" title="Xem trước & đổi cách hiển thị Đề PDF và Ô điền đáp án">
+            <button type="button" id="pdfModalLayoutBtn" onclick="App.showExamLayoutModal('${String(storageId || '').replace(/_sol$/, '')}')" class="px-2.5 sm:px-3 py-1.5 rounded-full bg-[#ffe27d] hover:bg-amber-200 text-xs font-extrabold text-[#3d0709] flex items-center gap-1.5 transition cursor-pointer shadow-xs whitespace-nowrap" title="Xem trước & đổi cách hiển thị Đề PDF và Ô điền đáp án">
               <i class="fa-solid fa-table-columns"></i>
               <span class="hidden sm:inline">Bố cục Đề &amp; Đáp án</span>
               <span class="sm:hidden">Bố cục</span>
             </button>
             ${!this.isStandaloneApp() ? `
-              <a id="pdfModalNewTabLink" href="${initialHref}" target="_blank" class="hidden sm:flex px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-indigo-300 hover:text-white items-center transition cursor-pointer whitespace-nowrap" title="Mở trong tab mới">
+              <a id="pdfModalNewTabLink" href="${initialHref}" target="_blank" class="hidden sm:flex px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs text-[#ffe27d] hover:text-white items-center transition cursor-pointer whitespace-nowrap border border-white/15" title="Mở trong tab mới">
                 <i class="fa-solid fa-arrow-up-right-from-square mr-1.5"></i>Tab Mới
               </a>
             ` : ''}
-            <a id="pdfModalDownloadLink" href="${initialHref}" download="Tai_Lieu_${Date.now()}.pdf" class="px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs text-white flex items-center transition cursor-pointer whitespace-nowrap" title="Tải về máy">
+            <a id="pdfModalDownloadLink" href="${initialHref}" download="Tai_Lieu_${Date.now()}.pdf" class="px-2.5 sm:px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 text-xs text-white flex items-center transition cursor-pointer whitespace-nowrap border border-white/20" title="Tải về máy">
               <i class="fa-solid fa-download sm:mr-1.5"></i><span class="hidden sm:inline">Tải Về</span>
             </a>
-            <button type="button" onclick="App.closePdfModal()" class="w-8 h-8 rounded-lg bg-slate-700 hover:bg-red-600 text-white flex items-center justify-center transition cursor-pointer shrink-0" title="Đóng">
+            <button type="button" onclick="App.closePdfModal()" class="w-8 h-8 rounded-full bg-white/15 hover:bg-rose-600 text-white flex items-center justify-center transition cursor-pointer shrink-0 border border-white/15" title="Đóng">
               <i class="fa-solid fa-xmark"></i>
             </button>
           </div>
