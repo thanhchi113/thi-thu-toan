@@ -1712,7 +1712,7 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v22"), 'sw.js must bump shell cache to v22');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v23"), 'sw.js must bump shell cache to v23');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
   assert.ok(/@media\s*\(max-width:\s*1023px\)\s*\{\s*\.scroll-top-fab\s*\{\s*display:\s*none\s*!important;/.test(cssSrc), 'app.css must hide floating .scroll-top-fab on mobile/tablet to prevent overlapping right-aligned buttons');
   assert.ok(/body\.in-exam\s+\.scroll-top-fab\s*\{\s*display:\s*none\s*!important;/.test(cssSrc), 'app.css must hide .scroll-top-fab inside exam room');
@@ -1778,7 +1778,24 @@ const PDFStorage = require('../js/pdf_storage.js');
   App.renderAdminDashboard(syncedAdmin);
   assert.ok(syncedAdmin.innerHTML.includes('ltac-admin-header'), 'Admin dashboard renders LTAC crimson studio header');
 
-  console.log('[OK] Test 29 Passed: 1:1 Ruled Math Notebook & Crimson Academic UI sync verified 100%.');
+  // Kiểm tra tài sản Logo Ch1 Math (Penrose triangle + Ch1 Σath) hiện diện đầy đủ trong cả mã nguồn & UI
+  assert.ok(
+    fs.existsSync(path.join(__dirname, '..', 'icons', 'logo-ch1math.png')) &&
+    fs.existsSync(path.join(__dirname, '..', 'icons', 'logo-mark.png')) &&
+    fs.existsSync(path.join(__dirname, '..', 'icons', 'favicon.png')),
+    'Ch1 Math logo PNG assets must exist in icons/'
+  );
+  assert.ok(indexHtmlSrc.includes('icons/favicon.png') && indexHtmlSrc.includes('icons/logo-ch1math.png'), 'index.html must reference Ch1 Math favicon and loading logo');
+  assert.ok(syncedLogin.innerHTML.includes('icons/logo-ch1math.png'), 'Login view must embed icons/logo-ch1math.png');
+  assert.ok(syncedStudent.innerHTML.includes('icons/logo-ch1math.png'), 'Student portal must embed icons/logo-ch1math.png');
+  assert.ok(syncedAdmin.innerHTML.includes('icons/logo-ch1math.png'), 'Admin dashboard must embed icons/logo-ch1math.png');
+
+  let introLogoNode = null;
+  global.document.body.appendChild = (node) => { introLogoNode = node; return node; };
+  App.showTeacherIntroModal();
+  assert.ok(introLogoNode && introLogoNode.innerHTML.includes('icons/logo-ch1math.png'), 'Teacher intro modal must embed icons/logo-ch1math.png');
+
+  console.log('[OK] Test 29 Passed: 1:1 Ruled Math Notebook, Crimson Academic UI & Ch1 Math Logo verified 100%.');
   console.log('[OK] TẤT CẢ 29 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);

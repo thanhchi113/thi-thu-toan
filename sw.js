@@ -1,4 +1,4 @@
-const CACHE_NAME = 'khao-thi-toan-shell-v22';
+const CACHE_NAME = 'khao-thi-toan-shell-v23';
 const PDF_CACHE_NAME = 'khao-thi-pdfs-v1';
 const SHELL_ASSETS = [
   './',
@@ -20,6 +20,9 @@ const SHELL_ASSETS = [
   './cursor/grabbing.webp',
   './cursor/grabbing-2x.webp',
   './icons/apple-touch-icon.png',
+  './icons/favicon.png',
+  './icons/logo-ch1math.png',
+  './icons/logo-mark.png',
   './icons/icon-192.png'
 ];
 

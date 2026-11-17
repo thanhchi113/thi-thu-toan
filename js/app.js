@@ -3561,7 +3561,7 @@ const App = {
         <header class="ltac-topbar sticky top-0 z-30">
           <div class="w-full max-w-[1220px] mx-auto px-3.5 sm:px-6 h-15 sm:h-[66px] py-2 flex items-center justify-between gap-3">
             <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="ltac-brand min-w-0 sm:shrink-0" title="Website chính thức Thầy Huỳnh Thanh Chí — Lớp Toán Anh Chí">
-              <span class="ltac-brand-badge">π</span>
+              <span class="ltac-brand-badge"><img src="icons/logo-ch1math.png" alt="Ch1 Math"></span>
               <span class="min-w-0 truncate">
                 <span class="ltac-brand-title truncate">Thầy Huỳnh Thanh Chí</span>
                 <span class="ltac-brand-sub truncate">Lớp Toán Anh Chí · Khối 6 – 12</span>
@@ -3698,7 +3698,7 @@ const App = {
               <div class="ltac-notebook-sheet py-6 px-5 sm:py-7 sm:px-8">
                 <div class="flex items-center justify-between gap-2 pb-4 mb-5 border-b border-dashed border-slate-200">
                   <div class="flex items-center gap-2.5 min-w-0">
-                    <span class="ltac-brand-badge" style="width:32px;height:32px;font-size:18px;border-radius:9px;">π</span>
+                    <span class="ltac-brand-badge" style="height:36px;"><img src="icons/logo-ch1math.png" alt="Ch1 Math"></span>
                     <div class="min-w-0">
                       <div class="font-serif font-bold text-sm sm:text-base text-slate-900 leading-tight truncate">Đăng Nhập Phòng Thi</div>
                       <div class="text-[11px] text-slate-500 truncate">Nhận đề thi, nộp BTVN &amp; xem điểm</div>
@@ -3828,7 +3828,7 @@ const App = {
           <div class="w-full max-w-[1180px] mx-auto space-y-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="ltac-brand">
-                <span class="ltac-brand-badge" style="width:30px;height:30px;font-size:17px;border-radius:8px;">π</span>
+                <span class="ltac-brand-badge" style="height:32px;padding:2px 5px;border-radius:8px;"><img src="icons/logo-ch1math.png" alt="Ch1 Math"></span>
                 <span class="font-serif font-bold text-sm sm:text-base text-indigo-700">Thầy Huỳnh Thanh Chí — Lớp Toán Anh Chí</span>
               </a>
               <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-medium text-slate-600">
@@ -5163,7 +5163,7 @@ const App = {
         <header class="ltac-topbar sticky top-0 z-30">
           <div class="w-full max-w-[97%] mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
             <div class="ltac-brand cursor-pointer min-w-0 sm:shrink-0" onclick="App.goHome()" title="Về trang chủ Cổng Học Sinh">
-              <span class="ltac-brand-badge">π</span>
+              <span class="ltac-brand-badge"><img src="icons/logo-ch1math.png" alt="Ch1 Math"></span>
               <div class="min-w-0">
                 <span class="ltac-brand-title text-sm sm:text-lg truncate">Lớp Toán Anh Chí</span>
                 <span class="ltac-brand-sub truncate">Cổng Học Sinh · Toán 6 – 12</span>
@@ -5364,7 +5364,7 @@ const App = {
                   class="col-span-2 sm:col-span-1 ui-btn min-h-[40px] px-2 sm:px-3.5 min-w-0 bg-gradient-to-r from-red-50 to-amber-50 hover:from-red-100 hover:to-amber-100 text-[#650f12] border border-[#650f12]/20 font-bold"
                   title="Giới thiệu Thầy Huỳnh Thanh Chí & Website Lớp Toán Anh Chí"
                 >
-                  <span class="w-4 h-4 rounded bg-[#650f12] text-[#fbf7ef] font-serif font-black text-[10px] flex items-center justify-center shrink-0">π</span>
+                  <img src="icons/logo-mark.png" alt="Ch1 Math" class="w-4 h-4 object-contain shrink-0">
                   <span class="sm:hidden">Về Thầy Chí &amp; Website Chính</span>
                   <span class="hidden sm:inline">Về Thầy Chí &amp; Web</span>
                 </button>
@@ -5390,8 +5390,8 @@ const App = {
           <!-- Card Nhận Diện Thương Hiệu Lớp Toán Anh Chí — Thầy Huỳnh Thanh Chí -->
           <div class="bg-gradient-to-r from-[#fbf7ef] via-white to-[#f4ede0] rounded-2xl p-4 sm:p-5 border border-[#e6dbcd] shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 text-slate-800">
             <div class="flex items-start sm:items-center gap-3.5 min-w-0">
-              <div class="w-12 h-12 rounded-2xl bg-[#650f12] text-[#fbf7ef] flex items-center justify-center font-serif font-black text-2xl shadow-md shrink-0 border-2 border-amber-300/40">
-                π
+              <div class="h-14 px-2.5 py-1.5 rounded-2xl bg-[#fffdf8] flex items-center justify-center shadow-sm shrink-0 border border-[#e6dbcd]">
+                <img src="icons/logo-ch1math.png" alt="Ch1 Math" class="h-full w-auto object-contain">
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
@@ -7046,7 +7046,7 @@ const App = {
 
             <div class="h-5 w-px bg-slate-200 hidden sm:block shrink-0"></div>
 
-            <span class="hidden sm:inline-grid ltac-brand-badge" style="width:34px;height:34px;font-size:19px;">π</span>
+            <span class="hidden sm:inline-flex ltac-brand-badge" style="height:34px;"><img src="icons/logo-ch1math.png" alt="Ch1 Math"></span>
             <div class="min-w-0 flex-1 overflow-hidden">
               <h2 class="text-xs sm:text-sm font-bold font-serif text-slate-900 truncate max-w-[120px] xs:max-w-[180px] sm:max-w-none">${ex.title}</h2>
               <div class="text-[11px] text-slate-500 flex items-center gap-x-1.5 overflow-hidden mt-0.5">
@@ -9654,8 +9654,8 @@ const App = {
         <header class="ltac-admin-header text-[#fbf7ef] sticky top-0 z-30">
           <div class="w-full max-w-[97%] mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
             <div class="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer min-w-0 sm:shrink-0" onclick="App.goHome()" title="Về trang chủ">
-              <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#fbf7ef] text-[#650f12] flex items-center justify-center font-serif italic font-black text-xl shadow-md border border-[#ffe27d]/50 shrink-0">
-                π
+              <div class="h-9 sm:h-10 px-1.5 py-1 rounded-xl bg-[#fffdf8] flex items-center justify-center shadow-md border border-[#ffe27d]/60 shrink-0">
+                <img src="icons/logo-ch1math.png" alt="Ch1 Math" class="h-full w-auto object-contain">
               </div>
               <div class="min-w-0">
                 <span class="block text-[10px] sm:text-xs font-bold text-[#ffe27d] uppercase tracking-wider leading-tight truncate">Cổng Giáo Viên · Toán 6 – 12</span>
@@ -14084,7 +14084,7 @@ const App = {
             <button type="button" onclick="App.closePdfModal()" class="sm:hidden px-2.5 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer border border-white/15" title="Quay lại">
               <i class="fa-solid fa-arrow-left text-[11px]"></i><span>Quay lại</span>
             </button>
-            <span class="hidden sm:inline-grid ltac-brand-badge" style="width:32px;height:32px;font-size:17px;background:#fbf7ef;color:#650f12;">π</span>
+            <span class="hidden sm:inline-flex ltac-brand-badge" style="height:32px;"><img src="icons/logo-ch1math.png" alt="Ch1 Math"></span>
             <div class="min-w-0 truncate">
               <h3 class="text-xs sm:text-sm font-bold font-serif text-white truncate">${title}</h3>
               <p class="text-[11px] text-[#f7ebe0]/80 truncate hidden sm:block">Tệp nguồn: <span class="font-mono text-[#ffe27d]">${pdfUrl || 'IndexedDB'}</span></p>
@@ -16548,8 +16548,8 @@ const App = {
         <div class="p-5 sm:p-6 bg-gradient-to-r from-[#650f12] via-[#7d1c20] to-[#4a090b] text-[#fbf7ef] relative overflow-hidden">
           <div class="relative z-10 flex items-start justify-between gap-3">
             <div class="flex items-center gap-3.5 min-w-0">
-              <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-[#fbf7ef] text-[#650f12] flex items-center justify-center font-serif font-black text-2xl sm:text-3xl shadow-lg shrink-0 border-2 border-amber-300/40">
-                π
+              <div class="h-14 sm:h-16 px-2.5 py-1.5 rounded-2xl bg-[#fffdf8] flex items-center justify-center shadow-lg shrink-0 border-2 border-amber-300/40">
+                <img src="icons/logo-ch1math.png" alt="Ch1 Math" class="h-full w-auto object-contain">
               </div>
               <div class="min-w-0">
                 <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-white/20 backdrop-blur-md text-amber-200 mb-1 border border-white/20">
@@ -16567,9 +16567,7 @@ const App = {
               <i class="fa-solid fa-xmark text-sm"></i>
             </button>
           </div>
-          <div class="absolute -right-6 -bottom-8 opacity-10 text-white font-serif font-black text-9xl pointer-events-none select-none">
-            π
-          </div>
+          <img src="icons/logo-mark.png" alt="" class="absolute -right-3 -bottom-3 w-28 h-28 object-contain opacity-15 pointer-events-none select-none">
         </div>
 
         <div class="p-5 sm:p-7 space-y-5 text-sm max-h-[75vh] overflow-y-auto">
