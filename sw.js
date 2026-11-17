@@ -1,4 +1,4 @@
-const CACHE_NAME = 'khao-thi-toan-shell-v23';
+const CACHE_NAME = 'khao-thi-toan-shell-v24';
 const PDF_CACHE_NAME = 'khao-thi-pdfs-v1';
 const SHELL_ASSETS = [
   './',
@@ -8,6 +8,7 @@ const SHELL_ASSETS = [
   './js/pdf_storage.js',
   './js/grading.js',
   './js/exam_data.js',
+  './js/curriculum_data.js',
   './js/seed_data.js',
   './js/app.js',
   './cursor-text.svg',

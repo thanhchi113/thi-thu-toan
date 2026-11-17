@@ -1712,7 +1712,7 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v23"), 'sw.js must bump shell cache to v23');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v24"), 'sw.js must bump shell cache to v24');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
   assert.ok(/@media\s*\(max-width:\s*1023px\)\s*\{\s*\.scroll-top-fab\s*\{\s*display:\s*none\s*!important;/.test(cssSrc), 'app.css must hide floating .scroll-top-fab on mobile/tablet to prevent overlapping right-aligned buttons');
   assert.ok(/body\.in-exam\s+\.scroll-top-fab\s*\{\s*display:\s*none\s*!important;/.test(cssSrc), 'app.css must hide .scroll-top-fab inside exam room');
@@ -1796,7 +1796,100 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.ok(introLogoNode && introLogoNode.innerHTML.includes('icons/logo-ch1math.png'), 'Teacher intro modal must embed icons/logo-ch1math.png');
 
   console.log('[OK] Test 29 Passed: 1:1 Ruled Math Notebook, Crimson Academic UI & Ch1 Math Logo verified 100%.');
-  console.log('[OK] TẤT CẢ 29 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
+
+  // Test 30: Kho Phiếu Bài Tập 3 Chế Độ (Bảng Google Sheet / Cây Thư Mục / Thẻ) + Xem Online Kiểu Drive + Làm Trực Tiếp / Tải In + Upload Hàng Loạt
+  console.log('--- TEST 30: Curriculum Sheet/Tree Explorer, Drive Viewer & Batch Upload ---');
+  const curriculumData = require('../js/curriculum_data.js');
+  assert.strictEqual(curriculumData.chapters.length, 6, 'Toan 12 curriculum must have 6 chapters');
+  assert.strictEqual(curriculumData.items.length, 56, 'Toan 12 curriculum must have 56 dang items');
+  curriculumData.items.forEach((it) => {
+    assert.ok(it.lessonTitle && it.lessonTitle.trim().length > 0, `${it.code} must have non-empty lessonTitle (including merged cells)`);
+    assert.ok(it.title && it.title.trim().length > 0, `${it.code} must have non-empty title`);
+  });
+  const dang01 = App.findHomeworkById('CUR-12-D01');
+  assert.ok(dang01 && dang01.pdfUrl.includes('drive.google.com/file/d/') && dang01.solutionPdfUrl.includes('drive.google.com/file/d/'), 'Dạng 01 must include Drive question & solution URLs');
+
+  // 30.1 Chuẩn hóa URL Google Drive (/preview iframe thuần không bọc <object type="application/pdf"> & uc?export=download)
+  const driveNorm = App.normalizeExternalPdfUrl(dang01.pdfUrl);
+  assert.ok(driveNorm.isExternalEmbed && driveNorm.embedUrl.endsWith('/preview'), 'Drive URL must normalize to /preview iframe embed');
+  assert.ok(driveNorm.downloadUrl.includes('uc?export=download&id='), 'Drive URL must derive direct export=download link');
+  const driveEmbedHtml = App.renderPdfFallbackHtml(driveNorm.embedUrl, driveNorm.isExternalEmbed);
+  assert.ok(driveEmbedHtml.includes('<iframe') && !driveEmbedHtml.includes('type="application/pdf"'), 'Drive preview must render clean <iframe> without <object type="application/pdf">');
+
+  // 30.2 Render Bảng Google Sheet và Cây Thư Mục cho Học sinh & Admin
+  const allMergedItems = App.getMergedWorksheets({ includeEmptySlots: true });
+  assert.ok(allMergedItems.length >= 56, 'Merged worksheets include all 56 curriculum slots');
+  const sheetHtmlStu = App.renderCurriculumSheetHtml({ scope: 'student', items: allMergedItems });
+  assert.ok(sheetHtmlStu.includes('CHƯƠNG I.') && sheetHtmlStu.includes('CHƯƠNG VI.') && sheetHtmlStu.includes('Dạng 01') && sheetHtmlStu.includes('Làm Trực Tiếp'), 'Sheet view renders all 6 chapters, Dạng 01 and Làm Trực Tiếp action');
+  const treeHtmlAdmin = App.renderCurriculumTreeHtml({ scope: 'admin', items: allMergedItems });
+  assert.ok(treeHtmlAdmin.includes('ltac-tree-branch') && treeHtmlAdmin.includes('Bài 1.') && treeHtmlAdmin.includes('Up PDF'), 'Tree view renders hierarchical chapters, lessons and admin upload buttons');
+
+  // 30.3 Kiểm tra openPdfModal kiểu Google Drive: Nút chuyển Đề/Đáp án, Nút Làm trực tiếp & Khóa tải về khi allowDownload=false
+  let capturedPdfModal = null;
+  global.document.body.appendChild = (node) => { capturedPdfModal = node; return node; };
+  App.state.currentUser = { username: 'HS901', fullName: 'Nguyễn Văn Minh', role: 'student', studentId: 'HS901', grade: 12, className: '12A1 VIP 2K9' };
+  const prevWin30 = global.window;
+  global.window = { ...prevWin30 };
+  const restrictedHw = App.normalizeHomeworkRecord({
+    id: 'HW-VIEWONLY-1',
+    itemKind: 'document',
+    grade: 12,
+    code: 'Phiếu 99',
+    title: 'Phiếu Chỉ Xem Online',
+    pdfUrl: 'https://drive.google.com/file/d/1_Yxb3SL69RqG7rvr0u1jv6Ipgf47Euq4/view',
+    solutionPdfUrl: 'https://drive.google.com/file/d/1tax8uiMtDlekUWbElnE0RSryCcvXXRtI/view',
+    allowOnlineView: true,
+    allowDownload: false,
+    allowDirectPractice: true
+  });
+  App.state.homeworks.unshift(restrictedHw);
+  await App.openPdfModal(restrictedHw.title, restrictedHw.pdfUrl, restrictedHw.id);
+  assert.ok(capturedPdfModal && capturedPdfModal.innerHTML.includes('pdfModalDocSwitcher') && capturedPdfModal.innerHTML.includes('pdfModalPracticeBtn'), 'Drive-style viewer renders Doc Switcher & Direct Practice button');
+  assert.ok(!capturedPdfModal.innerHTML.includes('pdfModalDownloadLink') && capturedPdfModal.innerHTML.includes('pdfModalViewOnlyBadge'), 'Student view-only PDF must hide download button and show Chỉ xem online badge');
+  const blockedDl = await App.downloadHomeworkPdf('HW-VIEWONLY-1');
+  assert.strictEqual(blockedDl, false, 'downloadHomeworkPdf must block student download when allowDownload=false');
+
+  // Admin vẫn thấy nút tải về ngay cả trên phiếu đặt Chỉ xem online
+  App.state.currentUser = { username: 'ADMIN', role: 'admin', fullName: 'Thầy Chí' };
+  await App.openPdfModal(restrictedHw.title, restrictedHw.pdfUrl, restrictedHw.id);
+  assert.ok(capturedPdfModal.innerHTML.includes('pdfModalDownloadLink'), 'Admin still sees download/print link');
+
+  // 30.4 Làm trực tiếp trên bất kỳ phiếu PDF nào (tự cấp không gian part4 khi chưa nhập đáp án trắc nghiệm)
+  App.state.currentUser = { username: 'HS901', fullName: 'Nguyễn Văn Minh', role: 'student', studentId: 'HS901', grade: 12, className: '12A1 VIP 2K9' };
+  const launchedDirect = App.launchWorksheetDirectPractice('CUR-12-D01');
+  await new Promise(r => setTimeout(r, 25));
+  assert.strictEqual(launchedDirect, true, 'launchWorksheetDirectPractice launches on CUR-12-D01');
+  assert.ok(App.state.activeExam && App.state.activeExam.id === 'CUR-12-D01' && App.state.activeExam.part4.length === 1, 'PDF-only worksheet auto-creates part4 interactive practice workspace');
+  if (App.state.timerInterval) { clearInterval(App.state.timerInterval); App.state.timerInterval = null; }
+  App.state.activeExam = null;
+
+  // 30.5 Tự động ghép cặp file hàng loạt (<stem>.pdf + <stem>-ANS.pdf & _DapAn.pdf)
+  const batchPairs = App.pairBatchWorksheetFiles([
+    { name: 'Dang05_Phieu1.pdf', size: 120000 },
+    { name: 'Dang05_Phieu1-ANS.pdf', size: 140000 },
+    { name: 'ChuyenDe_02.pdf', size: 220000 },
+    { name: 'ChuyenDe_02_DapAn.pdf', size: 240000 },
+    { name: 'ChuyenDe_03.pdf', size: 180000 }
+  ]);
+  assert.strictEqual(batchPairs.length, 3, 'Batch pairer detects 3 distinct worksheets from 5 files');
+  assert.strictEqual(batchPairs[0].solutionFile.name, 'Dang05_Phieu1-ANS.pdf', 'Auto-pairs -ANS.pdf with question PDF');
+  assert.strictEqual(batchPairs[1].solutionFile.name, 'ChuyenDe_02_DapAn.pdf', 'Auto-pairs _DapAn.pdf with question PDF');
+  assert.strictEqual(batchPairs[2].solutionFile, null, 'Handles standalone worksheet PDF without solution cleanly');
+
+  // 30.6 Phân tích TSV/CSV đồng bộ Google Sheet (=HYPERLINK)
+  const parsedRows = App.parseGoogleSheetTsvOrCsv(
+    'STT\tChương\tBài\tDạng\tĐề\tĐáp án\tNguồn\tCN\n' +
+    'Dạng 05\tChương 1\tBài 1. Tính đơn điệu\tDạng 2. Tham số m\t=HYPERLINK("https://drive.google.com/file/d/abc123XYZ/view"; "Đề")\t=HYPERLINK("https://drive.google.com/file/d/sol789XYZ/view"; "Đáp án")\tLaTeX (.tex)\t18/11/2026',
+    12
+  );
+  assert.strictEqual(parsedRows.length, 1, 'Sheet parser extracts 1 data row skipping header');
+  assert.strictEqual(parsedRows[0].id, 'CUR-12-D05', 'Matches existing CUR-12-D05 slot by code');
+  assert.strictEqual(parsedRows[0].pdfUrl, 'https://drive.google.com/file/d/abc123XYZ/view', 'Extracts Drive PDF link from =HYPERLINK formula');
+  assert.strictEqual(parsedRows[0].solutionPdfUrl, 'https://drive.google.com/file/d/sol789XYZ/view', 'Extracts Drive Solution link from =HYPERLINK formula');
+  global.window = prevWin30;
+
+  console.log('[OK] Test 30 Passed: Curriculum Sheet/Tree views, Drive online viewer, view-only lock, direct practice & batch upload verified 100%.');
+  console.log('[OK] TẤT CẢ 30 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);
