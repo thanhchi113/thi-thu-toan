@@ -3727,7 +3727,7 @@ const App = {
               <i class="fa-solid fa-book-open text-indigo-600 text-[10px]"></i><span>Tài liệu PDF</span>
             </a>
             <a href="https://thanhchi113.github.io/#lop-hoc" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-800 font-semibold shrink-0 whitespace-nowrap">
-              <i class="fa-regular fa-calendar text-indigo-600 text-[10px]"></i><span>Lịch 13 lớp</span>
+              <i class="fa-regular fa-calendar text-indigo-600 text-[10px]"></i><span>Lịch các lớp</span>
             </a>
             <a href="https://thanhchi113.github.io/" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-800 font-semibold shrink-0 whitespace-nowrap">
               <i class="fa-solid fa-globe text-indigo-600 text-[10px]"></i><span>Web Giới Thiệu</span>
@@ -18076,7 +18076,7 @@ const App = {
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
               <a href="${this.TEACHER_MAIN_WEB_URL}#lop-hoc" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-indigo-100/60 rounded-xl border border-indigo-100 text-slate-800 transition block">
                 <i class="fa-solid fa-calendar-days text-indigo-600 text-base mb-1 block"></i>
-                <span class="font-bold text-[11px]">Lịch 13 Nhóm Lớp</span>
+                <span class="font-bold text-[11px]">Lịch 10 Nhóm Lớp</span>
               </a>
               <a href="${this.TEACHER_MAIN_WEB_URL}#thanh-tich" target="_blank" rel="noopener noreferrer" class="p-2.5 bg-white hover:bg-amber-100/60 rounded-xl border border-amber-100 text-slate-800 transition block">
                 <i class="fa-solid fa-trophy text-amber-600 text-base mb-1 block"></i>
