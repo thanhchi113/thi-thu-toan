@@ -1712,7 +1712,7 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v29"), 'sw.js must bump shell cache to v29');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v30"), 'sw.js must bump shell cache to v30');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
   assert.ok(cssSrc.includes(':where([id$="Modal"].fixed.inset-0:not(#previewPdfModal), #appSystemDialog.fixed.inset-0) > div'), 'app.css must use zero-specificity :where() fallback so desktop .max-w-* classes on modals are never overridden');
   assert.ok(cssSrc.includes('max-height: calc(100dvh'), 'app.css must constrain modal card height within viewport');
