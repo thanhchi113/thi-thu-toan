@@ -1712,7 +1712,7 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v28"), 'sw.js must bump shell cache to v28');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v29"), 'sw.js must bump shell cache to v29');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
   assert.ok(cssSrc.includes(':where([id$="Modal"].fixed.inset-0:not(#previewPdfModal), #appSystemDialog.fixed.inset-0) > div'), 'app.css must use zero-specificity :where() fallback so desktop .max-w-* classes on modals are never overridden');
   assert.ok(cssSrc.includes('max-height: calc(100dvh'), 'app.css must constrain modal card height within viewport');
@@ -1921,12 +1921,19 @@ const PDFStorage = require('../js/pdf_storage.js');
   await App.openPdfModal(restrictedHw.title, restrictedHw.pdfUrl, restrictedHw.id);
   assert.ok(capturedPdfModal.innerHTML.includes('pdfModalDownloadLink'), 'Admin still sees download/print link');
 
-  // 30.4 Làm trực tiếp trên bất kỳ phiếu PDF nào (tự cấp không gian part4 khi chưa nhập đáp án trắc nghiệm)
+  // 30.4 Làm trực tiếp trên phiếu có sẵn đáp án .tex (CUR-12-D01) & phiếu chỉ có PDF (HW-VIEWONLY-1)
   App.state.currentUser = { username: 'HS901', fullName: 'Nguyễn Văn Minh', role: 'student', studentId: 'HS901', grade: 12, className: '12A1 VIP 2K9' };
   const launchedDirect = App.launchWorksheetDirectPractice('CUR-12-D01');
   await new Promise(r => setTimeout(r, 25));
   assert.strictEqual(launchedDirect, true, 'launchWorksheetDirectPractice launches on CUR-12-D01');
-  assert.ok(App.state.activeExam && App.state.activeExam.id === 'CUR-12-D01' && App.state.activeExam.part4.length === 1, 'PDF-only worksheet auto-creates part4 interactive practice workspace');
+  assert.ok(App.state.activeExam && App.state.activeExam.id === 'CUR-12-D01' && App.state.activeExam.part1.length === 12 && App.state.activeExam.part2.length === 4 && App.state.activeExam.part3.length === 6, 'CUR-12-D01 loads 12 P.I, 4 P.II, 6 P.III auto-graded questions');
+  if (App.state.timerInterval) { clearInterval(App.state.timerInterval); App.state.timerInterval = null; }
+  App.state.activeExam = null;
+
+  const launchedPdfOnly = App.launchWorksheetDirectPractice('HW-VIEWONLY-1');
+  await new Promise(r => setTimeout(r, 25));
+  assert.strictEqual(launchedPdfOnly, true, 'launchWorksheetDirectPractice launches on PDF-only worksheet HW-VIEWONLY-1');
+  assert.ok(App.state.activeExam && App.state.activeExam.id === 'HW-VIEWONLY-1' && App.state.activeExam.part4.length === 1, 'PDF-only worksheet auto-creates part4 interactive practice workspace');
   if (App.state.timerInterval) { clearInterval(App.state.timerInterval); App.state.timerInterval = null; }
   App.state.activeExam = null;
 
@@ -2026,7 +2033,75 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.strictEqual(typeof mockScrollEl.on_mousedown, 'function', 'scrollEl must listen to mousedown');
 
   console.log('[OK] Test 30 Passed: Curriculum Sheet/Tree views, Drive online viewer, view-only lock, direct practice & batch upload verified 100%.');
-  console.log('[OK] TẤT CẢ 30 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
+
+  // Test 31: Bỏ cột Nguồn / CN, Nút Xem & Tải 5 Phiên Bản PDF (PTMP_Muc1), Upload .tex lấy Đáp án & Hiển thị Đề PDF không đáp án khi Làm Trực Tiếp
+  console.log('--- TEST 31: Multi-Variant PDF View/Download, .tex Auto Answer Key & No-Answer Direct Practice PDF ---');
+  assert.ok(!sheetHtmlStu.includes('Nguồn / CN'), 'Sheet view must NOT contain Nguồn / CN column');
+
+  // 31.1 Kiểm tra 5 file PDF PTMP_Muc1 và file PTMP_Muc1.tex tồn tại thực tế & gắn vào CUR-12-D42
+  const ptmpPdfNames = [
+    'PTMP_Muc1-GV-DapAn.pdf',
+    'PTMP_Muc1-HS-CoVD-CoOli.pdf',
+    'PTMP_Muc1-HS-CoVD-KhongOli.pdf',
+    'PTMP_Muc1-HS-KhongVD-CoOli.pdf',
+    'PTMP_Muc1-HS-KhongVD-KhongOli.pdf',
+    'PTMP_Muc1.tex'
+  ];
+  ptmpPdfNames.forEach((fn) => {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', 'pdfs', fn)), `pdfs/${fn} must exist on disk`);
+  });
+
+  const d42 = App.findHomeworkById('CUR-12-D42');
+  assert.ok(d42, 'CUR-12-D42 (Phương trình mặt phẳng — Mức 1) must exist');
+  assert.strictEqual(d42.pdfUrl, 'pdfs/PTMP_Muc1-HS-KhongVD-KhongOli.pdf', 'CUR-12-D42 primary pdfUrl must be the no-answer student PDF (HS-KhongVD-KhongOli.pdf)');
+  assert.strictEqual(d42.solutionPdfUrl, 'pdfs/PTMP_Muc1-GV-DapAn.pdf', 'CUR-12-D42 solutionPdfUrl must be GV-DapAn.pdf');
+  const d42Variants = App.getWorksheetPdfVariants(d42, { includeSolution: true });
+  assert.strictEqual(d42Variants.length, 5, 'CUR-12-D42 must expose all 5 PDF variants (4 student + 1 teacher solution)');
+  const d42StuVariants = App.getWorksheetPdfVariants(d42, { includeSolution: false });
+  assert.strictEqual(d42StuVariants.length, 4, 'CUR-12-D42 must expose 4 student PDF variants in the Đề / Các Bản PDF column');
+  assert.ok(sheetHtmlStu.includes('HS · K.VD · K.Ôly') && sheetHtmlStu.includes('HS · K.VD · Có Ôly') && sheetHtmlStu.includes('HS · Có VD · K.Ôly') && sheetHtmlStu.includes('HS · Có VD · Có Ôly'), 'Sheet view renders View & Download buttons for all 4 student PDF variants');
+  assert.ok(sheetHtmlStu.includes('Xem ĐA') && sheetHtmlStu.includes("App.downloadHomeworkPdf('CUR-12-D42', true"), 'Sheet view renders Xem ĐA & Tải buttons for GV-DapAn.pdf');
+
+  // 31.2 Kiểm tra bộ phân tích file .tex (PTMP_Muc1.tex) trích xuất chính xác 12 câu P.I, 2 câu P.II, 4 câu P.III, 2 câu P.IV (bỏ qua \begin{vd})
+  const ptmpTexRaw = fs.readFileSync(path.join(__dirname, '..', 'pdfs', 'PTMP_Muc1.tex'), 'utf8');
+  const parsedPtmp = App.parseTexAnswerKey(ptmpTexRaw);
+  assert.deepStrictEqual(parsedPtmp.p1, ['C', 'D', 'D', 'C', 'C', 'A', 'A', 'A', 'D', 'C', 'D', 'B'], 'PTMP_Muc1.tex Part I must match exact 12 answers');
+  assert.strictEqual(parsedPtmp.p2.length, 2, 'PTMP_Muc1.tex Part II must have 2 TF questions');
+  assert.deepStrictEqual(parsedPtmp.p2[0], { a: true, b: true, c: false, d: false }, 'PTMP_Muc1.tex Part II Q1 must be Đ Đ S S');
+  assert.deepStrictEqual(parsedPtmp.p2[1], { a: true, b: false, c: true, d: false }, 'PTMP_Muc1.tex Part II Q2 must be Đ S Đ S');
+  assert.deepStrictEqual(parsedPtmp.p3, ['8', '8', '-4', '1'], 'PTMP_Muc1.tex Part III must be 8, 8, -4, 1');
+  assert.strictEqual(parsedPtmp.p4.length, 2, 'PTMP_Muc1.tex Part IV must have 2 essay questions');
+
+  // 31.3 Khi bấm Làm Trực Tiếp trên CUR-12-D42: tiếp nhận đáp án từ .tex và hiển thị file PDF không đáp án (HS-KhongVD-KhongOli.pdf)
+  App.state.currentUser = stu12;
+  const launchedD42 = App.launchWorksheetDirectPractice('CUR-12-D42');
+  await new Promise(r => setTimeout(r, 25));
+  assert.strictEqual(launchedD42, true, 'launchWorksheetDirectPractice launches on CUR-12-D42');
+  assert.strictEqual(App.state.activeExam.pdf_url, 'pdfs/PTMP_Muc1-HS-KhongVD-KhongOli.pdf', 'Direct practice displays the clean no-answer PDF (PTMP_Muc1-HS-KhongVD-KhongOli.pdf)');
+  assert.strictEqual(App.state.activeExam.part1.length, 12, 'Direct practice loads 12 Part I questions from .tex');
+  assert.strictEqual(App.state.activeExam.part2.length, 2, 'Direct practice loads 2 Part II questions from .tex');
+  assert.strictEqual(App.state.activeExam.part3.length, 4, 'Direct practice loads 4 Part III questions from .tex');
+  assert.strictEqual(App.state.activeExam.part4.length, 2, 'Direct practice loads 2 Part IV questions from .tex');
+  if (App.state.timerInterval) { clearInterval(App.state.timerInterval); App.state.timerInterval = null; }
+  App.state.activeExam = null;
+
+  // 31.4 Kiểm tra ghép tự động 5 file PDF + 1 file .tex khi upload hàng loạt (pairBatchWorksheetFiles)
+  const multiVariantBatch = App.pairBatchWorksheetFiles([
+    { name: 'PTMP_Muc1-GV-DapAn.pdf', size: 405782 },
+    { name: 'PTMP_Muc1-HS-CoVD-CoOli.pdf', size: 346676 },
+    { name: 'PTMP_Muc1-HS-CoVD-KhongOli.pdf', size: 310898 },
+    { name: 'PTMP_Muc1-HS-KhongVD-CoOli.pdf', size: 317760 },
+    { name: 'PTMP_Muc1-HS-KhongVD-KhongOli.pdf', size: 287679 },
+    { name: 'PTMP_Muc1.tex', size: 12400, _text: ptmpTexRaw }
+  ]);
+  assert.strictEqual(multiVariantBatch.length, 1, 'pairBatchWorksheetFiles groups 5 PDF variants + 1 .tex file into 1 worksheet');
+  assert.strictEqual(multiVariantBatch[0].questionFile.name, 'PTMP_Muc1-HS-KhongVD-KhongOli.pdf', 'pairBatchWorksheetFiles picks HS-KhongVD-KhongOli.pdf as primary no-answer question PDF');
+  assert.strictEqual(multiVariantBatch[0].solutionFile.name, 'PTMP_Muc1-GV-DapAn.pdf', 'pairBatchWorksheetFiles picks GV-DapAn.pdf as solution PDF');
+  assert.strictEqual(multiVariantBatch[0].texFile.name, 'PTMP_Muc1.tex', 'pairBatchWorksheetFiles attaches .tex file');
+  assert.strictEqual(multiVariantBatch[0].variantFiles.length, 5, 'pairBatchWorksheetFiles retains all 5 PDF variants');
+
+  console.log('[OK] Test 31 Passed: Multi-variant PDF View/Download, .tex answer key extraction & no-answer PDF direct practice verified 100%.');
+  console.log('[OK] TẤT CẢ 31 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

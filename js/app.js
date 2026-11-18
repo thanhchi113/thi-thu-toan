@@ -1369,6 +1369,186 @@ const App = {
     return ex;
   },
 
+  classifyWorksheetPdfVariant(fileNameOrKey, fallbackIdx = 0) {
+    const s = String(fileNameOrKey || '').trim();
+    if (/gv[-_]?dap[-_]?an|hs_sol|gv_dapan|(?:^|[-_.])(?:ans|dapan|dap[-_]?an|loigiai|loi[-_]?giai|lg|sol|solution)(?:\.pdf)?$/i.test(s)) {
+      return {
+        key: 'gv_dapan',
+        shortLabel: 'GV · Đáp Án',
+        label: 'Bản Giáo Viên — Lời Giải & Đáp Án (GV-DapAn)',
+        badgeCls: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        isAnswerPdf: true,
+        isSolution: true,
+        isDirectPracticePdf: false,
+        isNoAnswerPractice: false,
+        practicePriority: 99,
+        order: 99
+      };
+    }
+    if (/khong[-_]?vd[-_]?khong[-_]?o[-_]?li|hs_khongvd_khongoli/i.test(s)) {
+      return {
+        key: 'hs_khongvd_khongoli',
+        shortLabel: 'HS · K.VD · K.Ôly',
+        label: 'Đề Bài Tập Không Đáp Án (HS - Không VD - Không Ô Ly)',
+        badgeCls: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+        isAnswerPdf: false,
+        isSolution: false,
+        isDirectPracticePdf: true,
+        isNoAnswerPractice: true,
+        practicePriority: 1,
+        order: 1
+      };
+    }
+    if (/khong[-_]?vd[-_]?co[-_]?o[-_]?li|hs_khongvd_cooli/i.test(s)) {
+      return {
+        key: 'hs_khongvd_cooli',
+        shortLabel: 'HS · K.VD · Có Ôly',
+        label: 'Phiếu Bài Tập Có Ô Ly (HS - Không VD - Có Ô Ly)',
+        badgeCls: 'bg-sky-50 text-sky-800 border-sky-200',
+        isAnswerPdf: false,
+        isSolution: false,
+        isDirectPracticePdf: false,
+        isNoAnswerPractice: false,
+        practicePriority: 3,
+        order: 3
+      };
+    }
+    if (/co[-_]?vd[-_]?khong[-_]?o[-_]?li|hs_covd_khongoli/i.test(s)) {
+      return {
+        key: 'hs_covd_khongoli',
+        shortLabel: 'HS · Có VD · K.Ôly',
+        label: 'Phiếu Lý Thuyết + VD + Bài Tập (HS - Có VD - Không Ô Ly)',
+        badgeCls: 'bg-violet-50 text-violet-800 border-violet-200',
+        isAnswerPdf: false,
+        isSolution: false,
+        isDirectPracticePdf: true,
+        isNoAnswerPractice: true,
+        practicePriority: 2,
+        order: 2
+      };
+    }
+    if (/co[-_]?vd[-_]?co[-_]?o[-_]?li|hs_covd_cooli/i.test(s)) {
+      return {
+        key: 'hs_covd_cooli',
+        shortLabel: 'HS · Có VD · Có Ôly',
+        label: 'Phiếu Đầy Đủ Lý Thuyết + VD + Bài Tập Có Ô Ly (HS - Có VD - Có Ô Ly)',
+        badgeCls: 'bg-amber-50 text-amber-900 border-amber-200',
+        isAnswerPdf: false,
+        isSolution: false,
+        isDirectPracticePdf: false,
+        isNoAnswerPractice: false,
+        practicePriority: 4,
+        order: 4
+      };
+    }
+    return {
+      key: fallbackIdx > 0 ? `hs_file_${fallbackIdx}` : 'hs_de',
+      shortLabel: fallbackIdx > 0 ? `File Đề ${fallbackIdx + 1}` : 'File Đề',
+      label: 'File Đề PDF (Không đáp án)',
+      badgeCls: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+      isAnswerPdf: false,
+      isSolution: false,
+      isDirectPracticePdf: true,
+      isNoAnswerPractice: true,
+      practicePriority: 2,
+      order: 2
+    };
+  },
+
+  getWorksheetPdfVariants(hw, { includeSolution = false } = {}) {
+    if (!hw || typeof hw !== 'object') return [];
+    const rawList = Array.isArray(hw.pdfVariants) ? hw.pdfVariants : [];
+    const byKey = new Map();
+
+    rawList.forEach((v, idx) => {
+      if (!v || !v.url || /^(tex:|idb_html:)/.test(String(v.url))) return;
+      const meta = this.classifyWorksheetPdfVariant(v.key || v.fileName || v.url, idx);
+      const key = String(v.key || meta.key).trim();
+      const isAns = v.isAnswerPdf !== undefined ? Boolean(v.isAnswerPdf) : (v.isSolution !== undefined ? Boolean(v.isSolution) : meta.isAnswerPdf);
+      const isDirect = v.isDirectPracticePdf !== undefined ? Boolean(v.isDirectPracticePdf) : (v.isNoAnswerPractice !== undefined ? Boolean(v.isNoAnswerPractice) : meta.isDirectPracticePdf);
+      const prio = Number.isFinite(Number(v.practicePriority)) ? Number(v.practicePriority) : meta.practicePriority;
+      const storageKey = v.storageKey || (isAns ? `${hw.id}_sol` : (key === 'hs_de' || key === 'hs_khongvd_khongoli' ? hw.id : `${hw.id}_var_${key}`));
+      byKey.set(key, {
+        ...meta,
+        ...v,
+        key,
+        shortLabel: v.shortLabel || meta.shortLabel,
+        label: v.label || meta.label,
+        badgeCls: v.badgeCls || meta.badgeCls,
+        url: String(v.url).trim(),
+        fileName: v.fileName || `${hw.code || hw.id || 'Phieu'}_${key}.pdf`,
+        storageKey,
+        isAnswerPdf: isAns,
+        isSolution: isAns,
+        isDirectPracticePdf: isDirect,
+        isNoAnswerPractice: isDirect,
+        practicePriority: prio,
+        order: prio
+      });
+    });
+
+    if (hw.pdfUrl && !/^(tex:|idb_html:)/.test(String(hw.pdfUrl))) {
+      const hasPrimaryUrl = Array.from(byKey.values()).some(v => !v.isAnswerPdf && v.url === hw.pdfUrl);
+      if (!hasPrimaryUrl) {
+        const meta = this.classifyWorksheetPdfVariant(hw.fileName || hw.pdfUrl, 0);
+        const key = byKey.has(meta.key) ? 'hs_de' : meta.key;
+        byKey.set(key, {
+          ...meta,
+          key,
+          url: String(hw.pdfUrl).trim(),
+          fileName: hw.fileName || `${hw.code || hw.id || 'Phieu'}.pdf`,
+          storageKey: hw.id,
+          isAnswerPdf: false,
+          isDirectPracticePdf: true,
+          practicePriority: meta.practicePriority || 1
+        });
+      }
+    }
+
+    if (hw.solutionPdfUrl && !/^(tex:|idb_html:)/.test(String(hw.solutionPdfUrl))) {
+      const hasSol = Array.from(byKey.values()).some(v => v.isAnswerPdf);
+      if (!hasSol) {
+        const meta = this.classifyWorksheetPdfVariant('gv_dapan');
+        byKey.set('gv_dapan', {
+          ...meta,
+          key: 'gv_dapan',
+          url: String(hw.solutionPdfUrl).trim(),
+          fileName: hw.solutionFileName || `${hw.code || hw.id || 'Phieu'}-GV-DapAn.pdf`,
+          storageKey: `${hw.id}_sol`,
+          isAnswerPdf: true,
+          isDirectPracticePdf: false,
+          practicePriority: 99
+        });
+      }
+    }
+
+    const orderMap = {
+      hs_khongvd_khongoli: 1,
+      hs_de: 2,
+      hs_khongvd_cooli: 3,
+      hs_covd_khongoli: 4,
+      hs_covd_cooli: 5,
+      gv_dapan: 99
+    };
+
+    return Array.from(byKey.values())
+      .filter(v => includeSolution ? true : !v.isAnswerPdf)
+      .sort((a, b) => (orderMap[a.key] || 10) - (orderMap[b.key] || 10));
+  },
+
+  getDirectPracticePdfVariant(hw) {
+    if (!hw) return null;
+    const studentVars = this.getWorksheetPdfVariants(hw, { includeSolution: false });
+    if (studentVars.length === 0) return null;
+    const sorted = [...studentVars].sort((a, b) => {
+      const aDirect = a.isDirectPracticePdf ? 0 : 1;
+      const bDirect = b.isDirectPracticePdf ? 0 : 1;
+      if (aDirect !== bDirect) return aDirect - bDirect;
+      return (a.practicePriority || 10) - (b.practicePriority || 10);
+    });
+    return sorted[0] || studentVars[0];
+  },
+
   normalizeHomeworkRecord(hw) {
     if (!hw || typeof hw !== 'object') return hw;
     const seedHws = (typeof INITIAL_SEED_DATA !== 'undefined' && INITIAL_SEED_DATA.homeworks) ? INITIAL_SEED_DATA.homeworks : [];
@@ -1398,6 +1578,7 @@ const App = {
     hw.allowResubmit = hw.allowResubmit !== false;
     hw.allowViewSolution = hw.allowViewSolution !== false;
     hw.solutionFileName = hw.solutionFileName || '';
+    hw.texFileName = String(hw.texFileName || '').trim();
     hw.code = String(hw.code || '').trim();
     hw.chapterCode = String(hw.chapterCode || '').trim();
     hw.chapterTitle = String(hw.chapterTitle || '').trim();
@@ -1407,6 +1588,67 @@ const App = {
     hw.updatedLabel = String(hw.updatedLabel || hw.dateAdded || '').trim();
     hw.isCurriculumSlot = Boolean(hw.isCurriculumSlot);
     hw.orderIndex = Number.isFinite(Number(hw.orderIndex)) ? Number(hw.orderIndex) : 9999;
+
+    if (!Array.isArray(hw.part1)) hw.part1 = [];
+    if (!Array.isArray(hw.part2)) hw.part2 = [];
+    if (!Array.isArray(hw.part3)) hw.part3 = [];
+    if (!Array.isArray(hw.part4)) hw.part4 = [];
+
+    // Nếu phiếu có nội dung file .tex mà chưa tách đáp án thì tự động tách đáp án cho phần Làm trực tiếp
+    if (hw.texContent && typeof hw.texContent === 'string' && (hw.part1.length + hw.part2.length + hw.part3.length + hw.part4.length === 0)) {
+      const parsedTex = this.parseTexAnswerKey(hw.texContent);
+      hw.part1 = (parsedTex.p1 || []).map((a, i) => ({ id: i + 1, correct_answer: String(a || '').trim().toUpperCase() }));
+      hw.part2 = (parsedTex.p2 || []).map((obj, i) => ({
+        id: i + 1,
+        statements: ['a', 'b', 'c', 'd'].map(sub => ({ sub_id: sub, correct: Boolean(obj && obj[sub]) }))
+      }));
+      hw.part3 = (parsedTex.p3 || []).map((a, i) => ({ id: i + 1, correct_answer: String(a ?? '').trim() }));
+      hw.part4 = (parsedTex.p4 || []).map((a, i) => ({ id: i + 1, correct_answer: String(a ?? '').trim() }));
+    }
+
+    hw.part1 = hw.part1.map((q, idx) => (typeof q === 'object' && q !== null)
+      ? { id: q.id || (idx + 1), correct_answer: String(q.correct_answer || '').trim().toUpperCase(), ...(q.points !== undefined ? { points: q.points } : {}) }
+      : { id: idx + 1, correct_answer: String(q || '').trim().toUpperCase() }
+    );
+    hw.part2 = hw.part2.map((q, idx) => {
+      if (typeof q === 'object' && q !== null && Array.isArray(q.statements || q.items)) {
+        return {
+          id: q.id || (idx + 1),
+          statements: (q.statements || q.items).map(st => ({ sub_id: st.sub_id || st.key, correct: Boolean(st.correct) })),
+          ...(q.points !== undefined ? { points: q.points } : {})
+        };
+      }
+      return {
+        id: idx + 1,
+        statements: ['a', 'b', 'c', 'd'].map(sub => ({ sub_id: sub, correct: Boolean(q && q[sub]) }))
+      };
+    });
+    hw.part3 = hw.part3.map((q, idx) => (typeof q === 'object' && q !== null)
+      ? { id: q.id || (idx + 1), correct_answer: String(q.correct_answer ?? '').trim(), ...(q.points !== undefined ? { points: q.points } : {}) }
+      : { id: idx + 1, correct_answer: String(q ?? '').trim() }
+    );
+    hw.part4 = hw.part4.map((q, idx) => (typeof q === 'object' && q !== null)
+      ? { id: q.id || (idx + 1), correct_answer: String(q.correct_answer ?? '').trim(), ...(q.prompt ? { prompt: q.prompt } : {}), ...(q.points !== undefined ? { points: q.points } : {}) }
+      : { id: idx + 1, correct_answer: String(q ?? '').trim() }
+    );
+
+    if (Array.isArray(hw.pdfVariants) && hw.pdfVariants.length > 0) {
+      const allVars = this.getWorksheetPdfVariants(hw, { includeSolution: true });
+      hw.pdfVariants = allVars;
+      const directVar = this.getDirectPracticePdfVariant(hw);
+      if (directVar && (!hw.pdfUrl || /gv[-_]?dap[-_]?an/i.test(hw.pdfUrl))) {
+        hw.pdfUrl = directVar.url;
+        hw.fileName = directVar.fileName || hw.fileName || '';
+      }
+      const solVar = allVars.find(v => v.isAnswerPdf);
+      if (solVar && !hw.solutionPdfUrl) {
+        hw.solutionPdfUrl = solVar.url;
+        hw.solutionFileName = solVar.fileName || hw.solutionFileName || '';
+      }
+    } else {
+      hw.pdfVariants = [];
+    }
+
     hw.allowOnlineView = hw.allowOnlineView !== false;
     hw.allowDownload = hw.allowDownload !== false;
     hw.allowDirectPractice = isHwKind
@@ -1425,10 +1667,6 @@ const App = {
         : (hw.allowedClasses.length ? 'class' : (hw.allowedStudents.length ? 'selected' : 'grade'));
     }
     hw.allowedAll = hw.accessType === 'all';
-    if (!Array.isArray(hw.part1)) hw.part1 = [];
-    if (!Array.isArray(hw.part2)) hw.part2 = [];
-    if (!Array.isArray(hw.part3)) hw.part3 = [];
-    if (!Array.isArray(hw.part4)) hw.part4 = [];
     if (!hw.scoring || typeof hw.scoring !== 'object') {
       hw.scoring = { mode: 'equal', p1Total: null, p2Total: null, p3Total: null, p4Total: null };
     }
@@ -1631,8 +1869,11 @@ const App = {
 
   hasLocalOnlyPdf(item) {
     if (!item || typeof item !== 'object') return false;
-    return [item.pdf_url, item.solution_pdf_url, item.pdfUrl, item.solutionPdfUrl]
-      .some(u => typeof u === 'string' && u.startsWith('idb:'));
+    if ([item.pdf_url, item.solution_pdf_url, item.pdfUrl, item.solutionPdfUrl]
+      .some(u => typeof u === 'string' && u.startsWith('idb:'))) {
+      return true;
+    }
+    return Array.isArray(item.pdfVariants) && item.pdfVariants.some(v => v && typeof v.url === 'string' && v.url.startsWith('idb:'));
   },
 
   needsAutoServerUpload() {
@@ -1861,7 +2102,7 @@ const App = {
     return m ? m[1] : '';
   },
 
-  async downloadHomeworkPdf(hwId, isSolution = false) {
+  async downloadHomeworkPdf(hwId, isSolution = false, variantKey = null) {
     if (!this.state.currentUser && this.isStudentLoginRequiredForDocs()) {
       this.notify(
         'Chỉ có học sinh đã đăng nhập vào hệ thống mới được phép xem và tải tài liệu! Vui lòng đăng nhập bằng Mã học sinh.',
@@ -1885,7 +2126,30 @@ const App = {
       this.notify('Phiếu bài tập này đang ở chế độ Chỉ xem online trên Drive (không cho phép tải về in).', 'warning', 'Chỉ xem online');
       return false;
     }
-    const srcUrl = isSolution ? hw.solutionPdfUrl : hw.pdfUrl;
+
+    let srcUrl = isSolution ? hw.solutionPdfUrl : hw.pdfUrl;
+    let dlFileName = (isSolution ? hw.solutionFileName : hw.fileName) || '';
+    let cacheKey = isSolution ? `${hw.id}_sol` : hw.id;
+
+    if (variantKey) {
+      const allVars = this.getWorksheetPdfVariants(hw, { includeSolution: true });
+      const foundVar = allVars.find(v => v.key === variantKey);
+      if (foundVar) {
+        if (foundVar.isAnswerPdf && !isAdmin) {
+          const u = this.state.currentUser;
+          const latestSub = u ? this.getStudentLatestHwSubmission(hw.id, u.studentId) : null;
+          const dueMeta = this.getHomeworkDueStatus(hw);
+          if (hw.allowViewSolution === false || (hw.itemKind === 'homework' && !latestSub && !dueMeta.isOverdue)) {
+            this.notify('File đáp án & lời giải chỉ mở sau khi học sinh đã nộp bài!', 'warning', 'Chưa mở file đáp án');
+            return false;
+          }
+        }
+        srcUrl = foundVar.url;
+        dlFileName = foundVar.fileName || dlFileName;
+        cacheKey = foundVar.storageKey || cacheKey;
+      }
+    }
+
     if (!srcUrl) {
       this.notify('Mục này chưa có file PDF đính kèm!', 'warning', 'Chưa có file PDF');
       return false;
@@ -1898,7 +2162,6 @@ const App = {
       }
       return true;
     }
-    const cacheKey = isSolution ? `${hw.id}_sol` : hw.id;
     const resolved = await this.resolvePdfSourceUrl(srcUrl, cacheKey);
     if (!resolved) {
       this.notify('Không tải được file PDF này. Vui lòng kiểm tra kết nối mạng!', 'warning', 'Chưa tải được PDF');
@@ -1907,7 +2170,7 @@ const App = {
     if (typeof document !== 'undefined') {
       const a = document.createElement('a');
       a.href = resolved;
-      a.download = (isSolution ? hw.solutionFileName : hw.fileName) || `${cacheKey}.pdf`;
+      a.download = dlFileName || `${cacheKey}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -2363,6 +2626,18 @@ const App = {
           }
           if (hw.solutionPdfUrl && String(hw.solutionPdfUrl).startsWith('idb:')) {
             uploadJobs.push(uploadSlotIfNeeded(hw.solutionPdfUrl, `${hw.id}_sol`).then((u) => { hw.solutionPdfUrl = u; }));
+          }
+          if (Array.isArray(hw.pdfVariants)) {
+            for (const v of hw.pdfVariants) {
+              if (v && v.url && String(v.url).startsWith('idb:')) {
+                const vKey = v.storageKey || String(v.url).slice(4) || `${hw.id}_var_${v.key}`;
+                uploadJobs.push(uploadSlotIfNeeded(v.url, vKey).then((u) => {
+                  v.url = u;
+                  if (v.isAnswerPdf && (!hw.solutionPdfUrl || String(hw.solutionPdfUrl).startsWith('idb:'))) hw.solutionPdfUrl = u;
+                  if (v.isDirectPracticePdf && (!hw.pdfUrl || String(hw.pdfUrl).startsWith('idb:'))) hw.pdfUrl = u;
+                }));
+              }
+            }
           }
         }
         if (uploadJobs.length > 0) {
@@ -4542,34 +4817,37 @@ const App = {
 
   getHomeworkAsExamObject(hw) {
     if (!hw) return null;
-    const tMin = Math.max(0, parseInt(hw.time_minutes || 0, 10) || 0);
-    const p1 = Array.isArray(hw.part1) ? hw.part1 : [];
-    const p2 = Array.isArray(hw.part2) ? hw.part2 : [];
-    const p3 = Array.isArray(hw.part3) ? hw.part3 : [];
-    const rawP4 = Array.isArray(hw.part4) ? hw.part4 : [];
+    const normHw = this.normalizeHomeworkRecord({ ...hw });
+    const tMin = Math.max(0, parseInt(normHw.time_minutes || 0, 10) || 0);
+    const p1 = Array.isArray(normHw.part1) ? normHw.part1 : [];
+    const p2 = Array.isArray(normHw.part2) ? normHw.part2 : [];
+    const p3 = Array.isArray(normHw.part3) ? normHw.part3 : [];
+    const rawP4 = Array.isArray(normHw.part4) ? normHw.part4 : [];
     const hasAnyParts = (p1.length + p2.length + p3.length + rawP4.length) > 0;
     const p4 = hasAnyParts
       ? rawP4
-      : [{ id: 1, points: Number(hw.maxScore || 10) || 10, prompt: 'Làm bài trực tiếp theo Đề PDF bên trái (nhập đáp án/lời giải hoặc chụp ảnh vở nộp)' }];
+      : [{ id: 1, points: Number(normHw.maxScore || 10) || 10, prompt: 'Làm bài trực tiếp theo Đề PDF bên trái (nhập đáp án/lời giải hoặc chụp ảnh vở nộp)' }];
+    const directVar = this.getDirectPracticePdfVariant(normHw);
     return {
-      ...hw,
-      id: hw.id,
-      title: hw.title,
-      grade: Number(hw.grade || 12),
-      pdf_url: hw.pdfUrl || '',
-      pdf_name: hw.fileName || '',
-      solution_pdf_url: hw.solutionPdfUrl || '',
-      solution_pdf_name: hw.solutionFileName || '',
-      allow_view_answers: hw.allowViewSolution !== false,
+      ...normHw,
+      id: normHw.id,
+      title: normHw.title,
+      grade: Number(normHw.grade || 12),
+      pdf_url: directVar ? directVar.url : (normHw.pdfUrl || ''),
+      pdf_name: directVar ? directVar.fileName : (normHw.fileName || ''),
+      pdf_storage_key: directVar ? (directVar.storageKey || normHw.id) : normHw.id,
+      solution_pdf_url: normHw.solutionPdfUrl || '',
+      solution_pdf_name: normHw.solutionFileName || '',
+      allow_view_answers: normHw.allowViewSolution !== false,
       time_minutes: tMin > 0 ? tMin : 90,
       noTimeLimit: tMin <= 0,
       isHomeworkRoom: true,
-      homeworkRefId: hw.id,
+      homeworkRefId: normHw.id,
       part1: p1,
       part2: p2,
       part3: p3,
       part4: p4,
-      scoring: hw.scoring || { mode: 'equal', p1Total: null, p2Total: null, p3Total: null, p4Total: null }
+      scoring: normHw.scoring || { mode: 'equal', p1Total: null, p2Total: null, p3Total: null, p4Total: null }
     };
   },
 
@@ -7128,11 +7406,99 @@ const App = {
     `;
   },
 
+  getWorksheetTexStructureSummary(hw) {
+    if (!hw || typeof hw !== 'object') return { total: 0, label: '' };
+    const p1 = Array.isArray(hw.part1) ? hw.part1.filter(q => q && (q.correct_answer || typeof q === 'string')).length : 0;
+    const p2 = Array.isArray(hw.part2) ? hw.part2.length : 0;
+    const p3 = Array.isArray(hw.part3) ? hw.part3.filter(q => q && String(q.correct_answer ?? q ?? '').trim() !== '').length : 0;
+    const p4 = Array.isArray(hw.part4) ? hw.part4.length : 0;
+    const total = p1 + p2 + p3 + p4;
+    const segs = [];
+    if (p1 > 0) segs.push(`${p1} TN`);
+    if (p2 > 0) segs.push(`${p2} ĐS`);
+    if (p3 > 0) segs.push(`${p3} TLN`);
+    if (p4 > 0) segs.push(`${p4} TL`);
+    return { total, p1, p2, p3, p4, label: segs.join(' · ') };
+  },
+
+  renderWorksheetFileVariantsButtonsHtml(hw, { scope = 'student', layout = 'sheet' } = {}) {
+    const isAdmin = scope === 'admin';
+    const canOnline = isAdmin || hw.allowOnlineView !== false;
+    const canDownload = isAdmin || hw.allowDownload !== false;
+    const safeTitleJs = String(hw.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const studentVars = this.getWorksheetPdfVariants(hw, { includeSolution: false });
+
+    if (studentVars.length === 0) {
+      if (layout !== 'sheet') return '';
+      if (isAdmin) {
+        return `
+          <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold cursor-pointer whitespace-nowrap">
+            <i class="fa-solid fa-cloud-arrow-up mr-1"></i>Up File (.PDF / .TEX)
+          </button>
+        `;
+      }
+      if (hw.folderUrl) {
+        return `
+          <a href="${hw.folderUrl}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-semibold inline-flex items-center gap-1 whitespace-nowrap">
+            <i class="fa-regular fa-folder-open"></i><span>Thư mục (Chờ đề)</span>
+          </a>
+        `;
+      }
+      return '<span class="text-[11px] text-slate-400 italic">Đang cập nhật</span>';
+    }
+
+    if (studentVars.length === 1) {
+      const v = studentVars[0];
+      const isDriveFile = /drive\.google\.com/i.test(String(v.url || ''));
+      return `
+        <div class="inline-flex flex-wrap items-center justify-center gap-1">
+          ${canOnline ? `
+            <button type="button" onclick="App.openPdfModal('${safeTitleJs}', '${v.url}', '${v.storageKey || hw.id}', { docKind: '${v.key}', hwId: '${hw.id}' })" class="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap" title="Xem file trực tuyến">
+              <i class="${isDriveFile ? 'fa-brands fa-google-drive text-emerald-700' : 'fa-solid fa-eye'}"></i><span>Xem File</span>
+            </button>
+          ` : ''}
+          ${canDownload ? `
+            <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}', false, '${v.key}')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap" title="Tải file PDF về máy">
+              <i class="fa-solid fa-download text-slate-600"></i><span>Tải Về</span>
+            </button>
+          ` : '<span class="text-[10px] text-amber-700 font-semibold"><i class="fa-solid fa-ban mr-0.5"></i>Khóa tải</span>'}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="flex flex-col gap-1 text-left min-w-[215px]">
+        ${studentVars.map(v => {
+          const safeShortJs = String(v.shortLabel || 'Đề').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          return `
+            <div class="flex items-center justify-between gap-1.5 px-2 py-1 rounded-lg bg-slate-50/90 border border-slate-200/90" title="${this.escapeHtmlAttr(v.label)} (${this.escapeHtmlAttr(v.fileName)})">
+              <span class="px-1.5 py-0.2 rounded text-[10px] font-extrabold border truncate ${v.badgeCls || 'bg-indigo-50 text-indigo-800 border-indigo-200'}">
+                ${this.escapeHtmlAttr(v.shortLabel)}
+              </span>
+              <div class="inline-flex items-center gap-1 shrink-0">
+                ${canOnline ? `
+                  <button type="button" onclick="App.openPdfModal('${safeTitleJs} — ${safeShortJs}', '${v.url}', '${v.storageKey}', { docKind: '${v.key}', hwId: '${hw.id}' })" class="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer" title="Xem file ${this.escapeHtmlAttr(v.fileName)}">
+                    <i class="fa-solid fa-eye text-[9px]"></i><span>Xem</span>
+                  </button>
+                ` : ''}
+                ${canDownload ? `
+                  <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}', false, '${v.key}')" class="px-2 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer" title="Tải về ${this.escapeHtmlAttr(v.fileName)}">
+                    <i class="fa-solid fa-download text-[9px]"></i><span>Tải</span>
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  },
+
   renderCurriculumSheetHtml({ scope = 'student', items = [] } = {}) {
     const isAdmin = scope === 'admin';
     const u = this.state.currentUser;
     const grouped = this.groupCurriculumItems(items);
-    const colSpan = isAdmin ? 8 : 7;
+    const colSpan = isAdmin ? 7 : 6;
 
     if (items.length === 0) {
       return `
@@ -7159,12 +7525,11 @@ const App = {
             <thead>
               <tr>
                 <th class="w-24 text-center">STT / Mã</th>
-                <th class="min-w-[190px]">Bài Học</th>
-                <th class="min-w-[240px]">Phân Dạng &amp; Phiếu Bài Tập</th>
-                <th class="w-40 text-center">File Đề (Xem / In)</th>
-                <th class="w-36 text-center">Đáp Án PDF</th>
+                <th class="min-w-[180px]">Bài Học</th>
+                <th class="min-w-[230px]">Phân Dạng &amp; Phiếu Bài Tập</th>
+                <th class="min-w-[230px] text-center">File Đề (Xem / Tải Về)</th>
+                <th class="w-40 text-center">Đáp Án PDF</th>
                 <th class="w-36 text-center">Làm Trực Tiếp</th>
-                <th class="w-28 text-center">Nguồn / CN</th>
                 ${isAdmin ? '<th class="w-32 text-center">Thao tác GV</th>' : ''}
               </tr>
             </thead>
@@ -7199,19 +7564,18 @@ const App = {
                     </td>
                   </tr>
                   ${isCollapsed ? '' : chap.items.map(hw => {
-                    const hasPdf = Boolean(hw.pdfUrl);
+                    const hasPdf = Boolean(hw.pdfUrl || (Array.isArray(hw.pdfVariants) && hw.pdfVariants.length > 0));
                     const isHw = hw.itemKind === 'homework';
                     const isReady = hasPdf || isHw;
                     const safeTitleJs = String(hw.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                     const latestSub = (!isAdmin && u) ? this.getStudentLatestHwSubmission(hw.id, u.studentId) : null;
                     const dueMeta = this.getHomeworkDueStatus(hw);
-                    const canOnline = isAdmin || hw.allowOnlineView !== false;
                     const canDownload = isAdmin || hw.allowDownload !== false;
                     const canPractice = isAdmin || hw.allowDirectPractice !== false;
                     const canViewSol = Boolean(hw.solutionPdfUrl && (isAdmin || (hw.allowViewSolution !== false && (!isHw || latestSub || dueMeta.isOverdue))));
                     const sameLesson = prevLesson && hw.lessonTitle && prevLesson === hw.lessonTitle;
                     prevLesson = hw.lessonTitle || '';
-                    const isDriveFile = /drive\.google\.com/i.test(String(hw.pdfUrl || ''));
+                    const texSum = this.getWorksheetTexStructureSummary(hw);
 
                     return `
                       <tr class="ltac-sheet-row ${isReady ? 'ltac-sheet-ready' : ''}" data-sheet-row="${hw.id}">
@@ -7228,43 +7592,22 @@ const App = {
                           <div class="flex flex-wrap items-center gap-1 mt-1">
                             ${isHw ? `<span class="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-[#650f12] text-white">${hw.hwMode === 'interactive' ? 'BTVN Trực tuyến' : 'BTVN Ảnh vở'}</span>` : ''}
                             ${!canDownload && !isAdmin && hasPdf ? '<span class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200"><i class="fa-solid fa-lock mr-0.5"></i>Chỉ xem onl</span>' : ''}
-                            ${latestSub ? `<span class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">${latestSub.pendingManualGrade ? 'Đã nộp • Chờ chấm' : `Đã nộp: ${latestSub.scoreResult.totalScore}đ`}</span>` : ''}
+                            ${latestSub ? `<span class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">${latestSub.pendingManualGrade && latestSub.hwMode !== 'interactive' ? 'Đã nộp • Chờ chấm' : `Đã nộp: ${latestSub.scoreResult.totalScore}đ`}</span>` : ''}
                             ${isAdmin && Array.isArray(hw.allowedClasses) && hw.allowedClasses.length ? `<span class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">Lớp: ${hw.allowedClasses.join(', ')}</span>` : ''}
                           </div>
                         </td>
                         <td class="text-center">
-                          ${hasPdf ? `
-                            <div class="inline-flex flex-wrap items-center justify-center gap-1">
-                              ${canOnline ? `
-                                <button type="button" onclick="App.openPdfModal('${safeTitleJs}', '${hw.pdfUrl}', '${hw.id}')" class="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap" title="Xem trực tuyến kiểu Google Drive">
-                                  <i class="${isDriveFile ? 'fa-brands fa-google-drive text-emerald-700' : 'fa-solid fa-eye'}"></i><span>Xem Online</span>
-                                </button>
-                              ` : ''}
-                              ${canDownload ? `
-                                <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}')" class="px-2 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap" title="Tải file PDF về để in">
-                                  <i class="fa-solid fa-print text-slate-600"></i><span>Tải In</span>
-                                </button>
-                              ` : '<span class="text-[10px] text-amber-700 font-semibold"><i class="fa-solid fa-ban mr-0.5"></i>Khóa tải</span>'}
-                            </div>
-                          ` : (isAdmin ? `
-                            <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold cursor-pointer whitespace-nowrap">
-                              <i class="fa-solid fa-cloud-arrow-up mr-1"></i>Up Đề PDF
-                            </button>
-                          ` : (hw.folderUrl ? `
-                            <a href="${hw.folderUrl}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-semibold inline-flex items-center gap-1 whitespace-nowrap">
-                              <i class="fa-regular fa-folder-open"></i><span>Thư mục (Chờ đề)</span>
-                            </a>
-                          ` : '<span class="text-[11px] text-slate-400 italic">Đang cập nhật</span>'))}
+                          ${this.renderWorksheetFileVariantsButtonsHtml(hw, { scope, layout: 'sheet' })}
                         </td>
                         <td class="text-center">
                           ${hw.solutionPdfUrl ? (canViewSol ? `
-                            <div class="inline-flex items-center justify-center gap-1">
-                              <button type="button" onclick="App.openPdfModal('${safeTitleJs} — Đáp Án', '${hw.solutionPdfUrl}', '${hw.id}_sol', { docKind: 'solution' })" class="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap">
-                                <i class="fa-solid fa-check-double"></i><span>Xem Đáp Án</span>
+                            <div class="inline-flex flex-wrap items-center justify-center gap-1">
+                              <button type="button" onclick="App.openPdfModal('${safeTitleJs} — Đáp Án', '${hw.solutionPdfUrl}', '${hw.id}_sol', { docKind: 'gv_dapan', hwId: '${hw.id}' })" class="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap" title="Xem file Đáp án &amp; Lời giải chi tiết">
+                                <i class="fa-solid fa-eye"></i><span>Xem ĐA</span>
                               </button>
                               ${canDownload ? `
-                                <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}', true)" class="w-7 h-7 rounded-lg bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center justify-center cursor-pointer" title="Tải Đáp án PDF để in">
-                                  <i class="fa-solid fa-download text-[10px]"></i>
+                                <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}', true, 'gv_dapan')" class="px-2 py-1 rounded-lg bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap" title="Tải file Đáp án PDF về máy">
+                                  <i class="fa-solid fa-download text-[10px]"></i><span>Tải</span>
                                 </button>
                               ` : ''}
                             </div>
@@ -7276,14 +7619,13 @@ const App = {
                               <i class="fa-solid fa-camera"></i><span>${latestSub ? 'Nộp lại ảnh' : 'Nộp Ảnh Vở'}</span>
                             </button>
                           ` : (hasPdf && canPractice ? `
-                            <button type="button" onclick="App.launchWorksheetDirectPractice('${hw.id}')" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap">
-                              <i class="fa-solid fa-pen-to-square"></i><span>Làm Trực Tiếp</span>
-                            </button>
+                            <div class="inline-flex flex-col items-center gap-0.5">
+                              <button type="button" onclick="App.launchWorksheetDirectPractice('${hw.id}')" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap" title="Hiển thị file PDF không đáp án để làm bài và tự động đối chiếu đáp án từ file .tex">
+                                <i class="fa-solid fa-pen-to-square"></i><span>Làm Trực Tiếp</span>
+                              </button>
+                              ${texSum.total > 0 ? `<span class="text-[9.5px] font-mono font-bold text-indigo-700">${this.escapeHtmlAttr(texSum.label)}</span>` : ''}
+                            </div>
                           ` : '<span class="text-[11px] text-slate-400">—</span>')}
-                        </td>
-                        <td class="text-center text-[11px]">
-                          <div class="font-semibold ${hasPdf ? 'text-emerald-800' : 'text-slate-500'}">${this.escapeHtmlAttr(hw.sourceTag || (hasPdf ? 'PDF' : 'Chưa tải lên'))}</div>
-                          ${hw.updatedLabel ? `<div class="text-[10px] font-mono text-slate-400">${this.escapeHtmlAttr(hw.updatedLabel)}</div>` : ''}
                         </td>
                         ${isAdmin ? `
                           <td class="text-center">
@@ -7293,7 +7635,7 @@ const App = {
                                   <i class="fa-solid fa-list-check text-[11px]"></i>
                                 </button>
                               ` : ''}
-                              <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center justify-center cursor-pointer" title="Up PDF / Sửa phân quyền">
+                              <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center justify-center cursor-pointer" title="Up PDF / File .tex / Sửa phân quyền">
                                 <i class="fa-solid fa-pen text-[11px]"></i>
                               </button>
                               <button type="button" onclick="App.showAddHomeworkModal({ itemKind: 'document', grade: ${hw.grade || 12}, chapterCode: '${this.escapeHtmlAttr(hw.chapterCode || '')}', lessonTitle: '${this.escapeHtmlAttr(hw.lessonTitle || '')}', code: '${this.escapeHtmlAttr((hw.code || 'Phiếu') + ' (Mới)')}' })" class="w-7 h-7 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 inline-flex items-center justify-center cursor-pointer" title="Thêm phiếu mới vào đúng Bài học này">
@@ -7404,22 +7746,18 @@ const App = {
                                     <div class="min-w-0 flex-1">
                                       <div class="flex flex-wrap items-center gap-1.5 mb-0.5">
                                         <span class="px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-mono font-bold text-[10px]">${this.escapeHtmlAttr(hw.code || hw.id)}</span>
-                                        ${hw.sourceTag ? `<span class="px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 text-[10px] font-semibold">${this.escapeHtmlAttr(hw.sourceTag)}</span>` : ''}
+                                        ${this.getWorksheetTexStructureSummary(hw).total > 0 ? `<span class="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold"><i class="fa-solid fa-code mr-0.5"></i>${this.escapeHtmlAttr(this.getWorksheetTexStructureSummary(hw).label)}</span>` : ''}
                                         ${!canDownload && !isAdmin && hasPdf ? '<span class="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold"><i class="fa-solid fa-lock mr-0.5"></i>Chỉ xem onl</span>' : ''}
                                         ${latestSub ? `<span class="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">${latestSub.pendingManualGrade ? 'Đã nộp • Chờ chấm' : `Điểm: ${latestSub.scoreResult.totalScore}đ`}</span>` : ''}
                                       </div>
                                       <div class="text-xs sm:text-[13px] font-bold text-slate-900 leading-snug">${this.escapeHtmlAttr(hw.title)}</div>
+                                      ${hasPdf ? `<div class="mt-2">${this.renderWorksheetFileVariantsButtonsHtml(hw, { scope, layout: 'tree' })}</div>` : ''}
                                     </div>
                                   </div>
 
                                   <div class="flex flex-wrap items-center gap-1.5 shrink-0">
-                                    ${hasPdf && canOnline ? `
-                                      <button type="button" onclick="App.openPdfModal('${safeTitleJs}', '${hw.pdfUrl}', '${hw.id}')" class="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer">
-                                        <i class="fa-solid fa-eye"></i><span>Xem Online</span>
-                                      </button>
-                                    ` : ''}
                                     ${hasPdf && canPractice ? `
-                                      <button type="button" onclick="App.launchWorksheetDirectPractice('${hw.id}')" class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs">
+                                      <button type="button" onclick="App.launchWorksheetDirectPractice('${hw.id}')" class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs" title="Mở đề PDF không đáp án và chấm tự động theo đáp án file .tex">
                                         <i class="fa-solid fa-pen-to-square"></i><span>Làm Trực Tiếp</span>
                                       </button>
                                     ` : ''}
@@ -7428,15 +7766,17 @@ const App = {
                                         <i class="fa-solid fa-camera"></i><span>${latestSub ? 'Nộp lại' : 'Nộp Ảnh Vở'}</span>
                                       </button>
                                     ` : ''}
-                                    ${hasPdf && canDownload ? `
-                                      <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}')" class="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer">
-                                        <i class="fa-solid fa-print"></i><span>Tải In</span>
-                                      </button>
-                                    ` : ''}
                                     ${canViewSol ? `
-                                      <button type="button" onclick="App.openPdfModal('${safeTitleJs} — Đáp Án', '${hw.solutionPdfUrl}', '${hw.id}_sol', { docKind: 'solution' })" class="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer">
-                                        <i class="fa-solid fa-check-double"></i><span>Đáp Án</span>
-                                      </button>
+                                      <span class="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50/90 overflow-hidden shadow-2xs">
+                                        <button type="button" onclick="App.openPdfModal('${safeTitleJs} — Đáp Án', '${hw.solutionPdfUrl}', '${hw.id}_sol', { docKind: 'solution' })" class="px-2.5 py-1.5 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer">
+                                          <i class="fa-solid fa-check-double"></i><span>Xem ĐA</span>
+                                        </button>
+                                        ${canDownload ? `
+                                          <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}', true)" class="px-2 py-1.5 border-l border-emerald-200 bg-white/80 hover:bg-emerald-100 text-emerald-900 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer" title="Tải PDF Đáp Án">
+                                            <i class="fa-solid fa-download"></i><span>Tải</span>
+                                          </button>
+                                        ` : ''}
+                                      </span>
                                     ` : ''}
                                     ${isAdmin ? `
                                       <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold cursor-pointer">
@@ -7548,28 +7888,27 @@ const App = {
                   </div>
                   <h4 class="text-sm sm:text-base font-bold font-serif text-slate-900 truncate" title="${this.escapeHtmlAttr(hw.title)}">${hw.title}</h4>
                   <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">${hw.description || hw.lessonTitle || ''}</p>
-                  <div class="mt-2 text-[11px] text-slate-400 font-mono truncate">${hw.fileName || 'Tai_Lieu.pdf'} • ${hw.fileSize || 'PDF'}</div>
+                  <div class="mt-2 text-[11px] text-slate-400 font-mono truncate">${hw.fileName || 'Tai_Lieu.pdf'} • ${hw.fileSize || 'PDF'}${this.getWorksheetTexStructureSummary(hw).total > 0 ? ` • ${this.escapeHtmlAttr(this.getWorksheetTexStructureSummary(hw).label)}` : ''}</div>
 
-                  <div class="mt-3 flex flex-wrap items-center gap-2">
-                    ${hw.pdfUrl && canOnline ? `
-                      <button type="button" onclick="App.openPdfModal('${safeTitleJs}', '${hw.pdfUrl}', '${hw.id}')" class="ui-btn bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100">
-                        <i class="fa-solid fa-eye shrink-0"></i><span>Xem Online</span>
-                      </button>
-                    ` : ''}
+                  ${hw.pdfUrl ? `<div class="mt-2.5">${this.renderWorksheetFileVariantsButtonsHtml(hw, { scope: 'student', layout: 'card' })}</div>` : ''}
+
+                  <div class="mt-2.5 flex flex-wrap items-center gap-2">
                     ${hw.pdfUrl && canPractice ? `
-                      <button type="button" onclick="App.launchWorksheetDirectPractice('${hw.id}')" class="ui-btn bg-indigo-600 text-white hover:bg-indigo-700 font-bold">
+                      <button type="button" onclick="App.launchWorksheetDirectPractice('${hw.id}')" class="ui-btn bg-indigo-600 text-white hover:bg-indigo-700 font-bold" title="Mở đề PDF không đáp án và chấm tự động theo đáp án file .tex">
                         <i class="fa-solid fa-pen-to-square shrink-0"></i><span>Làm Trực Tiếp</span>
                       </button>
                     ` : ''}
-                    ${hw.pdfUrl && canDownload ? `
-                      <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}')" class="ui-btn bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200/80">
-                        <i class="fa-solid fa-print shrink-0"></i><span>Tải In</span>
-                      </button>
-                    ` : ''}
                     ${hw.solutionPdfUrl ? `
-                      <button type="button" onclick="App.openPdfModal('${safeTitleJs} — Đáp Án', '${hw.solutionPdfUrl}', '${hw.id}_sol', { docKind: 'solution' })" class="ui-btn bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
-                        <i class="fa-solid fa-check-double shrink-0"></i><span>Đáp Án</span>
-                      </button>
+                      <span class="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 overflow-hidden">
+                        <button type="button" onclick="App.openPdfModal('${safeTitleJs} — Đáp Án', '${hw.solutionPdfUrl}', '${hw.id}_sol', { docKind: 'solution' })" class="px-2.5 py-1.5 text-emerald-700 hover:bg-emerald-100 text-xs font-bold inline-flex items-center gap-1 cursor-pointer">
+                          <i class="fa-solid fa-check-double shrink-0"></i><span>Xem ĐA</span>
+                        </button>
+                        ${canDownload ? `
+                          <button type="button" onclick="App.downloadHomeworkPdf('${hw.id}', true)" class="px-2 py-1.5 border-l border-emerald-200 bg-white/80 hover:bg-emerald-100 text-emerald-900 text-xs font-bold inline-flex items-center gap-1 cursor-pointer" title="Tải PDF Đáp Án">
+                            <i class="fa-solid fa-download shrink-0"></i><span>Tải</span>
+                          </button>
+                        ` : ''}
+                      </span>
                     ` : ''}
                   </div>
                 </div>
@@ -8035,14 +8374,15 @@ const App = {
     this.state.paletteFilter = 'all';
     this.state.activePart3Target = { qId: 1, boxIdx: 0 };
 
-    const fastPdfUrl = examObj.pdf_url ? await this.resolveCachedPdfUrlFast(examObj.pdf_url, hw.id) : '';
+    const pdfKey = examObj.pdf_storage_key || hw.id;
+    const fastPdfUrl = examObj.pdf_url ? await this.resolveCachedPdfUrlFast(examObj.pdf_url, pdfKey) : '';
     this.state.resolvedPdfUrl = fastPdfUrl || '';
 
     this.render();
     this.startTimer();
 
     if (!fastPdfUrl && examObj.pdf_url) {
-      this.resolvePdfSourceUrl(examObj.pdf_url, hw.id).then((resolved) => {
+      this.resolvePdfSourceUrl(examObj.pdf_url, pdfKey).then((resolved) => {
         if (!resolved || !this.state.activeExam || this.state.activeExam.id !== hw.id) return;
         this.state.resolvedPdfUrl = resolved;
         this.mountPdfViewer('examRoomPdfViewer', resolved, { flowWithPage: this.isExamStackedFlowMode() });
@@ -13847,7 +14187,10 @@ const App = {
       .replace(/[\u2212\u2013\u2014]/g, '-')
       .trim();
     if (!keepReadableText) {
-      s = s.replace(/\s+/g, '').replace(/,/g, '.');
+      s = s
+        .replace(/^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*/, '')
+        .replace(/\s+/g, '')
+        .replace(/,/g, '.');
     } else {
       s = s.replace(/\s+/g, ' ');
     }
@@ -13866,11 +14209,17 @@ const App = {
 
     // Quét tiêu đề các Phần và tổng điểm từng phần nếu có trong file .tex
     const secMarkers = [];
-    const secRegex = /(?:PHẦN|PHAN)\s*(IV|III|II|I|[1-4])(?![IV0-9])([^\r\n]{0,160})|(?:\\section\*?|\bMỤC\b|\bPHẦN\b)[^\r\n]{0,40}?(TỰ\s*LUẬN)([^\r\n]{0,120})/gi;
+    const secRegex = /(?:PHẦN|PHAN)\s*(IV|III|II|I|[1-4])(?![IV0-9])([^\r\n]{0,160})|(?:\\section\*?|\bMỤC\b|\bPHẦN\b)[^\r\n]{0,40}?(TỰ\s*LUẬN)([^\r\n]{0,120})|\\(caulc|cauds|caukq|cautl)\b([^\r\n]{0,80})/gi;
     let sm;
     while ((sm = secRegex.exec(noComments)) !== null) {
       let secKey = null;
-      if (sm[3]) {
+      if (sm[5]) {
+        const macro = String(sm[5]).toLowerCase();
+        if (macro === 'caulc') secKey = 'p1';
+        else if (macro === 'cauds') secKey = 'p2';
+        else if (macro === 'caukq') secKey = 'p3';
+        else if (macro === 'cautl') secKey = 'p4';
+      } else if (sm[3]) {
         secKey = 'p4';
       } else {
         const tok = String(sm[1] || '').toUpperCase();
@@ -13881,7 +14230,7 @@ const App = {
       }
       if (secKey) {
         secMarkers.push({ pos: sm.index, sec: secKey });
-        const tail = (sm[2] || sm[4] || '');
+        const tail = (sm[2] || sm[4] || sm[6] || '');
         const ptM = tail.match(/(\d+(?:[.,]\d+)?)\s*(?:điểm|diem|đ(?![a-zA-ZÀ-ỹ]))/i);
         if (ptM) {
           sectionTotals[secKey + 'Total'] = Number(ptM[1].replace(',', '.'));
@@ -13898,12 +14247,14 @@ const App = {
       return cur;
     };
 
+    const hasStandardExEnvs = /\\begin\{(ex|bt|cauhoi)\}/i.test(noComments);
     const envRegex = /\\begin\{(ex|bt|vd|cauhoi)\}([\s\S]*?)\\end\{\1\}/gi;
     let em;
     let envCount = 0;
     while ((em = envRegex.exec(noComments)) !== null) {
-      envCount++;
       const envName = em[1].toLowerCase();
+      if (envName === 'vd' && hasStandardExEnvs) continue;
+      envCount++;
       const fullBody = em[2];
       const stem = this.stripLatexCommandWithArg(this.stripLatexCommandWithArg(fullBody, 'loigiai'), 'huongdan');
       const sec = sectionAtPos(em.index);
@@ -15514,6 +15865,18 @@ const App = {
   async switchPdfModalDoc(hwId, docKind = 'question') {
     const hw = this.findHomeworkById(hwId);
     if (!hw) return;
+    if (docKind !== 'question' && docKind !== 'solution') {
+      const variants = this.getWorksheetPdfVariants(hw, { includeSolution: true });
+      const found = variants.find(v => v.key === docKind);
+      if (found) {
+        const storageKey = found.isSolution ? `${hw.id}_sol` : `${hw.id}__${found.key}`;
+        await this.openPdfModal(`${hw.title || hw.code || 'Tài liệu'} — ${found.label}`, found.url, storageKey, {
+          docKind: found.isSolution ? 'solution' : found.key,
+          variantKey: found.key
+        });
+        return;
+      }
+    }
     const isSol = docKind === 'solution';
     const targetUrl = isSol ? hw.solutionPdfUrl : hw.pdfUrl;
     const targetKey = isSol ? `${hw.id}_sol` : hw.id;
@@ -15536,7 +15899,7 @@ const App = {
       return;
     }
 
-    const baseId = String(storageId || '').replace(/_sol$/, '');
+    const baseId = String(storageId || '').replace(/(?:_sol|__[a-z0-9_]+)$/i, '');
     const isViewingSol = /_sol$/.test(String(storageId || '')) || Boolean(opts && opts.docKind === 'solution');
     const hw = this.findHomeworkById(baseId);
     const isAdmin = Boolean(this.state.currentUser && this.state.currentUser.role === 'admin');
@@ -15567,7 +15930,10 @@ const App = {
     const u = this.state.currentUser;
     const hasSub = Boolean(hw && u && this.getStudentLatestHwSubmission(hw.id, u.studentId));
     const canViewSol = Boolean(hw && hw.solutionPdfUrl && (isAdmin || (hw.allowViewSolution !== false && (hw.itemKind !== 'homework' || hasSub || this.getHomeworkDueStatus(hw).isOverdue))));
-    const showDocSwitcher = Boolean(hw && hw.pdfUrl && canViewSol);
+    const allSwitcherVariants = hw ? this.getWorksheetPdfVariants(hw, { includeSolution: canViewSol }) : [];
+    const showDocSwitcher = Boolean(hw && (allSwitcherVariants.length > 1 || (hw.pdfUrl && canViewSol)));
+    const activeVariantKey = (opts && opts.variantKey)
+      || (isViewingSol ? 'gv_dapan' : (allSwitcherVariants.find(v => v.url === rawStr)?.key || (allSwitcherVariants[0]?.key || 'question')));
     const canPractice = Boolean(hw && hw.pdfUrl && (isAdmin || hw.allowDirectPractice !== false));
 
     const old = document.getElementById('previewPdfModal');
@@ -15597,13 +15963,25 @@ const App = {
 
           <div class="flex flex-wrap items-center gap-1.5 shrink-0">
             ${showDocSwitcher ? `
-              <div class="inline-flex items-center p-0.5 rounded-full bg-black/25 border border-white/15" id="pdfModalDocSwitcher">
-                <button type="button" onclick="App.switchPdfModalDoc('${hw.id}', 'question')" class="px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${!isViewingSol ? 'bg-[#ffe27d] text-[#3d0709] shadow-2xs' : 'text-white/85 hover:text-white'}">
-                  <i class="fa-regular fa-file-lines mr-1"></i>Đề PDF
-                </button>
-                <button type="button" onclick="App.switchPdfModalDoc('${hw.id}', 'solution')" class="px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${isViewingSol ? 'bg-emerald-400 text-[#1b3a2b] shadow-2xs' : 'text-white/85 hover:text-white'}">
-                  <i class="fa-solid fa-check-double mr-1"></i>Đáp Án
-                </button>
+              <div class="inline-flex flex-wrap items-center gap-0.5 p-0.5 rounded-full bg-black/25 border border-white/15" id="pdfModalDocSwitcher">
+                ${allSwitcherVariants.length > 1 ? allSwitcherVariants.map(v => {
+                  const isAct = v.key === activeVariantKey || (v.isSolution && isViewingSol);
+                  const activeCls = v.isSolution
+                    ? 'bg-emerald-400 text-[#1b3a2b] shadow-2xs'
+                    : 'bg-[#ffe27d] text-[#3d0709] shadow-2xs';
+                  return `
+                    <button type="button" onclick="App.switchPdfModalDoc('${hw.id}', '${v.isSolution ? 'solution' : v.key}')" class="px-2.5 py-1 rounded-full text-[10.5px] font-bold transition cursor-pointer ${isAct ? activeCls : 'text-white/85 hover:text-white'}" title="${this.escapeHtmlAttr(v.label)}">
+                      <i class="fa-solid ${v.isSolution ? 'fa-check-double' : 'fa-file-pdf'} mr-1"></i>${this.escapeHtmlAttr(v.shortLabel || v.label)}
+                    </button>
+                  `;
+                }).join('') : `
+                  <button type="button" onclick="App.switchPdfModalDoc('${hw.id}', 'question')" class="px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${!isViewingSol ? 'bg-[#ffe27d] text-[#3d0709] shadow-2xs' : 'text-white/85 hover:text-white'}">
+                    <i class="fa-regular fa-file-lines mr-1"></i>Đề PDF
+                  </button>
+                  <button type="button" onclick="App.switchPdfModalDoc('${hw.id}', 'solution')" class="px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${isViewingSol ? 'bg-emerald-400 text-[#1b3a2b] shadow-2xs' : 'text-white/85 hover:text-white'}">
+                    <i class="fa-solid fa-check-double mr-1"></i>Đáp Án
+                  </button>
+                `}
               </div>
             ` : ''}
 
@@ -15951,6 +16329,9 @@ const App = {
     this.cleanupUnusedHwPreupload();
     this.state.tempSelectedHwFile = null;
     this.state.tempSelectedHwSolFile = null;
+    this.state.tempSelectedHwVariantFiles = [];
+    this.state.tempSelectedHwTexName = '';
+    this.state.tempSelectedHwTexContent = '';
     this._hwPdfUploadToken = null;
     this._hwSolPdfUploadToken = null;
 
@@ -15965,7 +16346,13 @@ const App = {
       ? 'interactive'
       : (opts && opts.hwMode === 'interactive' ? 'interactive' : 'photo');
 
-    if (existingHw && initHwMode === 'interactive') {
+    const hasExistingKey = Boolean(existingHw && (
+      (Array.isArray(existingHw.part1) && existingHw.part1.length > 0) ||
+      (Array.isArray(existingHw.part2) && existingHw.part2.length > 0) ||
+      (Array.isArray(existingHw.part3) && existingHw.part3.length > 0) ||
+      (Array.isArray(existingHw.part4) && existingHw.part4.length > 0)
+    ));
+    if (existingHw && (initHwMode === 'interactive' || hasExistingKey || initKind === 'document')) {
       this.initAnswerKeyDraft(existingHw);
     } else {
       this.initAnswerKeyDraft(null);
@@ -16210,41 +16597,41 @@ const App = {
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="newHwFilesGrid">
-            <!-- File PDF Đề bài / Tài liệu -->
+            <!-- File PDF Đề bài / Các bản HS + File .tex -->
             <div class="space-y-2">
               <label id="newHwFileLabel" class="block font-bold text-slate-700">
-                <i class="fa-solid fa-file-pdf text-red-500 mr-1"></i>${initKind === 'homework' ? (initHwMode === 'photo' ? 'File PDF Đề bài (Tùy chọn)' : 'File PDF Đề BTVN *') : 'File PDF Phiếu Bài Tập / Đề'}
+                <i class="fa-solid fa-file-pdf text-red-500 mr-1"></i>${initKind === 'homework' ? (initHwMode === 'photo' ? 'File PDF Đề bài (Tùy chọn)' : 'File PDF Đề BTVN &amp; File .tex *') : 'Các Bản PDF Học Sinh &amp; File .tex (Chọn nhiều file)'}
               </label>
               <div id="newHwDropZone" data-drop-target="newHwFileInput" class="border-2 border-dashed border-indigo-200 rounded-xl p-3.5 text-center bg-indigo-50/40 hover:bg-indigo-50/80 transition cursor-pointer">
-                <input type="file" id="newHwFileInput" accept=".pdf,application/pdf" class="hidden" onchange="App.handleHwFileSelect(event)">
+                <input type="file" id="newHwFileInput" multiple accept=".pdf,.tex,application/pdf,text/plain,application/x-tex" class="hidden" onchange="App.handleHwFileSelect(event)">
                 <label for="newHwFileInput" class="cursor-pointer block">
                   <i class="fa-solid fa-cloud-arrow-up text-xl text-indigo-600 mb-1"></i>
-                  <div class="text-xs font-bold text-slate-800">Kéo thả hoặc bấm chọn PDF Đề</div>
-                  <div id="newHwFileBadge" class="text-[11px] text-slate-500 mt-1 truncate">${existingHw && existingHw.fileName ? `Đang dùng: ${existingHw.fileName}` : 'Tự động lưu Supabase / IndexedDB'}</div>
+                  <div class="text-xs font-bold text-slate-800">Chọn 1 hoặc nhiều bản PDF + File <code class="font-mono text-indigo-700">.tex</code></div>
+                  <div id="newHwFileBadge" class="text-[11px] text-slate-500 mt-1 truncate">${existingHw && existingHw.fileName ? `Đang dùng: ${existingHw.fileName}${existingHw.texFileName ? ` • ${existingHw.texFileName}` : ''}` : 'Tự nhận diện HS-KhongVD-KhongOli, CoOli, CoVD, GV-DapAn &amp; .tex'}</div>
                 </label>
               </div>
-              <input type="url" id="newHwExternalPdfUrl" value="${this.escapeHtmlAttr(existingHw && existingHw.pdfUrl && !String(existingHw.pdfUrl).startsWith('idb:') ? existingHw.pdfUrl : '')}" placeholder="Hoặc dán Link Google Drive / URL PDF Đề..." class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-[11px] font-mono text-slate-700 focus:border-indigo-600 outline-none">
+              <input type="url" id="newHwExternalPdfUrl" value="${this.escapeHtmlAttr(existingHw && existingHw.pdfUrl && !String(existingHw.pdfUrl).startsWith('idb:') ? existingHw.pdfUrl : '')}" placeholder="Hoặc dán Link Google Drive / URL PDF Đề (không đáp án)..." class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-[11px] font-mono text-slate-700 focus:border-indigo-600 outline-none">
             </div>
 
             <!-- File PDF Đáp án / Lời giải -->
             <div id="newHwSolDropWrap" class="space-y-2">
               <label class="block font-bold text-slate-700">
-                <i class="fa-solid fa-file-circle-check text-emerald-600 mr-1"></i>File PDF Đáp Án / Lời Giải (Tùy chọn)
+                <i class="fa-solid fa-file-circle-check text-emerald-600 mr-1"></i>File PDF GV Đáp Án / Lời Giải (Tùy chọn)
               </label>
               <div id="newHwSolDropZone" data-drop-target="newHwSolFileInput" class="border-2 border-dashed border-emerald-200 rounded-xl p-3.5 text-center bg-emerald-50/40 hover:bg-emerald-50/80 transition cursor-pointer">
-                <input type="file" id="newHwSolFileInput" accept=".pdf,application/pdf" class="hidden" onchange="App.handleHwSolFileSelect(event)">
+                <input type="file" id="newHwSolFileInput" accept=".pdf,.tex,application/pdf,text/plain,application/x-tex" class="hidden" onchange="App.handleHwSolFileSelect(event)">
                 <label for="newHwSolFileInput" class="cursor-pointer block">
                   <i class="fa-solid fa-file-shield text-xl text-emerald-600 mb-1"></i>
-                  <div class="text-xs font-bold text-slate-800">Kéo thả hoặc bấm chọn PDF Đáp Án</div>
-                  <div id="newHwSolFileBadge" class="text-[11px] text-slate-500 mt-1 truncate">${existingHw && existingHw.solutionFileName ? `Đang dùng: ${existingHw.solutionFileName}` : 'Mở xem song song Đề và Đáp án'}</div>
+                  <div class="text-xs font-bold text-slate-800">Chọn PDF Đáp Án (<code class="font-mono text-emerald-700">*-GV-DapAn.pdf</code>) hoặc <code class="font-mono text-emerald-700">.tex</code></div>
+                  <div id="newHwSolFileBadge" class="text-[11px] text-slate-500 mt-1 truncate">${existingHw && existingHw.solutionFileName ? `Đang dùng: ${existingHw.solutionFileName}` : 'Mở xem &amp; tải Đáp án chi tiết'}</div>
                 </label>
               </div>
               <input type="url" id="newHwExternalSolUrl" value="${this.escapeHtmlAttr(existingHw && existingHw.solutionPdfUrl && !String(existingHw.solutionPdfUrl).startsWith('idb:') ? existingHw.solutionPdfUrl : '')}" placeholder="Hoặc dán Link Google Drive / URL PDF Đáp án..." class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-[11px] font-mono text-slate-700 focus:border-emerald-600 outline-none">
             </div>
           </div>
 
-          <!-- Bảng đáp án chấm tự động (chỉ hiện khi BTVN ở chế độ interactive) -->
-          <div id="newHwInteractiveKeyWrap" class="${initKind === 'homework' && initHwMode === 'interactive' ? '' : 'hidden'}">
+          <!-- Bảng đáp án chấm tự động từ file .tex (hiện cho cả Phiếu Bài Tập làm trực tiếp & BTVN interactive) -->
+          <div id="newHwInteractiveKeyWrap" class="${(initKind === 'document' || (initKind === 'homework' && initHwMode === 'interactive')) ? '' : 'hidden'}">
             <div id="answerKeyEditorHost" data-drop-target="ansKeyEditorSmart">
               ${this.renderAnswerKeyEditorHtml()}
             </div>
@@ -16285,7 +16672,7 @@ const App = {
     document.getElementById('newHwMaxScoreWrap')?.classList.toggle('hidden', hwMode !== 'photo');
     document.getElementById('newHwTimeMinutesWrap')?.classList.toggle('hidden', hwMode !== 'interactive');
     document.getElementById('newHwSolDropWrap')?.classList.remove('hidden');
-    document.getElementById('newHwInteractiveKeyWrap')?.classList.toggle('hidden', !(kind === 'homework' && hwMode === 'interactive'));
+    document.getElementById('newHwInteractiveKeyWrap')?.classList.toggle('hidden', !(kind === 'document' || (kind === 'homework' && hwMode === 'interactive')));
 
     const filesGrid = document.getElementById('newHwFilesGrid');
     if (filesGrid) {
@@ -16293,7 +16680,7 @@ const App = {
     }
     const fileLbl = document.getElementById('newHwFileLabel');
     if (fileLbl) {
-      fileLbl.innerHTML = `<i class="fa-solid fa-file-pdf text-red-500 mr-1"></i>${kind === 'homework' ? (hwMode === 'photo' ? 'File PDF Đề bài (Tùy chọn)' : 'File PDF Đề BTVN *') : 'File PDF Phiếu Bài Tập / Đề'}`;
+      fileLbl.innerHTML = `<i class="fa-solid fa-file-pdf text-red-500 mr-1"></i>${kind === 'homework' ? (hwMode === 'photo' ? 'File PDF Đề bài (Tùy chọn)' : 'File PDF Đề BTVN &amp; File .tex *') : 'Các Bản PDF Học Sinh &amp; File .tex (Chọn nhiều file)'}`;
     }
     const submitTxt = document.getElementById('addHwSubmitBtnText');
     if (submitTxt && !this._editingHomeworkId) {
@@ -16573,9 +16960,87 @@ const App = {
     this.render();
   },
 
-  handleHwFileSelect(event) {
-    const file = event.target.files[0];
-    if (!file) return;
+  async readTextFromUploadedFile(file) {
+    if (!file) return '';
+    if (typeof file._text === 'string') return file._text;
+    if (typeof file.text === 'function') {
+      try { return await file.text(); } catch (_) {}
+    }
+    if (typeof FileReader !== 'undefined') {
+      return await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(String(ev?.target?.result || ''));
+        reader.onerror = () => resolve('');
+        reader.readAsText(file, 'utf-8');
+      });
+    }
+    return '';
+  },
+
+  stripWorksheetVariantSuffix(fileName) {
+    return String(fileName || '')
+      .replace(/\.(?:pdf|tex)$/i, '')
+      .replace(/(?:\s*[-_.]+\s*(?:GV[-_.]*(?:Dap[-_.]*An|Loi[-_.]*Giai|LG|ANS)|HS[-_.]*(?:Co|Khong|Ko)[-_.]*VD(?:[-_.]*(?:Co|Khong|Ko)[-_.]*(?:Oli|O[-_.]*ly))?|ans|dapan|dap[-_]?an|loigiai|loi[-_]?giai|lg|sol|solution|de|debai|de[-_]?bai))+$/i, '')
+      .trim();
+  },
+
+  async handleHwFileSelect(event) {
+    const selectedFiles = Array.from(event?.target?.files || []);
+    if (selectedFiles.length === 0) return;
+
+    const texFiles = selectedFiles.filter(f => /\.tex$/i.test(f.name || ''));
+    const pdfFiles = selectedFiles.filter(f => /\.pdf$/i.test(f.name || ''));
+
+    if (texFiles.length > 0) {
+      const texFile = texFiles[0];
+      const rawTex = await this.readTextFromUploadedFile(texFile);
+      this.state.tempSelectedHwTexName = texFile.name;
+      this.state.tempSelectedHwTexContent = rawTex;
+      if (rawTex) {
+        this.importAnswerKeyFromTexOrText(rawTex, texFile.name);
+        document.getElementById('newHwInteractiveKeyWrap')?.classList.remove('hidden');
+      }
+      const titleEl = document.getElementById('newHwTitle');
+      if (titleEl && !titleEl.value.trim()) {
+        titleEl.value = this.stripWorksheetVariantSuffix(texFile.name).replace(/[_-]+/g, ' ').trim();
+      }
+    }
+
+    if (pdfFiles.length === 0) {
+      const badge = document.getElementById('newHwFileBadge');
+      if (badge && texFiles.length > 0) {
+        badge.innerHTML = `<span class="text-emerald-700 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-code"></i>Đã nạp đáp án từ: ${this.escapeHtmlAttr(texFiles[0].name)}</span>`;
+      }
+      return;
+    }
+
+    if (!Array.isArray(this.state.tempSelectedHwVariantFiles)) {
+      this.state.tempSelectedHwVariantFiles = [];
+    }
+    pdfFiles.forEach(pf => {
+      const meta = this.classifyWorksheetPdfVariant(pf.name);
+      const existingIdx = this.state.tempSelectedHwVariantFiles.findIndex(x => x.meta.key === meta.key);
+      if (existingIdx !== -1) this.state.tempSelectedHwVariantFiles[existingIdx] = { file: pf, meta };
+      else this.state.tempSelectedHwVariantFiles.push({ file: pf, meta });
+    });
+    this.state.tempSelectedHwVariantFiles.sort((a, b) => (a.meta.order || 99) - (b.meta.order || 99));
+
+    const solEntry = this.state.tempSelectedHwVariantFiles.find(x => x.meta.isSolution);
+    if (solEntry) {
+      this.state.tempSelectedHwSolFile = solEntry.file;
+      const solBadge = document.getElementById('newHwSolFileBadge');
+      if (solBadge) {
+        solBadge.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>Đã ghép Đáp án: ${this.escapeHtmlAttr(solEntry.file.name)}</span>`;
+      }
+    }
+
+    const stuEntries = this.state.tempSelectedHwVariantFiles.filter(x => !x.meta.isSolution);
+    const primaryEntry = stuEntries.find(x => x.meta.key === 'hs_khongvd_khongoli')
+      || stuEntries.find(x => x.meta.isNoAnswerPractice)
+      || stuEntries[0]
+      || this.state.tempSelectedHwVariantFiles[0];
+    const file = primaryEntry ? primaryEntry.file : pdfFiles[0];
+
     this._preuploadedHwPdfUrl = '';
     if (this._preuploadedHwPdfPromise) {
       const oldP = this._preuploadedHwPdfPromise;
@@ -16586,13 +17051,17 @@ const App = {
     const badge = document.getElementById('newHwFileBadge');
     const titleEl = document.getElementById('newHwTitle');
     if (titleEl && !titleEl.value.trim()) {
-      titleEl.value = file.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim();
+      titleEl.value = this.stripWorksheetVariantSuffix(file.name).replace(/[_-]+/g, ' ').trim();
     }
+    const multiSummary = this.state.tempSelectedHwVariantFiles.length > 1
+      ? ` (${this.state.tempSelectedHwVariantFiles.length} bản PDF${this.state.tempSelectedHwTexName ? ` + ${this.state.tempSelectedHwTexName}` : ''})`
+      : (this.state.tempSelectedHwTexName ? ` (+ ${this.state.tempSelectedHwTexName})` : '');
+
     if (this.isServerSyncEnabled()) {
       const token = Symbol('hwPdf');
       this._hwPdfUploadToken = token;
       if (badge) {
-        badge.innerHTML = `<span class="text-indigo-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-spinner fa-spin"></i>Đã chọn: ${file.name} (${sizeMb} MB) — Đang tải <span id="hwPdfUploadPct">0%</span>...</span>`;
+        badge.innerHTML = `<span class="text-indigo-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-spinner fa-spin"></i>Đề làm trực tiếp: ${this.escapeHtmlAttr(file.name)}${this.escapeHtmlAttr(multiSummary)} — Đang tải <span id="hwPdfUploadPct">0%</span>...</span>`;
       }
       this._preuploadedHwPdfPromise = this.uploadPdfToServer('HW_' + Date.now(), file, (pct) => {
         if (this._hwPdfUploadToken !== token) return;
@@ -16603,28 +17072,42 @@ const App = {
           if (this._hwPdfUploadToken === token) {
             this._preuploadedHwPdfUrl = serverUrl || '';
             const b = document.getElementById('newHwFileBadge');
-            if (b) b.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-cloud-arrow-up"></i>Đã lưu đám mây: ${file.name} (${sizeMb} MB)</span>`;
+            if (b) b.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-cloud-arrow-up"></i>Đã lưu đám mây: ${this.escapeHtmlAttr(file.name)}${this.escapeHtmlAttr(multiSummary)} (${sizeMb} MB)</span>`;
           }
           return serverUrl;
         })
         .catch(() => {
           if (this._hwPdfUploadToken === token) {
             const b = document.getElementById('newHwFileBadge');
-            if (b) b.innerHTML = `<span class="text-amber-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>Lưu tạm: ${file.name} (${sizeMb} MB)</span>`;
+            if (b) b.innerHTML = `<span class="text-amber-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>Lưu tạm: ${this.escapeHtmlAttr(file.name)}${this.escapeHtmlAttr(multiSummary)} (${sizeMb} MB)</span>`;
           }
           return '';
         });
     } else {
       this._preuploadedHwPdfPromise = null;
       if (badge) {
-        badge.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>Đã chọn: ${file.name} (${sizeMb} MB)</span>`;
+        badge.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>Đề làm trực tiếp: ${this.escapeHtmlAttr(file.name)}${this.escapeHtmlAttr(multiSummary)} (${sizeMb} MB)</span>`;
       }
     }
   },
 
-  handleHwSolFileSelect(event) {
-    const file = event.target.files[0];
+  async handleHwSolFileSelect(event) {
+    const file = event?.target?.files?.[0];
     if (!file) return;
+    if (/\.tex$/i.test(file.name || '')) {
+      const rawTex = await this.readTextFromUploadedFile(file);
+      this.state.tempSelectedHwTexName = file.name;
+      this.state.tempSelectedHwTexContent = rawTex;
+      if (rawTex) {
+        this.importAnswerKeyFromTexOrText(rawTex, file.name);
+        document.getElementById('newHwInteractiveKeyWrap')?.classList.remove('hidden');
+      }
+      const badge = document.getElementById('newHwSolFileBadge');
+      if (badge) {
+        badge.innerHTML = `<span class="text-emerald-600 font-bold inline-flex items-center gap-1"><i class="fa-solid fa-code"></i>Đã trích xuất đáp án từ: ${this.escapeHtmlAttr(file.name)}</span>`;
+      }
+      return;
+    }
     this._preuploadedHwSolPdfUrl = '';
     if (this._preuploadedHwSolPdfPromise) {
       const oldP = this._preuploadedHwSolPdfPromise;
@@ -16769,9 +17252,62 @@ const App = {
         if (solutionPdfUrl) this.setPdfCacheVersion(solKey, solutionPdfUrl);
       }
 
-      const parts = (itemKind === 'homework' && hwMode === 'interactive')
+      const variantEntries = Array.isArray(this.state.tempSelectedHwVariantFiles) ? this.state.tempSelectedHwVariantFiles : [];
+      const savedVariants = Array.isArray(existingHw?.pdfVariants) ? existingHw.pdfVariants.map(v => ({ ...v })) : [];
+      for (const vEntry of variantEntries) {
+        if (!vEntry || !vEntry.file || !vEntry.meta) continue;
+        const vFile = vEntry.file;
+        const vMeta = vEntry.meta;
+        let vUrl = '';
+        if (vFile === file && pdfUrl) {
+          vUrl = pdfUrl;
+        } else if (vFile === solFile && solutionPdfUrl) {
+          vUrl = solutionPdfUrl;
+        } else {
+          const vStorageKey = vMeta.isSolution ? `${hwId}_sol` : `${hwId}__${vMeta.key}`;
+          if (typeof PDFStorage !== 'undefined') {
+            await PDFStorage.savePdf(vStorageKey, vFile);
+          }
+          if (this.isServerSyncEnabled()) {
+            try { vUrl = await this.uploadPdfToServer(vStorageKey, vFile); } catch (_) {}
+          }
+          if (!vUrl && typeof PDFStorage !== 'undefined') {
+            vUrl = `idb:${vStorageKey}`;
+          }
+          if (vUrl) this.setPdfCacheVersion(vStorageKey, vUrl);
+        }
+        if (vUrl) {
+          const nextVar = {
+            key: vMeta.key,
+            label: vMeta.label,
+            shortLabel: vMeta.shortLabel,
+            url: vUrl,
+            fileName: vFile.name,
+            isSolution: Boolean(vMeta.isSolution),
+            isNoAnswerPractice: Boolean(vMeta.isNoAnswerPractice)
+          };
+          const eIdx = savedVariants.findIndex(x => x.key === vMeta.key);
+          if (eIdx !== -1) savedVariants[eIdx] = nextVar;
+          else savedVariants.push(nextVar);
+        }
+      }
+
+      const shouldKeepAnswerKey = (itemKind === 'document') || (itemKind === 'homework' && hwMode === 'interactive');
+      const draftParts = shouldKeepAnswerKey
         ? this.buildPartsFromDraft(this.state.answerKeyDraft)
         : { scoring: {}, part1: [], part2: [], part3: [], part4: [] };
+      const hasDraftQuestions = (draftParts.part1.length + draftParts.part2.length + draftParts.part3.length + draftParts.part4.length) > 0;
+      const parts = hasDraftQuestions
+        ? draftParts
+        : (shouldKeepAnswerKey && existingHw
+          ? {
+              scoring: existingHw.scoring || {},
+              part1: Array.isArray(existingHw.part1) ? existingHw.part1 : [],
+              part2: Array.isArray(existingHw.part2) ? existingHw.part2 : [],
+              part3: Array.isArray(existingHw.part3) ? existingHw.part3 : [],
+              part4: Array.isArray(existingHw.part4) ? existingHw.part4 : []
+            }
+          : { scoring: {}, part1: [], part2: [], part3: [], part4: [] });
       const nowDateStr = new Date().toLocaleDateString('vi-VN');
 
       const record = this.normalizeHomeworkRecord({
@@ -16790,6 +17326,8 @@ const App = {
         fileSize,
         solutionPdfUrl,
         solutionFileName,
+        pdfVariants: savedVariants,
+        texFileName: this.state.tempSelectedHwTexName || existingHw?.texFileName || '',
         sourceTag: pdfUrl ? (/drive\.google\.com/i.test(pdfUrl) ? 'Google Drive' : 'PDF Cloud') : (existingHw?.sourceTag || 'Chưa tải lên'),
         updatedLabel: nowDateStr,
         allowOnlineView,
@@ -16837,6 +17375,9 @@ const App = {
       this.saveData({ markAdminDirty: true, skipAutoPush: true });
       this.state.tempSelectedHwFile = null;
       this.state.tempSelectedHwSolFile = null;
+      this.state.tempSelectedHwVariantFiles = [];
+      this.state.tempSelectedHwTexName = '';
+      this.state.tempSelectedHwTexContent = '';
       this._preuploadedHwPdfPromise = null;
       this._preuploadedHwSolPdfPromise = null;
       this._preuploadedHwPdfUrl = '';
@@ -16888,35 +17429,56 @@ const App = {
     );
   },
 
-  // --- TẢI LÊN HÀNG LOẠT PHIẾU BÀI TẬP (TỰ ĐỘNG GHÉP CẶP ĐỀ .PDF + ĐÁP ÁN -ANS.PDF) ---
+  // --- TẢI LÊN HÀNG LOẠT PHIẾU BÀI TẬP (TỰ ĐỘNG GHÉP CÁC BẢN ĐỀ .PDF + ĐÁP ÁN -GV-DapAn.PDF + FILE .TEX) ---
   pairBatchWorksheetFiles(fileList) {
-    const files = Array.from(fileList || []).filter(f => f && f.name && /\.pdf$/i.test(f.name));
+    const files = Array.from(fileList || []).filter(f => f && f.name && /\.(?:pdf|tex)$/i.test(f.name));
     const map = new Map();
-    const solRe = /(?:\s*[-_.]\s*(?:ans|dapan|dap[-_]?an|loigiai|loi[-_]?giai|lg|sol|solution))\.pdf$/i;
 
     files.forEach(file => {
-      const isSol = solRe.test(file.name);
-      const rawStem = isSol ? file.name.replace(solRe, '') : file.name.replace(/\.pdf$/i, '');
-      const key = rawStem.trim().toLowerCase();
+      const isTex = /\.tex$/i.test(file.name);
+      const rawStem = this.stripWorksheetVariantSuffix(file.name) || file.name.replace(/\.(?:pdf|tex)$/i, '').trim();
+      const key = rawStem.toLowerCase();
       if (!map.has(key)) {
         const cleanTitle = rawStem.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
-        const codeMatch = cleanTitle.match(/(?:Dạng|Dang|Phiếu|Phieu|Đề|De)\s*0*\d+/i);
+        const codeMatch = cleanTitle.match(/(?:Dạng|Dang|Phiếu|Phieu|Đề|De|Mức|Muc)\s*0*\d+/i);
         map.set(key, {
           key,
-          stem: rawStem.trim(),
+          stem: rawStem,
           code: codeMatch ? codeMatch[0].replace(/\s+/g, ' ') : '',
           title: cleanTitle,
           questionFile: null,
-          solutionFile: null
+          solutionFile: null,
+          texFile: null,
+          variantFiles: []
         });
       }
       const entry = map.get(key);
-      if (isSol) entry.solutionFile = file;
-      else entry.questionFile = file;
+      if (isTex) {
+        entry.texFile = file;
+      } else {
+        const meta = this.classifyWorksheetPdfVariant(file.name);
+        const existingIdx = entry.variantFiles.findIndex(x => x.meta.key === meta.key);
+        if (existingIdx !== -1) entry.variantFiles[existingIdx] = { file, meta };
+        else entry.variantFiles.push({ file, meta });
+      }
     });
 
-    // Nếu file chỉ có hậu tố đáp án mà không có file đề cùng stem, bỏ qua câu không có đề hoặc giữ tùy người dùng xem
-    return Array.from(map.values()).filter(p => p.questionFile);
+    const result = [];
+    map.forEach(entry => {
+      entry.variantFiles.sort((a, b) => (a.meta.order || 99) - (b.meta.order || 99));
+      const solEntry = entry.variantFiles.find(x => x.meta.isSolution);
+      if (solEntry) entry.solutionFile = solEntry.file;
+      const stuEntries = entry.variantFiles.filter(x => !x.meta.isSolution);
+      const bestNoAns = stuEntries.find(x => x.meta.key === 'hs_khongvd_khongoli')
+        || stuEntries.find(x => x.meta.isNoAnswerPractice)
+        || stuEntries[0]
+        || null;
+      if (bestNoAns) entry.questionFile = bestNoAns.file;
+      if (entry.questionFile || entry.texFile) {
+        result.push(entry);
+      }
+    });
+    return result;
   },
 
   showBatchWorksheetModal(preset = {}) {
@@ -16939,8 +17501,8 @@ const App = {
               <i class="fa-solid fa-layer-group text-base"></i>
             </div>
             <div class="min-w-0">
-              <h3 class="font-extrabold text-sm sm:text-base text-white">Tải Lên Hàng Loạt Phiếu Bài Tập PDF</h3>
-              <p class="text-[11px] text-[#ffe27d] truncate">Chọn cùng lúc nhiều PDF — tự động ghép cặp Đề (TenFile.pdf) + Đáp án (TenFile-ANS.pdf / _DapAn.pdf)</p>
+              <h3 class="font-extrabold text-sm sm:text-base text-white">Tải Lên Hàng Loạt Phiếu Bài Tập (.PDF &amp; .TEX)</h3>
+              <p class="text-[11px] text-[#ffe27d] truncate">Tự động gom các bản PDF HS (Có/Không VD, Có/Không Ô ly), GV-DapAn.pdf và lấy đáp án từ file .tex</p>
             </div>
           </div>
           <button type="button" onclick="document.getElementById('batchWorksheetModal')?.remove()" class="w-8 h-8 rounded-full bg-white/15 hover:bg-rose-600 text-white flex items-center justify-center cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
@@ -16977,16 +17539,16 @@ const App = {
             </label>
             <label class="inline-flex items-center gap-2 cursor-pointer font-bold text-slate-700">
               <input type="checkbox" id="batchAllowPractice" checked class="rounded text-amber-600">
-              <span>Bật làm bài trực tiếp</span>
+              <span>Bật làm bài trực tiếp (tự chấm từ .tex)</span>
             </label>
           </div>
 
           <div class="border-2 border-dashed border-emerald-300 hover:border-emerald-500 rounded-2xl p-5 text-center bg-emerald-50/40 cursor-pointer transition">
-            <input type="file" id="batchWorksheetFilesInput" accept=".pdf,application/pdf" multiple class="hidden" onchange="App.handleBatchWorksheetFileSelect(event)">
+            <input type="file" id="batchWorksheetFilesInput" accept=".pdf,.tex,application/pdf,text/plain,application/x-tex" multiple class="hidden" onchange="App.handleBatchWorksheetFileSelect(event)">
             <label for="batchWorksheetFilesInput" class="cursor-pointer block space-y-1">
               <i class="fa-solid fa-cloud-arrow-up text-3xl text-emerald-600"></i>
-              <div class="text-sm font-extrabold text-slate-800">Bấm để chọn nhiều file PDF cùng lúc (Đề + Đáp án *-ANS.pdf)</div>
-              <p class="text-[11px] text-slate-500">Hỗ trợ ghép tự động <code class="font-mono">Phieu1.pdf</code> với <code class="font-mono">Phieu1-ANS.pdf</code> hoặc <code class="font-mono">Phieu1_DapAn.pdf</code></p>
+              <div class="text-sm font-extrabold text-slate-800">Bấm chọn cùng lúc các bản PDF &amp; File <code class="font-mono text-indigo-700">.tex</code></div>
+              <p class="text-[11px] text-slate-500">Hỗ trợ ghép tự động <code class="font-mono">*-HS-KhongVD-KhongOli.pdf</code>, <code class="font-mono">*-HS-CoVD-CoOli.pdf</code>, <code class="font-mono">*-GV-DapAn.pdf</code> và trích xuất đáp án từ <code class="font-mono">*.tex</code></p>
             </label>
           </div>
 
@@ -17004,29 +17566,48 @@ const App = {
     this.openModalElement(modal);
   },
 
-  handleBatchWorksheetFileSelect(event) {
+  async handleBatchWorksheetFileSelect(event) {
     const pairs = this.pairBatchWorksheetFiles(event?.target?.files || []);
+    for (const p of pairs) {
+      if (p.texFile) {
+        p.texContent = await this.readTextFromUploadedFile(p.texFile);
+        p.parsedTex = p.texContent ? this.parseTexAnswerKey(p.texContent) : null;
+      }
+    }
     this.state.tempBatchHwPairs = pairs;
     const host = document.getElementById('batchWorksheetPreviewList');
     if (!host) return;
     if (pairs.length === 0) {
-      host.innerHTML = '<div class="p-4 text-center text-xs text-amber-800 bg-amber-50 rounded-xl border border-amber-200">Không phát hiện file Đề PDF hợp lệ nào trong số các file vừa chọn.</div>';
+      host.innerHTML = '<div class="p-4 text-center text-xs text-amber-800 bg-amber-50 rounded-xl border border-amber-200">Không phát hiện file PDF hoặc .tex hợp lệ nào trong số các file vừa chọn.</div>';
       return;
     }
     host.innerHTML = `
-      <div class="text-xs font-extrabold text-emerald-800 mb-1.5">Đã nhận diện ${pairs.length} phiếu bài tập sẵn sàng tải lên:</div>
+      <div class="text-xs font-extrabold text-emerald-800 mb-1.5">Đã nhận diện ${pairs.length} bộ phiếu bài tập sẵn sàng tải lên:</div>
       <div class="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden bg-white">
-        ${pairs.map((p, idx) => `
-          <div class="p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div class="min-w-0 flex-1">
-              <div class="font-bold text-slate-900 truncate">${idx + 1}. ${this.escapeHtmlAttr(p.title)}</div>
-              <div class="text-[11px] font-mono text-slate-500 truncate">Đề: ${this.escapeHtmlAttr(p.questionFile.name)} ${p.solutionFile ? `• Đáp án: ${this.escapeHtmlAttr(p.solutionFile.name)}` : '• Chưa kèm đáp án'}</div>
+        ${pairs.map((p, idx) => {
+          const parsedCount = p.parsedTex
+            ? ((p.parsedTex.p1?.length || 0) + (p.parsedTex.p2?.length || 0) + (p.parsedTex.p3?.length || 0) + (p.parsedTex.p4?.length || 0))
+            : 0;
+          return `
+            <div class="p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div class="min-w-0 flex-1">
+                <div class="font-bold text-slate-900 truncate">${idx + 1}. ${this.escapeHtmlAttr(p.title)}</div>
+                <div class="text-[11px] font-mono text-slate-500 truncate">
+                  ${p.questionFile ? `Đề làm bài: ${this.escapeHtmlAttr(p.questionFile.name)}` : 'Chưa có PDF Đề'}
+                  ${p.variantFiles && p.variantFiles.length > 1 ? ` • ${p.variantFiles.length} bản PDF` : ''}
+                  ${p.solutionFile ? ` • ĐA: ${this.escapeHtmlAttr(p.solutionFile.name)}` : ''}
+                  ${p.texFile ? ` • TeX: ${this.escapeHtmlAttr(p.texFile.name)} (${parsedCount} câu)` : ''}
+                </div>
+              </div>
+              <div class="flex items-center gap-1">
+                ${p.texFile ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800"><i class="fa-solid fa-code mr-0.5"></i>Đáp án .tex (${parsedCount} câu)</span>` : ''}
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${p.solutionFile ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
+                  ${p.variantFiles ? `${p.variantFiles.length} file PDF` : (p.solutionFile ? 'Đủ Đề + Đáp án' : 'Chỉ Đề PDF')}
+                </span>
+              </div>
             </div>
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${p.solutionFile ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
-              ${p.solutionFile ? 'Đủ Đề + Đáp án' : 'Chỉ Đề PDF'}
-            </span>
-          </div>
-        `).join('')}
+          `;
+        }).join('')}
       </div>
     `;
   },
@@ -17034,7 +17615,7 @@ const App = {
   async handleBatchWorksheetSubmit() {
     const pairs = Array.isArray(this.state.tempBatchHwPairs) ? this.state.tempBatchHwPairs : [];
     if (pairs.length === 0) {
-      this.notify('Vui lòng chọn ít nhất 1 file PDF Đề bài để tải lên hàng loạt!', 'warning', 'Chưa chọn file');
+      this.notify('Vui lòng chọn ít nhất 1 file PDF hoặc .tex để tải lên hàng loạt!', 'warning', 'Chưa chọn file');
       return 0;
     }
     const grade = parseInt(document.getElementById('batchHwGrade')?.value || '12', 10) || 12;
@@ -17059,11 +17640,13 @@ const App = {
       const p = pairs[i];
       const hwId = `HW-${baseTs}-${i + 1}`;
       let pdfUrl = '';
-      if (typeof PDFStorage !== 'undefined') await PDFStorage.savePdf(hwId, p.questionFile);
-      if (this.isServerSyncEnabled()) {
-        try { pdfUrl = await this.uploadPdfToServer(hwId, p.questionFile); } catch (_) {}
+      if (p.questionFile) {
+        if (typeof PDFStorage !== 'undefined') await PDFStorage.savePdf(hwId, p.questionFile);
+        if (this.isServerSyncEnabled()) {
+          try { pdfUrl = await this.uploadPdfToServer(hwId, p.questionFile); } catch (_) {}
+        }
+        if (!pdfUrl && typeof PDFStorage !== 'undefined') pdfUrl = `idb:${hwId}`;
       }
-      if (!pdfUrl && typeof PDFStorage !== 'undefined') pdfUrl = `idb:${hwId}`;
 
       let solutionPdfUrl = '';
       let solutionFileName = '';
@@ -17077,6 +17660,42 @@ const App = {
         if (!solutionPdfUrl && typeof PDFStorage !== 'undefined') solutionPdfUrl = `idb:${solKey}`;
       }
 
+      const savedVariants = [];
+      for (const vEntry of (p.variantFiles || [])) {
+        if (!vEntry || !vEntry.file || !vEntry.meta) continue;
+        const vFile = vEntry.file;
+        const vMeta = vEntry.meta;
+        let vUrl = '';
+        if (vFile === p.questionFile && pdfUrl) {
+          vUrl = pdfUrl;
+        } else if (vFile === p.solutionFile && solutionPdfUrl) {
+          vUrl = solutionPdfUrl;
+        } else {
+          const vStorageKey = vMeta.isSolution ? `${hwId}_sol` : `${hwId}__${vMeta.key}`;
+          if (typeof PDFStorage !== 'undefined') await PDFStorage.savePdf(vStorageKey, vFile);
+          if (this.isServerSyncEnabled()) {
+            try { vUrl = await this.uploadPdfToServer(vStorageKey, vFile); } catch (_) {}
+          }
+          if (!vUrl && typeof PDFStorage !== 'undefined') vUrl = `idb:${vStorageKey}`;
+        }
+        if (vUrl) {
+          savedVariants.push({
+            key: vMeta.key,
+            label: vMeta.label,
+            shortLabel: vMeta.shortLabel,
+            url: vUrl,
+            fileName: vFile.name,
+            isSolution: Boolean(vMeta.isSolution),
+            isNoAnswerPractice: Boolean(vMeta.isNoAnswerPractice)
+          });
+        }
+      }
+
+      let texContent = p.texContent || '';
+      if (!texContent && p.texFile) {
+        texContent = await this.readTextFromUploadedFile(p.texFile);
+      }
+
       const rec = this.normalizeHomeworkRecord({
         id: hwId,
         code: p.code || `Phiếu ${i + 1}`,
@@ -17088,10 +17707,13 @@ const App = {
         grade,
         description: lessonTitle || 'Phiếu bài tập luyện tập chuyên đề',
         pdfUrl,
-        fileName: p.questionFile.name,
-        fileSize: `${(Number(p.questionFile.size || 0) / 1024 / 1024).toFixed(1)} MB`,
+        fileName: p.questionFile ? p.questionFile.name : (p.texFile ? p.texFile.name : ''),
+        fileSize: p.questionFile ? `${(Number(p.questionFile.size || 0) / 1024 / 1024).toFixed(1)} MB` : 'TeX',
         solutionPdfUrl,
         solutionFileName,
+        pdfVariants: savedVariants,
+        texFileName: p.texFile ? p.texFile.name : '',
+        texContent,
         sourceTag: 'PDF Batch',
         updatedLabel: todayVi,
         dateAdded: todayIso,

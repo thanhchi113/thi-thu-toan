@@ -302,7 +302,171 @@ const CURRICULUM_DATA = {
         12
       ],
       "allowedClasses": [],
-      "allowedStudents": []
+      "allowedStudents": [],
+      "texFileName": "Phieu_01_Tong_Hop_22_Cau.tex",
+      "part1": [
+        {
+          "id": 1,
+          "correct_answer": "D"
+        },
+        {
+          "id": 2,
+          "correct_answer": "C"
+        },
+        {
+          "id": 3,
+          "correct_answer": "B"
+        },
+        {
+          "id": 4,
+          "correct_answer": "A"
+        },
+        {
+          "id": 5,
+          "correct_answer": "C"
+        },
+        {
+          "id": 6,
+          "correct_answer": "C"
+        },
+        {
+          "id": 7,
+          "correct_answer": "D"
+        },
+        {
+          "id": 8,
+          "correct_answer": "C"
+        },
+        {
+          "id": 9,
+          "correct_answer": "D"
+        },
+        {
+          "id": 10,
+          "correct_answer": "B"
+        },
+        {
+          "id": 11,
+          "correct_answer": "A"
+        },
+        {
+          "id": 12,
+          "correct_answer": "C"
+        }
+      ],
+      "part2": [
+        {
+          "id": 1,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": false
+            },
+            {
+              "sub_id": "b",
+              "correct": true
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": true
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": false
+            },
+            {
+              "sub_id": "b",
+              "correct": true
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": false
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": false
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": true
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        }
+      ],
+      "part3": [
+        {
+          "id": 1,
+          "correct_answer": "-2"
+        },
+        {
+          "id": 2,
+          "correct_answer": "5"
+        },
+        {
+          "id": 3,
+          "correct_answer": "-1"
+        },
+        {
+          "id": 4,
+          "correct_answer": "4"
+        },
+        {
+          "id": 5,
+          "correct_answer": "-4"
+        },
+        {
+          "id": 6,
+          "correct_answer": "10"
+        }
+      ],
+      "part4": []
     },
     {
       "id": "CUR-12-D02",
@@ -334,7 +498,133 @@ const CURRICULUM_DATA = {
         12
       ],
       "allowedClasses": [],
-      "allowedStudents": []
+      "allowedStudents": [],
+      "texFileName": "Phieu_02_Trac_Nghiem_30_Cau.tex",
+      "part1": [
+        {
+          "id": 1,
+          "correct_answer": "D"
+        },
+        {
+          "id": 2,
+          "correct_answer": "B"
+        },
+        {
+          "id": 3,
+          "correct_answer": "D"
+        },
+        {
+          "id": 4,
+          "correct_answer": "A"
+        },
+        {
+          "id": 5,
+          "correct_answer": "B"
+        },
+        {
+          "id": 6,
+          "correct_answer": "D"
+        },
+        {
+          "id": 7,
+          "correct_answer": "D"
+        },
+        {
+          "id": 8,
+          "correct_answer": "A"
+        },
+        {
+          "id": 9,
+          "correct_answer": "C"
+        },
+        {
+          "id": 10,
+          "correct_answer": "C"
+        },
+        {
+          "id": 11,
+          "correct_answer": "D"
+        },
+        {
+          "id": 12,
+          "correct_answer": "C"
+        },
+        {
+          "id": 13,
+          "correct_answer": "B"
+        },
+        {
+          "id": 14,
+          "correct_answer": "C"
+        },
+        {
+          "id": 15,
+          "correct_answer": "D"
+        },
+        {
+          "id": 16,
+          "correct_answer": "B"
+        },
+        {
+          "id": 17,
+          "correct_answer": "C"
+        },
+        {
+          "id": 18,
+          "correct_answer": "C"
+        },
+        {
+          "id": 19,
+          "correct_answer": "C"
+        },
+        {
+          "id": 20,
+          "correct_answer": "B"
+        },
+        {
+          "id": 21,
+          "correct_answer": "C"
+        },
+        {
+          "id": 22,
+          "correct_answer": "D"
+        },
+        {
+          "id": 23,
+          "correct_answer": "B"
+        },
+        {
+          "id": 24,
+          "correct_answer": "C"
+        },
+        {
+          "id": 25,
+          "correct_answer": "B"
+        },
+        {
+          "id": 26,
+          "correct_answer": "A"
+        },
+        {
+          "id": 27,
+          "correct_answer": "A"
+        },
+        {
+          "id": 28,
+          "correct_answer": "D"
+        },
+        {
+          "id": 29,
+          "correct_answer": "A"
+        },
+        {
+          "id": 30,
+          "correct_answer": "A"
+        }
+      ],
+      "part2": [],
+      "part3": [],
+      "part4": []
     },
     {
       "id": "CUR-12-D03",
@@ -366,7 +656,328 @@ const CURRICULUM_DATA = {
         12
       ],
       "allowedClasses": [],
-      "allowedStudents": []
+      "allowedStudents": [],
+      "texFileName": "Phieu_03_Dung_Sai_15_Cau.tex",
+      "part1": [],
+      "part2": [
+        {
+          "id": 1,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": true
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": false
+            },
+            {
+              "sub_id": "b",
+              "correct": true
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": false
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": false
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": false
+            },
+            {
+              "sub_id": "b",
+              "correct": true
+            },
+            {
+              "sub_id": "c",
+              "correct": true
+            },
+            {
+              "sub_id": "d",
+              "correct": false
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": true
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": true
+            },
+            {
+              "sub_id": "d",
+              "correct": false
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": false
+            },
+            {
+              "sub_id": "b",
+              "correct": true
+            },
+            {
+              "sub_id": "c",
+              "correct": true
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": false
+            },
+            {
+              "sub_id": "b",
+              "correct": true
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": false
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": true
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": true
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": false
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": true
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        },
+        {
+          "id": 14,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": true
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": true
+            }
+          ]
+        }
+      ],
+      "part3": [],
+      "part4": []
     },
     {
       "id": "CUR-12-D04",
@@ -398,7 +1009,73 @@ const CURRICULUM_DATA = {
         12
       ],
       "allowedClasses": [],
-      "allowedStudents": []
+      "allowedStudents": [],
+      "texFileName": "Phieu_04_Tra_Loi_Ngan_15_Cau.tex",
+      "part1": [],
+      "part2": [],
+      "part3": [
+        {
+          "id": 1,
+          "correct_answer": "2"
+        },
+        {
+          "id": 2,
+          "correct_answer": "2"
+        },
+        {
+          "id": 3,
+          "correct_answer": "3"
+        },
+        {
+          "id": 4,
+          "correct_answer": "2"
+        },
+        {
+          "id": 5,
+          "correct_answer": "2024"
+        },
+        {
+          "id": 6,
+          "correct_answer": "2"
+        },
+        {
+          "id": 7,
+          "correct_answer": "-9/4"
+        },
+        {
+          "id": 8,
+          "correct_answer": "3"
+        },
+        {
+          "id": 9,
+          "correct_answer": "3"
+        },
+        {
+          "id": 10,
+          "correct_answer": "-3"
+        },
+        {
+          "id": 11,
+          "correct_answer": "42"
+        },
+        {
+          "id": 12,
+          "correct_answer": "-3"
+        },
+        {
+          "id": 13,
+          "correct_answer": "9"
+        },
+        {
+          "id": 14,
+          "correct_answer": "0"
+        },
+        {
+          "id": 15,
+          "correct_answer": "4"
+        }
+      ],
+      "part4": []
     },
     {
       "id": "CUR-12-D05",
@@ -1592,16 +2269,16 @@ const CURRICULUM_DATA = {
       "grade": 12,
       "chapterCode": "Chương 5",
       "lessonTitle": "Bài 1. Phương trình mặt phẳng",
-      "title": "Dạng 1. Xác định vectơ pháp tuyến và viết phương trình mặt phẳng theo các điều kiện",
-      "description": "Bài 1. Phương trình mặt phẳng",
-      "pdfUrl": "",
-      "fileName": "",
-      "fileSize": "",
+      "title": "Phiếu bài tập 01: Phương trình mặt phẳng – Mức nhận biết (Vectơ pháp tuyến & PTTQ mặt phẳng)",
+      "description": "Bài 1. Phương trình mặt phẳng — Gồm 5 phiên bản PDF (HS Không VD/Có VD • Không Ô Ly/Có Ô Ly & GV Đáp Án) + Đáp án chấm trực tiếp từ file .tex",
+      "pdfUrl": "pdfs/PTMP_Muc1-HS-KhongVD-KhongOli.pdf",
+      "fileName": "PTMP_Muc1-HS-KhongVD-KhongOli.pdf",
+      "fileSize": "0.3 MB",
       "folderUrl": "https://drive.google.com/drive/folders/1sLokIC4GUuw42sSDgetOU5FAI8wr85Ay",
-      "solutionPdfUrl": "",
-      "solutionFileName": "",
+      "solutionPdfUrl": "pdfs/PTMP_Muc1-GV-DapAn.pdf",
+      "solutionFileName": "PTMP_Muc1-GV-DapAn.pdf",
       "sourceTag": "Chưa tải lên",
-      "updatedLabel": "",
+      "updatedLabel": "18/11/2026",
       "itemKind": "document",
       "hwMode": "none",
       "accessType": "grade",
@@ -1614,7 +2291,177 @@ const CURRICULUM_DATA = {
         12
       ],
       "allowedClasses": [],
-      "allowedStudents": []
+      "allowedStudents": [],
+      "texFileName": "PTMP_Muc1.tex",
+      "pdfVariants": [
+        {
+          "key": "hs_khongvd_khongoli",
+          "shortLabel": "HS · K.VD · K.Ôly",
+          "label": "Đề Bài Tập Không Đáp Án (HS - Không VD - Không Ô Ly)",
+          "url": "pdfs/PTMP_Muc1-HS-KhongVD-KhongOli.pdf",
+          "fileName": "PTMP_Muc1-HS-KhongVD-KhongOli.pdf",
+          "isAnswerPdf": false,
+          "isDirectPracticePdf": true
+        },
+        {
+          "key": "hs_khongvd_cooli",
+          "shortLabel": "HS · K.VD · Có Ôly",
+          "label": "Phiếu Bài Tập Có Ô Ly (HS - Không VD - Có Ô Ly)",
+          "url": "pdfs/PTMP_Muc1-HS-KhongVD-CoOli.pdf",
+          "fileName": "PTMP_Muc1-HS-KhongVD-CoOli.pdf",
+          "isAnswerPdf": false,
+          "isDirectPracticePdf": false
+        },
+        {
+          "key": "hs_covd_khongoli",
+          "shortLabel": "HS · Có VD · K.Ôly",
+          "label": "Phiếu Lý Thuyết + VD + Bài Tập (HS - Có VD - Không Ô Ly)",
+          "url": "pdfs/PTMP_Muc1-HS-CoVD-KhongOli.pdf",
+          "fileName": "PTMP_Muc1-HS-CoVD-KhongOli.pdf",
+          "isAnswerPdf": false,
+          "isDirectPracticePdf": false
+        },
+        {
+          "key": "hs_covd_cooli",
+          "shortLabel": "HS · Có VD · Có Ôly",
+          "label": "Phiếu Đầy Đủ Lý Thuyết + VD + Bài Tập Có Ô Ly (HS - Có VD - Có Ô Ly)",
+          "url": "pdfs/PTMP_Muc1-HS-CoVD-CoOli.pdf",
+          "fileName": "PTMP_Muc1-HS-CoVD-CoOli.pdf",
+          "isAnswerPdf": false,
+          "isDirectPracticePdf": false
+        },
+        {
+          "key": "gv_dapan",
+          "shortLabel": "GV · Đáp Án",
+          "label": "Bản Giáo Viên — Lời Giải Chi Tiết & Bảng Đáp Án (GV - DapAn)",
+          "url": "pdfs/PTMP_Muc1-GV-DapAn.pdf",
+          "fileName": "PTMP_Muc1-GV-DapAn.pdf",
+          "isAnswerPdf": true,
+          "isDirectPracticePdf": false
+        }
+      ],
+      "part1": [
+        {
+          "id": 1,
+          "correct_answer": "C"
+        },
+        {
+          "id": 2,
+          "correct_answer": "D"
+        },
+        {
+          "id": 3,
+          "correct_answer": "D"
+        },
+        {
+          "id": 4,
+          "correct_answer": "C"
+        },
+        {
+          "id": 5,
+          "correct_answer": "C"
+        },
+        {
+          "id": 6,
+          "correct_answer": "A"
+        },
+        {
+          "id": 7,
+          "correct_answer": "A"
+        },
+        {
+          "id": 8,
+          "correct_answer": "A"
+        },
+        {
+          "id": 9,
+          "correct_answer": "D"
+        },
+        {
+          "id": 10,
+          "correct_answer": "C"
+        },
+        {
+          "id": 11,
+          "correct_answer": "D"
+        },
+        {
+          "id": 12,
+          "correct_answer": "B"
+        }
+      ],
+      "part2": [
+        {
+          "id": 1,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": true
+            },
+            {
+              "sub_id": "c",
+              "correct": false
+            },
+            {
+              "sub_id": "d",
+              "correct": false
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "statements": [
+            {
+              "sub_id": "a",
+              "correct": true
+            },
+            {
+              "sub_id": "b",
+              "correct": false
+            },
+            {
+              "sub_id": "c",
+              "correct": true
+            },
+            {
+              "sub_id": "d",
+              "correct": false
+            }
+          ]
+        }
+      ],
+      "part3": [
+        {
+          "id": 1,
+          "correct_answer": "8"
+        },
+        {
+          "id": 2,
+          "correct_answer": "8"
+        },
+        {
+          "id": 3,
+          "correct_answer": "-4"
+        },
+        {
+          "id": 4,
+          "correct_answer": "1"
+        }
+      ],
+      "part4": [
+        {
+          "id": 1,
+          "correct_answer": "Cặp VTCP: AB, AD; VTPT: AA'"
+        },
+        {
+          "id": 2,
+          "correct_answer": "n_P = (3;-5;7), n_Q = (1;1;0); A(1;3;1) thuộc (P), B(1;2;3) không thuộc (P)"
+        }
+      ]
     },
     {
       "id": "CUR-12-D43",
@@ -5263,9 +6110,9 @@ const CURRICULUM_DATA = {
   ]
 };
 
-if (typeof window !== "undefined") {
+if (typeof window !== 'undefined') {
   window.CURRICULUM_DATA = CURRICULUM_DATA;
 }
-if (typeof module !== "undefined" && module.exports) {
+if (typeof module !== 'undefined' && module.exports) {
   module.exports = CURRICULUM_DATA;
 }
