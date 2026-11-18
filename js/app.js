@@ -183,6 +183,7 @@ const App = {
       studentCompareScope: 'both',       // 'both' (Lớp mình & Toàn khối) | 'class' (Chỉ Lớp mình) | 'grade' (Chỉ Toàn khối)
       anonymizeOtherStudents: true,      // Ẩn thông tin các bạn khác để bảo vệ sự riêng tư
       allowStudentViewAnswers: true,     // Cho phép học sinh xem đáp án & lời giải sau khi nộp
+      requireStudentLoginForDocs: true,  // Chỉ có học sinh đăng nhập vào mới được phép truy cập xem và tải tài liệu
       warnOnExitExam: true,              // Cảnh báo & ghi nhận vi phạm khi thoát ra ngoài lúc đang thi (Điện thoại / App / Web)
       warnOnScreenshot: true,            // Phát âm thanh & cảnh báo khi học sinh chụp màn hình lúc đang thi
       rewardCatalog: null,               // Danh mục phần thưởng đổi điểm (null -> dùng DEFAULT_REWARD_CATALOG)
@@ -1523,6 +1524,7 @@ const App = {
       studentCompareScope: 'both',
       anonymizeOtherStudents: true,
       allowStudentViewAnswers: true,
+      requireStudentLoginForDocs: true,
       warnOnExitExam: true,
       warnOnScreenshot: true,
       rewardCatalog: null,
@@ -1860,6 +1862,14 @@ const App = {
   },
 
   async downloadHomeworkPdf(hwId, isSolution = false) {
+    if (!this.state.currentUser && this.isStudentLoginRequiredForDocs()) {
+      this.notify(
+        'Chỉ có học sinh đã đăng nhập vào hệ thống mới được phép xem và tải tài liệu! Vui lòng đăng nhập bằng Mã học sinh.',
+        'warning',
+        'Yêu cầu đăng nhập Học sinh'
+      );
+      return false;
+    }
     const hw = this.findHomeworkById(hwId);
     if (!hw) return false;
     const isAdmin = this.state.currentUser && this.state.currentUser.role === 'admin';
@@ -4307,12 +4317,19 @@ const App = {
     };
   },
 
+  isStudentLoginRequiredForDocs() {
+    if (!this.state.settings) return true;
+    return this.state.settings.requireStudentLoginForDocs !== false;
+  },
+
   isStudentAllowedGradeCurriculum(grade, u = this.state.currentUser) {
     const g = Number(grade || 12);
     if (u && u.role === 'admin') return true;
     const cfg = this.getGradeAccessConfig(g);
-    if (cfg.allowPublic) return true;
-    if (!u) return false;
+    if (!u) {
+      if (this.isStudentLoginRequiredForDocs()) return false;
+      return Boolean(cfg.allowPublic);
+    }
     if (cfg.allowAllStudents) return true;
     const stuRecord = (this.state.students || []).find(s => s && s.studentId === u.studentId) || u;
     const myGrade = this.getStudentGrade(stuRecord);
@@ -4379,6 +4396,7 @@ const App = {
     const gradeCfg = this.getGradeAccessConfig(hwGrade);
 
     if (!u) {
+      if (this.isStudentLoginRequiredForDocs()) return false;
       return Boolean(gradeCfg.allowPublic && (hw.allowedAll || hw.accessType === 'all' || hw.accessType === 'grade'));
     }
 
@@ -6688,10 +6706,16 @@ const App = {
               `;
             }).join('')}
           </div>
-          <button type="button" id="openCurriculumAccessModalBtn" onclick="App.showCurriculumAccessModal(${curGrade !== 'ALL' && Number(curGrade) >= 10 ? Number(curGrade) : 12})" class="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-[#650f12] border border-amber-300 text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer shrink-0">
-            <i class="fa-solid fa-user-shield text-amber-700"></i>
-            <span>Phân Quyền Truy Cập Khối (10 · 11 · 12)</span>
-          </button>
+          <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+            <button type="button" id="quickToggleRequireLoginDocsBtn" onclick="App.toggleSetting('requireStudentLoginForDocs')" class="px-3 py-1.5 rounded-xl text-xs font-extrabold border inline-flex items-center gap-1.5 cursor-pointer transition ${this.isStudentLoginRequiredForDocs() ? 'bg-rose-50 hover:bg-rose-100 text-[#650f12] border-rose-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'}" title="Bật/Tắt yêu cầu học sinh phải đăng nhập mới được xem và tải tài liệu">
+              <i class="fa-solid ${this.isStudentLoginRequiredForDocs() ? 'fa-user-lock text-[#650f12]' : 'fa-lock-open text-slate-500'}"></i>
+              <span>Chỉ HS đăng nhập mới xem &amp; tải TL: ${this.isStudentLoginRequiredForDocs() ? 'BẬT' : 'TẮT'}</span>
+            </button>
+            <button type="button" id="openCurriculumAccessModalBtn" onclick="App.showCurriculumAccessModal(${curGrade !== 'ALL' && Number(curGrade) >= 10 ? Number(curGrade) : 12})" class="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-[#650f12] border border-amber-300 text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer shrink-0">
+              <i class="fa-solid fa-user-shield text-amber-700"></i>
+              <span>Phân Quyền Truy Cập Khối (10 · 11 · 12)</span>
+            </button>
+          </div>
         </div>
       `;
     }
@@ -6802,14 +6826,18 @@ const App = {
           </div>
 
           <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
-            <div class="font-extrabold text-slate-800 uppercase tracking-wider text-[11px]">Tùy chọn mở rộng toàn cục cho Khối ${g}:</div>
+            <div class="font-extrabold text-slate-800 uppercase tracking-wider text-[11px]">Cài đặt bảo mật đăng nhập &amp; mở rộng cho Khối ${g}:</div>
+            <label class="flex items-center gap-2.5 cursor-pointer font-bold text-[#650f12]">
+              <input type="checkbox" id="curAccessRequireStudentLogin" ${this.isStudentLoginRequiredForDocs() ? 'checked' : ''} class="rounded text-[#650f12]">
+              <span>Bắt buộc học sinh phải đăng nhập mới được phép truy cập xem và tải tài liệu (Khóa khách chưa đăng nhập)</span>
+            </label>
             <label class="flex items-center gap-2.5 cursor-pointer font-bold text-slate-800">
               <input type="checkbox" id="curAccessAllowAllStudents" ${cfg.allowAllStudents ? 'checked' : ''} class="rounded text-indigo-600">
               <span>Cho phép tất cả học sinh các khối khác (đã đăng nhập) cũng được xem Kho Phiếu Khối ${g}</span>
             </label>
             <label class="flex items-center gap-2.5 cursor-pointer font-bold text-slate-800">
               <input type="checkbox" id="curAccessAllowPublic" ${cfg.allowPublic ? 'checked' : ''} class="rounded text-emerald-600">
-              <span>Cho phép khách chưa đăng nhập xem trước Bảng Sheet &amp; Cây Thư Mục Khối ${g}</span>
+              <span>Cho phép khách chưa đăng nhập xem trước Bảng Sheet &amp; Cây Thư Mục Khối ${g} (chỉ có hiệu lực khi tắt mục bắt buộc đăng nhập ở trên)</span>
             </label>
           </div>
 
@@ -6869,6 +6897,11 @@ const App = {
 
   saveCurriculumAccessModal(grade = 12) {
     const g = Number(grade || this._activeAccessModalGrade || 12);
+    const reqLoginEl = document.getElementById('curAccessRequireStudentLogin');
+    if (reqLoginEl) {
+      if (!this.state.settings) this.state.settings = {};
+      this.state.settings.requireStudentLoginForDocs = Boolean(reqLoginEl.checked);
+    }
     const allowAllStudents = Boolean(document.getElementById('curAccessAllowAllStudents')?.checked);
     const allowPublic = Boolean(document.getElementById('curAccessAllowPublic')?.checked);
     const classNames = Array.from(document.querySelectorAll('#curriculumAccessModal input[name="curAccessClassPick"]:checked')).map(el => el.value);
@@ -11748,6 +11781,30 @@ const App = {
                   <span>${this.state.settings.allowStudentViewAnswers ? 'Khóa Đáp Án &amp; Lời Giải' : 'Mở Cho Xem Đáp Án'}</span>
                 </button>
               </div>
+
+              <!-- Cấu hình 5: Bắt buộc Học sinh đăng nhập mới được xem & tải tài liệu -->
+              <div class="p-4 rounded-xl border ${this.isStudentLoginRequiredForDocs() ? 'border-rose-200 bg-rose-50/40' : 'border-slate-200 bg-slate-50/60'} flex flex-col justify-between space-y-3 md:col-span-2 lg:col-span-4">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div class="space-y-1.5">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h4 class="text-xs sm:text-sm font-extrabold text-slate-900">5. Chỉ Học Sinh Đăng Nhập Mới Được Xem &amp; Tải Tài Liệu / Phiếu Bài Tập / Đề Thi</h4>
+                      <span id="requireLoginDocsStatusPill" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full ${this.isStudentLoginRequiredForDocs() ? 'bg-rose-100 text-[#650f12] border border-rose-200' : 'bg-slate-200 text-slate-600'}">
+                        ${this.isStudentLoginRequiredForDocs() ? 'Đang Bật (Bắt Buộc Đăng Nhập)' : 'Đang Tắt'}
+                      </span>
+                    </div>
+                    <p class="text-[11px] sm:text-xs text-slate-600 leading-relaxed">
+                      Khi bật: Chỉ có học sinh đã đăng nhập bằng <strong>Mã học sinh &amp; Mật khẩu</strong> mới được phép truy cập <strong>Xem file online, Tải PDF về in, xem Bảng Sheet &amp; Cây Thư Mục Khối 10 · 11 · 12</strong> và làm bài tập. Khách chưa đăng nhập bị chặn hoàn toàn.
+                    </p>
+                  </div>
+                  <div class="flex items-center gap-2.5 shrink-0">
+                    <input type="checkbox" id="toggleRequireLoginDocsSwitch" class="ui-switch switch-rose shrink-0" ${this.isStudentLoginRequiredForDocs() ? 'checked' : ''} onchange="App.toggleSetting('requireStudentLoginForDocs')" aria-label="Chỉ học sinh đăng nhập mới được xem và tải tài liệu">
+                    <button type="button" id="toggleRequireStudentLoginDocsBtn" onclick="App.toggleSetting('requireStudentLoginForDocs')" class="ui-btn px-3.5 ${this.isStudentLoginRequiredForDocs() ? 'bg-[#650f12] hover:bg-[#3d0709] text-[#ffe27d]' : 'bg-slate-800 hover:bg-slate-900 text-white'}">
+                      <i class="fa-solid ${this.isStudentLoginRequiredForDocs() ? 'fa-user-lock' : 'fa-lock-open'}"></i>
+                      <span>${this.isStudentLoginRequiredForDocs() ? 'Đang Bắt Buộc HS Đăng Nhập' : 'Bật Bắt Buộc HS Đăng Nhập'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
             </div>
             </div>
@@ -15287,11 +15344,13 @@ const App = {
   },
 
   toggleSetting(key) {
-    if (this.state.settings && typeof this.state.settings[key] !== 'undefined') {
-      this.state.settings[key] = !this.state.settings[key];
-      this.saveData({ markAdminDirty: true });
-      this.render();
-    }
+    if (!this.state.settings) this.state.settings = {};
+    const curVal = key === 'requireStudentLoginForDocs'
+      ? this.isStudentLoginRequiredForDocs()
+      : Boolean(this.state.settings[key]);
+    this.state.settings[key] = !curVal;
+    this.saveData({ markAdminDirty: true });
+    this.render();
   },
 
   isStudentCompareAllowed() {
@@ -15463,6 +15522,14 @@ const App = {
   },
 
   async openPdfModal(title, pdfUrl, storageId = null, opts = {}) {
+    if (!this.state.currentUser && this.isStudentLoginRequiredForDocs()) {
+      this.notify(
+        'Chỉ có học sinh đã đăng nhập vào hệ thống mới được phép xem và tải tài liệu! Vui lòng đăng nhập bằng Mã học sinh.',
+        'warning',
+        'Yêu cầu đăng nhập Học sinh'
+      );
+      return false;
+    }
     const rawStr = String(pdfUrl || '').trim();
     if (!rawStr && !storageId) {
       this.notify('Mục này hiện chưa có file PDF đính kèm (hoặc Giáo viên chưa đồng bộ file PDF lên Đám mây)!', 'warning', 'Chưa có file PDF');

@@ -1712,7 +1712,7 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v27"), 'sw.js must bump shell cache to v27');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v28"), 'sw.js must bump shell cache to v28');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
   assert.ok(cssSrc.includes(':where([id$="Modal"].fixed.inset-0:not(#previewPdfModal), #appSystemDialog.fixed.inset-0) > div'), 'app.css must use zero-specificity :where() fallback so desktop .max-w-* classes on modals are never overridden');
   assert.ok(cssSrc.includes('max-height: calc(100dvh'), 'app.css must constrain modal card height within viewport');
@@ -1831,10 +1831,12 @@ const PDFStorage = require('../js/pdf_storage.js');
   const stu11 = { studentId: 'HS017', fullName: 'Bảo Nghi', role: 'student', grade: 11, className: '11B 2K10' };
   const stu12 = { studentId: 'HS001', fullName: 'Quốc Việt', role: 'student', grade: 12, className: '12B 2K9' };
 
-  // Khách chưa đăng nhập không xem được lộ trình của bất kỳ khối nào
+  // Khách chưa đăng nhập không xem được lộ trình của bất kỳ khối nào & cài đặt requireStudentLoginForDocs bật mặc định
   App.state.currentUser = null;
   App.state.studentHwGradeFilter = 'ALL';
-  assert.strictEqual(App.getFilteredCurriculumItems('public').filter(it => it.isCurriculumSlot).length, 0, 'Unauthenticated guest must see 0 curriculum items by default');
+  assert.strictEqual(App.isStudentLoginRequiredForDocs(), true, 'requireStudentLoginForDocs must default to true');
+  assert.strictEqual(App.getFilteredCurriculumItems('public').length, 0, 'Unauthenticated guest must see 0 items when requireStudentLoginForDocs is true');
+  assert.strictEqual(await App.openPdfModal('Test PDF', dang01.pdfUrl, 'CUR-12-D01'), false, 'Unauthenticated guest blocked from opening PDF when requireStudentLoginForDocs is true');
   assert.strictEqual(await App.downloadHomeworkPdf('CUR-12-D01'), false, 'Unauthenticated guest cannot download Grade 12 PDF');
 
   // Học sinh Khối 10 chỉ xem được đúng 46 dạng của Khối 10, bị chặn Khối 11 & 12
