@@ -2101,7 +2101,109 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.strictEqual(multiVariantBatch[0].variantFiles.length, 5, 'pairBatchWorksheetFiles retains all 5 PDF variants');
 
   console.log('[OK] Test 31 Passed: Multi-variant PDF View/Download, .tex answer key extraction & no-answer PDF direct practice verified 100%.');
-  console.log('[OK] TẤT CẢ 31 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
+
+  // Test 32: Quản trị trực tiếp Cây Thư Mục (Sửa tên Chương/Bài/Dạng, Thêm Dạng, Upload file nhanh) & Chế độ Giáo Viên Xem Như Học Sinh
+  console.log('--- TEST 32: Admin Folder Tree Rename/Upload/Add Topic & Teacher View-As-Student Mode ---');
+  App.state.currentUser = { ...App.state.admin, role: 'admin' };
+  App.state.hwGradeFilter = '12';
+  App.state.hwViewMode = 'tree';
+
+  const adminTreeItems = App.getFilteredCurriculumItems('admin');
+  const adminTreeGrouped = App.groupCurriculumItems(adminTreeItems);
+  const adminToolbarHtml = App.renderWorksheetViewToolbarHtml('admin', adminTreeItems, adminTreeGrouped);
+  const adminTreeHtml = App.renderCurriculumTreeHtml({ scope: 'admin', items: adminTreeItems });
+
+  assert.ok(adminToolbarHtml.includes('+ Chương') && adminToolbarHtml.includes('+ Bài Học') && adminToolbarHtml.includes('+ Thêm Dạng'), 'Admin toolbar must include + Chương, + Bài Học, + Thêm Dạng buttons');
+  assert.ok(adminToolbarHtml.includes('Xem Như Học Sinh'), 'Admin toolbar must include Xem Như Học Sinh button');
+  assert.ok(adminTreeHtml.includes('Sửa tên Chương') && adminTreeHtml.includes('+ Thêm Bài') && adminTreeHtml.includes('Sửa tên Bài'), 'Admin tree view must include chapter & lesson rename/add buttons');
+  assert.ok(adminTreeHtml.includes('Up File') && adminTreeHtml.includes('Sửa tên') && adminTreeHtml.includes('triggerQuickTreeUpload'), 'Admin tree leaf must include Up File & Sửa tên buttons');
+
+  // 32.1 Thêm Dạng mới vào Cây Thư Mục (chưa cần file PDF) -> sau đó Upload nhanh file PDF + .tex vào Dạng vừa tạo
+  const addedSlot = await App.addCurriculumTopicSlot({
+    grade: 12,
+    chapterCode: 'Chương 5',
+    lessonTitle: 'Bài 1. Phương trình mặt phẳng',
+    code: 'Dạng 05',
+    title: 'Dạng 5. Bài toán thực tế về phương trình mặt phẳng'
+  });
+  assert.ok(addedSlot && addedSlot.id, 'addCurriculumTopicSlot must create a new topic slot in the folder tree');
+  assert.strictEqual(addedSlot.code, 'Dạng 05');
+  assert.strictEqual(addedSlot.title, 'Dạng 5. Bài toán thực tế về phương trình mặt phẳng');
+
+  // Sửa tên Dạng trực tiếp
+  const renamedSlot = App.renameCurriculumItem(addedSlot.id, {
+    code: 'Dạng 05 (Mới)',
+    title: 'Dạng 5. Ứng dụng phương trình mặt phẳng trong không gian Oxyz'
+  });
+  assert.strictEqual(renamedSlot.code, 'Dạng 05 (Mới)', 'renameCurriculumItem must update topic code');
+  assert.strictEqual(renamedSlot.title, 'Dạng 5. Ứng dụng phương trình mặt phẳng trong không gian Oxyz', 'renameCurriculumItem must update topic title');
+
+  // Upload nhanh file PDF + .tex vào Dạng trong Cây Thư Mục
+  const uploadedSlot = await App.attachFilesToHomeworkRecord(addedSlot.id, [
+    { name: 'PTMP_Dang5-HS-KhongVD-KhongOli.pdf', size: 280000 },
+    { name: 'PTMP_Dang5-GV-DapAn.pdf', size: 390000 },
+    { name: 'PTMP_Dang5.tex', size: 12000, _text: ptmpTexRaw }
+  ]);
+  assert.ok(uploadedSlot.pdfUrl, 'attachFilesToHomeworkRecord must set primary student pdfUrl');
+  assert.ok(uploadedSlot.solutionPdfUrl, 'attachFilesToHomeworkRecord must set teacher solutionPdfUrl');
+  assert.strictEqual(uploadedSlot.part1.length, 12, 'attachFilesToHomeworkRecord must extract 12 P.I answers from .tex');
+  assert.strictEqual(uploadedSlot.part3.length, 4, 'attachFilesToHomeworkRecord must extract 4 P.III answers from .tex');
+
+  // 32.2 Đổi tên Bài học & Đổi tên Chương trong Cây Thư Mục
+  await App.addCurriculumTopicSlot({
+    grade: 12,
+    chapterCode: 'Chương 6',
+    lessonTitle: 'Bài Tạm Để Test Đổi Tên',
+    code: 'Dạng 01',
+    title: 'Dạng test trong bài học tạm'
+  });
+  const renamedLessonCount = App.renameCurriculumLesson(12, 'Chương 6', 'Bài Tạm Để Test Đổi Tên', 'Bài Đã Đổi Tên Thành Công');
+  assert.strictEqual(renamedLessonCount, 1, 'renameCurriculumLesson must update items in that lesson');
+  assert.ok(
+    App.getMergedWorksheets().some(x => x.lessonTitle === 'Bài Đã Đổi Tên Thành Công'),
+    'Merged worksheets must reflect new lesson title'
+  );
+  const deletedLessonCount = App.deleteCurriculumLesson(12, 'Chương 6', 'Bài Đã Đổi Tên Thành Công', { skipConfirm: true });
+  assert.strictEqual(deletedLessonCount, 1, 'deleteCurriculumLesson must remove the test lesson');
+
+  const updatedChapMeta = App.renameCurriculumChapter(12, 'Chương 5', {
+    newChapterCode: 'Chương 5',
+    newChapterTitle: 'KHỐI 12 — CHƯƠNG V. PHƯƠNG TRÌNH MẶT PHẲNG, ĐƯỜNG THẲNG, MẶT CẦU (ĐÃ CẬP NHẬT)'
+  });
+  assert.ok(updatedChapMeta.chapterTitle.includes('(ĐÃ CẬP NHẬT)'), 'renameCurriculumChapter must update chapter title');
+  assert.ok(
+    App.getCurriculumCatalog().chapters.some(c => c.grade === 12 && c.chapterTitle.includes('(ĐÃ CẬP NHẬT)')),
+    'getCurriculumCatalog must return the updated chapter title'
+  );
+
+  // 32.3 Chế độ Giáo Viên Xem Như Học Sinh (không cần đăng xuất / thoát ra vào lại)
+  App.state.currentUser = { ...App.state.admin, role: 'admin', fullName: 'Thầy Huỳnh Thanh Chí' };
+  App.saveSessionUser(App.state.currentUser);
+  assert.strictEqual(App.isTeacherPreviewingAsStudent(), false, 'Initially not in student preview mode');
+
+  // Bật chế độ Xem Như Học Sinh (mặc định xem theo Khối 12 đang lọc)
+  App.toggleAdminStudentViewMode(true, { grade: '11', studentMainTab: 'homeworks', studentHwViewMode: 'tree' });
+  assert.strictEqual(App.isTeacherPreviewingAsStudent(), true, 'isTeacherPreviewingAsStudent must be true after enabling');
+  assert.strictEqual(App.state.currentUser.role, 'student', 'Effective currentUser role must be student during preview');
+  assert.strictEqual(App.state.currentUser._isTeacherPreview, true, 'Effective currentUser must carry _isTeacherPreview flag');
+  assert.strictEqual(App.isStudentAllowedGradeCurriculum(11), true, 'When previewing as Grade 11 student, Grade 11 must be unlocked');
+  assert.strictEqual(App.isStudentAllowedGradeCurriculum(12), false, 'When previewing as Grade 11 student, Grade 12 must be locked just like a real Grade 11 student');
+
+  // Chuyển sang góc nhìn Tất cả Khối trong chế độ Xem Như Học Sinh
+  App.setAdminPreviewTarget({ grade: 'ALL' });
+  assert.strictEqual(App.isStudentAllowedGradeCurriculum(12), true, 'ALL preview unlocks Grade 12');
+  assert.strictEqual(App.isStudentAllowedGradeCurriculum(11), true, 'ALL preview unlocks Grade 11');
+  assert.strictEqual(App.isStudentAllowedGradeCurriculum(10), true, 'ALL preview unlocks Grade 10');
+  const previewBannerHtml = App.renderTeacherPreviewBannerHtml();
+  assert.ok(previewBannerHtml.includes('Quay Lại Trang Giáo Viên'), 'Preview banner must render button to return to Teacher Portal');
+
+  // Quay lại Trang Giáo Viên chỉ với 1 chạm (không cần đăng nhập lại)
+  App.toggleAdminStudentViewMode(false);
+  assert.strictEqual(App.isTeacherPreviewingAsStudent(), false, 'isTeacherPreviewingAsStudent must be false after returning to Admin');
+  assert.strictEqual(App.state.currentUser.role, 'admin', 'Admin role must be restored immediately without logging in again');
+
+  console.log('[OK] Test 32 Passed: Folder Tree rename/upload/add topic & Teacher View-As-Student mode verified 100%.');
+  console.log('[OK] TẤT CẢ 32 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

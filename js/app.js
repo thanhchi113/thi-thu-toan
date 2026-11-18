@@ -169,6 +169,11 @@ const App = {
     studentHwRoadmapFilter: 'ALL',
     studentHwChapterFilter: 'ALL',
     collapsedCurriculumKeys: {},
+    adminPreviewAsStudent: false,
+    adminPreviewGrade: 'ALL',
+    adminPreviewStudentId: '',
+    _savedAdminUser: null,
+    _quickTreeUploadHwId: '',
     deepLinkClassHint: '',
     hwSubModalClassFilter: 'ALL',
     hwSubModalStatusFilter: 'ALL',
@@ -189,6 +194,8 @@ const App = {
       rewardCatalog: null,               // Danh mục phần thưởng đổi điểm (null -> dùng DEFAULT_REWARD_CATALOG)
       classGroups: null,                 // Danh sách nhóm lớp tùy chỉnh của Lớp Toán Anh Chí
       deletedClassGroups: [],            // Danh sách nhóm lớp mặc định đã xóa
+      customCurriculumChapters: [],      // Danh sách Chương tùy chỉnh / đã đổi tên trong Cây Thư Mục
+      deletedCurriculumChapterKeys: [],  // Danh sách mã Chương đã xóa khỏi Cây Thư Mục
     },
     violationLogs: [],
     studentScoreTab: 'mine',             // 'mine' (Kết quả cá nhân) | 'classBoard' (So sánh Lớp / Khối)
@@ -2942,6 +2949,14 @@ const App = {
   // 2. Quản lý Đăng nhập / Phiên làm việc (Lưu kép sessionStorage + localStorage để không bị văng ra khi điện thoại ẩn tab)
   saveSessionUser(user) {
     if (!user) return;
+    if (user._isTeacherPreview) {
+      if (this.state._savedAdminUser) {
+        const adminRaw = JSON.stringify(this.state._savedAdminUser);
+        try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('thpt_current_user', adminRaw); } catch (_) {}
+        try { if (typeof localStorage !== 'undefined') localStorage.setItem('thpt_current_user', adminRaw); } catch (_) {}
+      }
+      return;
+    }
     const raw = JSON.stringify(user);
     try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('thpt_current_user', raw); } catch (_) {}
     try { if (typeof localStorage !== 'undefined') localStorage.setItem('thpt_current_user', raw); } catch (_) {}
@@ -3028,6 +3043,9 @@ const App = {
       document.querySelectorAll('[id$="Modal"], #appSystemDialog, #selfEditStudentModal, #adminProfileModal, #addAdminModal, #changeAdminPassModal').forEach(el => el.remove());
     }
     this.state.currentUser = null;
+    this.state.adminPreviewAsStudent = false;
+    this.state.adminPreviewStudentId = '';
+    this.state._savedAdminUser = null;
     this.state.activeExam = null;
     this.state.activeSubmissionDetailId = null;
     this.state.currentDetailSubId = null;
@@ -4541,15 +4559,215 @@ const App = {
     }
   },
 
+  // --- CHẾ ĐỘ GIÁO VIÊN XEM NHƯ HỌC SINH (KHÔNG CẦN ĐĂNG XUẤT / THOÁT TRANG) ---
+  isTeacherPreviewingAsStudent() {
+    return Boolean(
+      this.state.adminPreviewAsStudent &&
+      (this.state._savedAdminUser || (this.state.currentUser && (this.state.currentUser.role === 'admin' || this.state.currentUser._isTeacherPreview)))
+    );
+  },
+
+  buildTeacherPreviewStudentUser() {
+    const adminAcc = this.state._savedAdminUser
+      || (this.state.currentUser && this.state.currentUser.role === 'admin' ? this.state.currentUser : this.state.admin)
+      || { fullName: 'Thầy Huỳnh Thanh Chí', username: 'ADMIN', role: 'admin' };
+    const stuId = String(this.state.adminPreviewStudentId || '').trim();
+    if (stuId) {
+      const foundStu = (this.state.students || []).find(s => s && s.studentId === stuId);
+      if (foundStu) {
+        return {
+          ...foundStu,
+          role: 'student',
+          _isTeacherPreview: true,
+          _previewAllGrades: false,
+          _genericGradePreview: false,
+          _adminFullName: adminAcc.fullName || 'Thầy Huỳnh Thanh Chí'
+        };
+      }
+    }
+    const gRaw = String(this.state.adminPreviewGrade || 'ALL').toUpperCase();
+    const isAll = gRaw === 'ALL';
+    const gNum = isAll ? 12 : (Number(gRaw) || 12);
+    const matchingGroup = (this.getClassGroups() || []).find(cg => Number(cg.grade) === gNum);
+    const sampleClass = isAll ? '12A 2K9' : (matchingGroup ? matchingGroup.name : `${gNum}A`);
+    return {
+      studentId: isAll ? 'GV_XEM_HS' : `GV_HS_K${gNum}`,
+      fullName: isAll
+        ? `${adminAcc.fullName || 'Thầy Huỳnh Thanh Chí'} (Xem như Học sinh)`
+        : `Học sinh Khối ${gNum} (Xem thử)`,
+      nickname: isAll ? 'Tất cả Khối' : `Khối ${gNum}`,
+      role: 'student',
+      grade: gNum,
+      className: sampleClass,
+      extraAllowedGrades: isAll ? [12, 11, 10, 9, 8, 7, 6] : [],
+      status: 'active',
+      _isTeacherPreview: true,
+      _previewAllGrades: isAll,
+      _genericGradePreview: !isAll,
+      _adminFullName: adminAcc.fullName || 'Thầy Huỳnh Thanh Chí'
+    };
+  },
+
+  toggleAdminStudentViewMode(enable, opts = {}) {
+    const nextState = typeof enable === 'boolean' ? enable : !this.state.adminPreviewAsStudent;
+    if (nextState) {
+      if (!this.state.currentUser) return false;
+      if (this.state.currentUser.role === 'admin') {
+        this.state._savedAdminUser = { ...this.state.currentUser };
+      }
+      if (!this.state._savedAdminUser && !this.state.currentUser._isTeacherPreview) {
+        return false;
+      }
+      this.state.adminPreviewAsStudent = true;
+      if (opts.studentId !== undefined) {
+        this.state.adminPreviewStudentId = String(opts.studentId || '');
+      }
+      if (opts.grade !== undefined) {
+        this.state.adminPreviewGrade = String(opts.grade || 'ALL');
+        if (opts.studentId === undefined) this.state.adminPreviewStudentId = '';
+      } else if (!this.state.adminPreviewGrade) {
+        this.state.adminPreviewGrade = (this.state.hwGradeFilter && this.state.hwGradeFilter !== 'ALL')
+          ? String(this.state.hwGradeFilter)
+          : 'ALL';
+      }
+      if (opts.studentMainTab) {
+        this.state.studentMainTab = opts.studentMainTab;
+      }
+      if (opts.studentHwViewMode) {
+        this.state.studentHwViewMode = opts.studentHwViewMode;
+      }
+      this.state.currentUser = this.buildTeacherPreviewStudentUser();
+      if (this.state.adminPreviewStudentId) {
+        this.state.studentHwGradeFilter = String(this.getStudentGrade(this.state.currentUser));
+      } else if (this.state.adminPreviewGrade && this.state.adminPreviewGrade !== 'ALL') {
+        this.state.studentHwGradeFilter = String(this.state.adminPreviewGrade);
+      } else {
+        this.state.studentHwGradeFilter = 'ALL';
+      }
+      this.state.studentHwChapterFilter = 'ALL';
+      this.render();
+      return true;
+    }
+
+    if (this.state.activeExam) {
+      this.clearIntervalTimer();
+      this.resetExamMonitorState();
+      this.state.activeExam = null;
+      if (typeof document !== 'undefined') {
+        document.body?.classList?.remove?.('in-exam');
+        if (document.documentElement?.style) document.documentElement.style.overflow = '';
+        if (document.body?.style) document.body.style.overflow = '';
+      }
+    }
+    this.state.adminPreviewAsStudent = false;
+    const restoredAdmin = this.state._savedAdminUser
+      || (this.state.admin ? { ...this.state.admin, role: 'admin', email: this.state.admin.email || this.ADMIN_RECOVERY_EMAIL } : null);
+    if (restoredAdmin) {
+      this.state.currentUser = { ...restoredAdmin, role: 'admin' };
+    }
+    if (opts.adminMainTab) {
+      this.state.adminMainTab = opts.adminMainTab;
+    }
+    if (opts.hwViewMode) {
+      this.state.hwViewMode = opts.hwViewMode;
+    }
+    this.render();
+    return false;
+  },
+
+  setAdminPreviewTarget({ grade, studentId } = {}) {
+    if (!this.isTeacherPreviewingAsStudent()) {
+      return this.toggleAdminStudentViewMode(true, { grade, studentId });
+    }
+    if (studentId !== undefined) {
+      this.state.adminPreviewStudentId = String(studentId || '');
+      if (this.state.adminPreviewStudentId) {
+        const stu = (this.state.students || []).find(s => s && s.studentId === this.state.adminPreviewStudentId);
+        if (stu) {
+          this.state.adminPreviewGrade = String(this.getStudentGrade(stu));
+          this.state.studentHwGradeFilter = String(this.getStudentGrade(stu));
+        }
+      } else {
+        this.state.adminPreviewGrade = 'ALL';
+        this.state.studentHwGradeFilter = 'ALL';
+      }
+    } else if (grade !== undefined) {
+      this.state.adminPreviewStudentId = '';
+      this.state.adminPreviewGrade = String(grade || 'ALL');
+      this.state.studentHwGradeFilter = this.state.adminPreviewGrade === 'ALL' ? 'ALL' : String(this.state.adminPreviewGrade);
+    }
+    this.state.studentHwChapterFilter = 'ALL';
+    this.state.currentUser = this.buildTeacherPreviewStudentUser();
+    this.render();
+    return true;
+  },
+
+  renderTeacherPreviewBannerHtml() {
+    if (!this.isTeacherPreviewingAsStudent()) return '';
+    const gCur = this.state.adminPreviewStudentId ? '' : String(this.state.adminPreviewGrade || 'ALL');
+    const stuId = String(this.state.adminPreviewStudentId || '');
+    const studentsList = Array.isArray(this.state.students) ? this.state.students : [];
+    return `
+      <div id="teacherStudentPreviewBar" class="rounded-2xl p-3 sm:p-4 bg-gradient-to-r from-[#3d0709] via-[#650f12] to-[#3d0709] text-white border-2 border-[#ffe27d]/80 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div class="flex items-start sm:items-center gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-[#ffe27d] text-[#3d0709] flex items-center justify-center shrink-0 font-extrabold shadow-xs">
+            <i class="fa-solid fa-eye text-base"></i>
+          </div>
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="px-2 py-0.5 rounded-md bg-[#ffe27d] text-[#3d0709] text-[10px] font-extrabold uppercase tracking-wider">Chế độ Giáo Viên Xem Thử</span>
+              <span class="font-extrabold text-xs sm:text-sm text-white truncate">Đang xem giao diện Học Sinh (không cần đăng xuất)</span>
+            </div>
+            <p class="text-[11px] text-[#ffe27d]/90 mt-0.5">Chọn Khối hoặc Học sinh cụ thể bên dưới để kiểm tra đúng đề thi, BTVN, Bảng Sheet &amp; Cây Thư Mục được phân quyền.</p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+          <div class="inline-flex flex-wrap items-center gap-1 bg-black/25 p-1 rounded-xl border border-white/15">
+            ${[
+              { val: 'ALL', label: 'Tất cả Khối' },
+              { val: '12', label: 'HS Khối 12' },
+              { val: '11', label: 'HS Khối 11' },
+              { val: '10', label: 'HS Khối 10' },
+              { val: '9', label: 'HS Khối 9' }
+            ].map(opt => `
+              <button type="button" onclick="App.setAdminPreviewTarget({ grade: '${opt.val}' })" class="px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition cursor-pointer ${gCur === opt.val ? 'bg-[#ffe27d] text-[#3d0709] shadow-2xs' : 'text-[#fbf7ef] hover:bg-white/15'}">
+                ${opt.label}
+              </button>
+            `).join('')}
+          </div>
+
+          <select aria-label="Chọn học sinh cụ thể để xem như học sinh đó" onchange="App.setAdminPreviewTarget({ studentId: this.value })" class="px-2.5 py-1.5 rounded-xl bg-white text-slate-900 font-bold text-xs border border-[#ffe27d] outline-none cursor-pointer max-w-[210px]">
+            <option value="" ${!stuId ? 'selected' : ''}>-- Hoặc chọn 1 Học sinh (${studentsList.length}) --</option>
+            ${studentsList.map(s => `
+              <option value="${this.escapeHtmlAttr(s.studentId)}" ${stuId === s.studentId ? 'selected' : ''}>
+                [${this.escapeHtmlAttr(s.studentId)}] ${this.escapeHtmlAttr(s.fullName)} (${this.escapeHtmlAttr(s.className || ('K' + this.getStudentGrade(s)))})
+              </option>
+            `).join('')}
+          </select>
+
+          <button type="button" id="exitStudentPreviewBtn" onclick="App.toggleAdminStudentViewMode(false)" class="px-3.5 py-2 rounded-xl bg-[#ffe27d] hover:bg-amber-200 text-[#3d0709] font-extrabold text-xs shadow-sm inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+            <i class="fa-solid fa-user-shield"></i><span>Quay Lại Trang Giáo Viên</span>
+          </button>
+        </div>
+      </div>
+    `;
+  },
+
   // Kiểm tra quyền dự thi của học sinh theo 4 chế độ: Tất cả / Theo nhóm lớp / Theo khối (6-12) / Chỉ định
   isStudentAllowedExam(ex, u) {
     if (!ex || !ex.is_active || !u) return false;
+    if (u.role === 'admin' || (u._isTeacherPreview && u._previewAllGrades)) return true;
     if (ex.allowed_all || ex.access_type === 'all') return true;
+    const studentGrade = this.getStudentGrade(u);
+    if (u._isTeacherPreview && u._genericGradePreview) {
+      if (Number(ex.grade || 12) === studentGrade) return true;
+      if (Array.isArray(ex.allowed_grades) && ex.allowed_grades.map(Number).includes(studentGrade)) return true;
+    }
     if (ex.access_type === 'class') {
       const myCls = u.className || '';
       return Array.isArray(ex.allowed_classes) && ex.allowed_classes.some(c => this.isSameClassName(c, myCls));
     }
-    const studentGrade = this.getStudentGrade(u);
     if (ex.access_type === 'grade') {
       return Array.isArray(ex.allowed_grades) && ex.allowed_grades.map(Number).includes(studentGrade);
     }
@@ -4599,7 +4817,7 @@ const App = {
 
   isStudentAllowedGradeCurriculum(grade, u = this.state.currentUser) {
     const g = Number(grade || 12);
-    if (u && u.role === 'admin') return true;
+    if (u && (u.role === 'admin' || (u._isTeacherPreview && u._previewAllGrades))) return true;
     const cfg = this.getGradeAccessConfig(g);
     if (!u) {
       if (this.isStudentLoginRequiredForDocs()) return false;
@@ -4618,7 +4836,7 @@ const App = {
   },
 
   getStudentAllowedGrades(u = this.state.currentUser) {
-    if (u && u.role === 'admin') return [12, 11, 10, 9, 8, 7, 6];
+    if (u && (u.role === 'admin' || (u._isTeacherPreview && u._previewAllGrades))) return [12, 11, 10, 9, 8, 7, 6];
     const grades = [12, 11, 10, 9, 8, 7, 6].filter(g => this.isStudentAllowedGradeCurriculum(g, u));
     if (u && grades.length === 0) {
       return [this.getStudentGrade(u)];
@@ -4652,7 +4870,7 @@ const App = {
         else curExtra.delete(g);
         st.extraAllowedGrades = Array.from(curExtra);
       });
-      if (this.state.currentUser && this.state.currentUser.role === 'student') {
+      if (this.state.currentUser && this.state.currentUser.role === 'student' && !this.state.currentUser._isTeacherPreview) {
         const freshStu = (this.state.students || []).find(s => s.studentId === this.state.currentUser.studentId);
         if (freshStu) {
           this.state.currentUser = { ...this.state.currentUser, ...freshStu };
@@ -4666,7 +4884,7 @@ const App = {
 
   isStudentAllowedHomework(hw, u = this.state.currentUser) {
     if (!hw || hw.is_active === false || hw.isActive === false) return false;
-    if (u && u.role === 'admin') return true;
+    if (u && (u.role === 'admin' || (u._isTeacherPreview && u._previewAllGrades))) return true;
     const hwGrade = Number(hw.grade || 12);
     const gradeCfg = this.getGradeAccessConfig(hwGrade);
 
@@ -4683,6 +4901,10 @@ const App = {
     if (Array.isArray(stuRecord.allowedHomeworks) && stuRecord.allowedHomeworks.includes(hw.id)) return true;
     if (myCls && Array.isArray(hw.allowedClasses) && hw.allowedClasses.some(c => this.isSameClassName(c, myCls))) return true;
 
+    if (u._isTeacherPreview && u._genericGradePreview && Number(hwGrade) === this.getStudentGrade(u)) {
+      return true;
+    }
+
     if (hw.accessType === 'class' || hw.accessType === 'selected' || hw.accessType === 'student') {
       return false;
     }
@@ -4693,10 +4915,782 @@ const App = {
   },
 
   getCurriculumCatalog() {
-    if (typeof CURRICULUM_DATA !== 'undefined' && CURRICULUM_DATA && Array.isArray(CURRICULUM_DATA.items)) {
-      return CURRICULUM_DATA;
+    const base = (typeof CURRICULUM_DATA !== 'undefined' && CURRICULUM_DATA && Array.isArray(CURRICULUM_DATA.items))
+      ? CURRICULUM_DATA
+      : { sheetId: '', sheetUrl: '', sheetTab: '', chapters: [], items: [] };
+    const customChaps = Array.isArray(this.state.settings?.customCurriculumChapters)
+      ? this.state.settings.customCurriculumChapters
+      : [];
+    const delChapKeys = new Set(
+      (Array.isArray(this.state.settings?.deletedCurriculumChapterKeys) ? this.state.settings.deletedCurriculumChapterKeys : [])
+        .map(k => String(k || '').toLowerCase())
+    );
+    if (customChaps.length === 0 && delChapKeys.size === 0) {
+      return base;
     }
-    return { sheetId: '', sheetUrl: '', sheetTab: '', chapters: [], items: [] };
+    const chapMap = new Map();
+    (base.chapters || []).forEach(c => {
+      if (!c) return;
+      const k = `${Number(c.grade || 12)}::${String(c.chapterCode || '').trim().toLowerCase()}`;
+      if (!delChapKeys.has(k)) chapMap.set(k, { ...c });
+    });
+    customChaps.forEach(c => {
+      if (!c) return;
+      const k = `${Number(c.grade || 12)}::${String(c.chapterCode || '').trim().toLowerCase()}`;
+      if (delChapKeys.has(k)) return;
+      const prev = chapMap.get(k) || {};
+      chapMap.set(k, { ...prev, ...c });
+    });
+    return {
+      ...base,
+      chapters: Array.from(chapMap.values())
+    };
+  },
+
+  // --- QUẢN TRỊ CÂY THƯ MỤC & BẢNG SHEET (SỬA TÊN, UPLOAD NHANH, THÊM CHƯƠNG / BÀI HỌC / DẠNG, XÓA) ---
+  getSuggestedNextTopicCode(grade = 12, chapterCode = '', lessonTitle = '') {
+    const g = Number(grade || 12);
+    const ch = String(chapterCode || '').trim().toLowerCase();
+    const ls = String(lessonTitle || '').trim().toLowerCase();
+    const items = this.getMergedWorksheets({ includeEmptySlots: true }).filter(it => {
+      if (Number(it.grade || 12) !== g) return false;
+      if (ch && String(it.chapterCode || '').trim().toLowerCase() !== ch) return false;
+      if (ls && String(it.lessonTitle || '').trim().toLowerCase() !== ls) return false;
+      return true;
+    });
+    let maxNum = 0;
+    items.forEach(it => {
+      const m = String(it.code || it.title || '').match(/(?:Dạng|Dang|Phiếu|Phieu|Mục|Muc)\s*0*(\d+)/i);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > maxNum) maxNum = n;
+      }
+    });
+    const nextNum = maxNum > 0 ? (maxNum + 1) : (items.length + 1);
+    return `Dạng ${String(nextNum).padStart(2, '0')}`;
+  },
+
+  renameCurriculumChapter(grade, oldChapterCode, { newChapterCode, newChapterTitle, folderUrl } = {}) {
+    const g = Number(grade || 12);
+    const oldCodeClean = String(oldChapterCode || '').trim();
+    const nextCodeClean = String(newChapterCode || oldCodeClean || 'Chương 1').trim();
+    const nextTitleClean = String(newChapterTitle || '').trim() || `KHỐI ${g} — ${nextCodeClean.toUpperCase()}`;
+
+    if (!this.state.settings || typeof this.state.settings !== 'object') this.state.settings = {};
+    if (!Array.isArray(this.state.settings.customCurriculumChapters)) {
+      this.state.settings.customCurriculumChapters = [];
+    }
+    if (!Array.isArray(this.state.settings.deletedCurriculumChapterKeys)) {
+      this.state.settings.deletedCurriculumChapterKeys = [];
+    }
+
+    const cat = this.getCurriculumCatalog();
+    const existingMeta = (cat.chapters || []).find(
+      c => Number(c.grade) === g && String(c.chapterCode || '').trim().toLowerCase() === oldCodeClean.toLowerCase()
+    ) || {};
+
+    const chapNumMatch = nextCodeClean.match(/\d+/);
+    const orderVal = existingMeta.order || (chapNumMatch ? parseInt(chapNumMatch[0], 10) : 50);
+    const updatedChap = {
+      id: existingMeta.id || `CH${g}-${nextCodeClean}`,
+      grade: g,
+      chapterNo: existingMeta.chapterNo || orderVal,
+      order: orderVal,
+      bannerCode: nextCodeClean.toUpperCase(),
+      chapterCode: nextCodeClean,
+      chapterTitle: nextTitleClean,
+      folderUrl: folderUrl !== undefined ? String(folderUrl || '').trim() : (existingMeta.folderUrl || ''),
+      colorHex: existingMeta.colorHex || '#650f12',
+      tintHex: existingMeta.tintHex || '#fbf7ef'
+    };
+
+    const oldKeyLower = `${g}::${oldCodeClean.toLowerCase()}`;
+    const nextKeyLower = `${g}::${nextCodeClean.toLowerCase()}`;
+    this.state.settings.deletedCurriculumChapterKeys = this.state.settings.deletedCurriculumChapterKeys.filter(
+      k => String(k || '').toLowerCase() !== nextKeyLower
+    );
+    if (oldCodeClean && oldKeyLower !== nextKeyLower) {
+      if (!this.state.settings.deletedCurriculumChapterKeys.includes(oldKeyLower)) {
+        this.state.settings.deletedCurriculumChapterKeys.push(oldKeyLower);
+      }
+    }
+
+    const customList = this.state.settings.customCurriculumChapters.filter(c => {
+      if (!c || Number(c.grade || 12) !== g) return true;
+      const ck = String(c.chapterCode || '').trim().toLowerCase();
+      return ck !== oldCodeClean.toLowerCase() && ck !== nextCodeClean.toLowerCase();
+    });
+    customList.push(updatedChap);
+    this.state.settings.customCurriculumChapters = customList;
+
+    if (oldCodeClean && oldCodeClean !== nextCodeClean) {
+      const merged = this.getMergedWorksheets({ includeEmptySlots: true });
+      merged.forEach(item => {
+        if (Number(item.grade || 12) === g && String(item.chapterCode || '').trim().toLowerCase() === oldCodeClean.toLowerCase()) {
+          const updatedItem = this.normalizeHomeworkRecord({
+            ...item,
+            chapterCode: nextCodeClean
+          });
+          const idx = (this.state.homeworks || []).findIndex(h => h && h.id === updatedItem.id);
+          if (idx !== -1) this.state.homeworks[idx] = updatedItem;
+          else this.state.homeworks.unshift(updatedItem);
+        }
+      });
+    }
+
+    this.saveData({ markAdminDirty: true });
+    this.renderPreservingScroll();
+    return updatedChap;
+  },
+
+  renameCurriculumLesson(grade, chapterCode, oldLessonTitle, newLessonTitle, newChapterCode = null) {
+    const g = Number(grade || 12);
+    const chClean = String(chapterCode || '').trim();
+    const oldLsClean = String(oldLessonTitle || '').trim();
+    const nextLsClean = String(newLessonTitle || '').trim();
+    const nextChClean = newChapterCode ? String(newChapterCode).trim() : chClean;
+    if (!nextLsClean) return 0;
+
+    const merged = this.getMergedWorksheets({ includeEmptySlots: true });
+    let count = 0;
+    merged.forEach(item => {
+      const itemGrade = Number(item.grade || 12);
+      const itemChap = String(item.chapterCode || '').trim() || 'Tài liệu & BTVN khác';
+      const itemLs = String(item.lessonTitle || '').trim() || 'Phiếu bài tập & Chuyên đề';
+      if (
+        itemGrade === g &&
+        itemChap.toLowerCase() === chClean.toLowerCase() &&
+        itemLs.toLowerCase() === oldLsClean.toLowerCase()
+      ) {
+        const updated = this.normalizeHomeworkRecord({
+          ...item,
+          chapterCode: nextChClean || item.chapterCode,
+          lessonTitle: nextLsClean,
+          updatedLabel: new Date().toLocaleDateString('vi-VN')
+        });
+        const idx = (this.state.homeworks || []).findIndex(h => h && h.id === updated.id);
+        if (idx !== -1) this.state.homeworks[idx] = updated;
+        else this.state.homeworks.unshift(updated);
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      this.saveData({ markAdminDirty: true });
+      this.renderPreservingScroll();
+    }
+    return count;
+  },
+
+  renameCurriculumItem(hwId, { code, title, lessonTitle, chapterCode, grade } = {}) {
+    const existing = this.findHomeworkById(hwId);
+    if (!existing) return null;
+    const nextTitle = title !== undefined ? String(title || '').trim() : existing.title;
+    if (!nextTitle) return null;
+    const nextCode = code !== undefined ? String(code || '').trim() : (existing.code || '');
+    const nextLesson = lessonTitle !== undefined ? String(lessonTitle || '').trim() : (existing.lessonTitle || '');
+    const nextChap = chapterCode !== undefined ? String(chapterCode || '').trim() : (existing.chapterCode || '');
+    const nextGrade = grade !== undefined ? (Number(grade) || existing.grade || 12) : (existing.grade || 12);
+
+    const updated = this.normalizeHomeworkRecord({
+      ...existing,
+      code: nextCode,
+      title: nextTitle,
+      lessonTitle: nextLesson,
+      chapterCode: nextChap,
+      grade: nextGrade,
+      updatedLabel: new Date().toLocaleDateString('vi-VN')
+    });
+
+    const idx = (this.state.homeworks || []).findIndex(h => h && h.id === updated.id);
+    if (idx !== -1) this.state.homeworks[idx] = updated;
+    else this.state.homeworks.unshift(updated);
+
+    this.saveData({ markAdminDirty: true });
+    this.renderPreservingScroll();
+    return updated;
+  },
+
+  async addCurriculumTopicSlot({
+    grade = 12,
+    chapterCode = 'Chương 1',
+    lessonTitle = 'Bài 1. Chuyên đề mới',
+    code = '',
+    title = '',
+    itemKind = 'document',
+    files = []
+  } = {}) {
+    const g = Number(grade || 12) || 12;
+    const ch = String(chapterCode || 'Chương 1').trim() || 'Chương 1';
+    const ls = String(lessonTitle || 'Phiếu bài tập & Chuyên đề').trim() || 'Phiếu bài tập & Chuyên đề';
+    const finalCode = String(code || '').trim() || this.getSuggestedNextTopicCode(g, ch, ls);
+    const finalTitle = String(title || '').trim() || `${finalCode}. Phân dạng bài tập mới`;
+    const sameChapItems = this.getMergedWorksheets({ includeEmptySlots: true }).filter(
+      it => Number(it.grade || 12) === g && String(it.chapterCode || '').trim().toLowerCase() === ch.toLowerCase()
+    );
+    const maxOrder = sameChapItems.reduce((acc, it) => Math.max(acc, Number(it.orderIndex) || 0), 0);
+
+    const newId = `CUR-${g}-D${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+    const record = this.normalizeHomeworkRecord({
+      id: newId,
+      code: finalCode,
+      grade: g,
+      chapterCode: ch,
+      lessonTitle: ls,
+      title: finalTitle,
+      description: ls,
+      itemKind: itemKind === 'homework' ? 'homework' : 'document',
+      hwMode: itemKind === 'homework' ? 'interactive' : 'none',
+      isCurriculumSlot: true,
+      orderIndex: maxOrder + 1,
+      allowOnlineView: true,
+      allowDownload: true,
+      allowDirectPractice: true,
+      allowViewSolution: true,
+      accessType: 'grade',
+      allowedGrades: [g],
+      isActive: true,
+      dateAdded: new Date().toISOString().split('T')[0],
+      updatedLabel: new Date().toLocaleDateString('vi-VN')
+    });
+
+    this.state.homeworks.unshift(record);
+    if (this.state.collapsedCurriculumKeys) {
+      delete this.state.collapsedCurriculumKeys[`${g}::${ch}`];
+      delete this.state.collapsedCurriculumKeys[`${g}::${ch}::${ls}`];
+    }
+
+    if (Array.isArray(files) && files.length > 0) {
+      await this.attachFilesToHomeworkRecord(record.id, files);
+    } else {
+      this.saveData({ markAdminDirty: true });
+      this.renderPreservingScroll();
+    }
+    return this.findHomeworkById(record.id);
+  },
+
+  deleteCurriculumLesson(grade, chapterCode, lessonTitle, { skipConfirm = false } = {}) {
+    const g = Number(grade || 12);
+    const ch = String(chapterCode || '').trim();
+    const ls = String(lessonTitle || '').trim();
+    const targets = this.getMergedWorksheets({ includeEmptySlots: true }).filter(it =>
+      Number(it.grade || 12) === g &&
+      (String(it.chapterCode || '').trim() || 'Tài liệu & BTVN khác').toLowerCase() === ch.toLowerCase() &&
+      (String(it.lessonTitle || '').trim() || 'Phiếu bài tập & Chuyên đề').toLowerCase() === ls.toLowerCase()
+    );
+    if (targets.length === 0) return 0;
+
+    const doDelete = () => {
+      const idSet = new Set(targets.map(t => t.id));
+      this.state.homeworks = (this.state.homeworks || []).filter(h => !idSet.has(h.id));
+      targets.forEach(t => this.markDeletedId(t.id));
+      this.saveData({ markAdminDirty: true });
+      this.renderPreservingScroll();
+      this.notify(`Đã xóa bài học "${ls}" (${targets.length} mục) khỏi Cây Thư Mục.`, 'info', 'Đã xóa bài học');
+    };
+
+    if (skipConfirm || typeof document === 'undefined') {
+      doDelete();
+      return targets.length;
+    }
+    this.confirmDialog(
+      `Bạn có chắc chắn muốn xóa thư mục Bài học "${ls}" (${targets.length} dạng/phiếu bên trong) khỏi Cây Thư Mục Khối ${g}?`,
+      doDelete,
+      { type: 'danger', title: 'Xóa Bài học khỏi Cây Thư Mục?', confirmText: 'Xóa bài học', cancelText: 'Hủy' }
+    );
+    return targets.length;
+  },
+
+  deleteCurriculumChapter(grade, chapterCode, { skipConfirm = false } = {}) {
+    const g = Number(grade || 12);
+    const ch = String(chapterCode || '').trim();
+    const targets = this.getMergedWorksheets({ includeEmptySlots: true }).filter(it =>
+      Number(it.grade || 12) === g &&
+      (String(it.chapterCode || '').trim() || 'Tài liệu & BTVN khác').toLowerCase() === ch.toLowerCase()
+    );
+
+    const doDelete = () => {
+      const idSet = new Set(targets.map(t => t.id));
+      this.state.homeworks = (this.state.homeworks || []).filter(h => !idSet.has(h.id));
+      targets.forEach(t => this.markDeletedId(t.id));
+      if (!this.state.settings || typeof this.state.settings !== 'object') this.state.settings = {};
+      if (!Array.isArray(this.state.settings.deletedCurriculumChapterKeys)) {
+        this.state.settings.deletedCurriculumChapterKeys = [];
+      }
+      const chKey = `${g}::${ch.toLowerCase()}`;
+      if (!this.state.settings.deletedCurriculumChapterKeys.includes(chKey)) {
+        this.state.settings.deletedCurriculumChapterKeys.push(chKey);
+      }
+      if (Array.isArray(this.state.settings.customCurriculumChapters)) {
+        this.state.settings.customCurriculumChapters = this.state.settings.customCurriculumChapters.filter(
+          c => !(Number(c?.grade || 12) === g && String(c?.chapterCode || '').trim().toLowerCase() === ch.toLowerCase())
+        );
+      }
+      this.saveData({ markAdminDirty: true });
+      this.renderPreservingScroll();
+      this.notify(`Đã xóa "${ch}" (Khối ${g}) khỏi Cây Thư Mục.`, 'info', 'Đã xóa Chương');
+    };
+
+    if (skipConfirm || typeof document === 'undefined') {
+      doDelete();
+      return targets.length;
+    }
+    this.confirmDialog(
+      `Bạn có chắc chắn muốn xóa toàn bộ "${ch}" (Khối ${g} — gồm ${targets.length} dạng/phiếu) khỏi Cây Thư Mục?`,
+      doDelete,
+      { type: 'danger', title: 'Xóa Chương khỏi Cây Thư Mục?', confirmText: 'Xóa Chương', cancelText: 'Hủy' }
+    );
+    return targets.length;
+  },
+
+  triggerQuickTreeUpload(hwId) {
+    if (typeof document === 'undefined') return;
+    this.state._quickTreeUploadHwId = String(hwId || '');
+    let inp = document.getElementById('quickTreeFileInput');
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'file';
+      inp.id = 'quickTreeFileInput';
+      inp.multiple = true;
+      inp.accept = '.pdf,.tex,application/pdf,text/plain,application/x-tex';
+      inp.className = 'hidden';
+      inp.onchange = (ev) => this.handleQuickTreeUpload(ev);
+      document.body.appendChild(inp);
+    }
+    inp.value = '';
+    inp.click();
+  },
+
+  async attachFilesToHomeworkRecord(hwId, fileList) {
+    const existing = this.findHomeworkById(hwId);
+    if (!existing) return null;
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return existing;
+
+    const texFiles = files.filter(f => /\.tex$/i.test(f.name || ''));
+    const pdfFiles = files.filter(f => /\.pdf$/i.test(f.name || ''));
+
+    let texFileName = existing.texFileName || '';
+    let parsedTex = null;
+    if (texFiles.length > 0) {
+      texFileName = texFiles[0].name;
+      const rawTex = await this.readTextFromUploadedFile(texFiles[0]);
+      if (rawTex) {
+        parsedTex = this.parseTexAnswerKey(rawTex);
+      }
+    }
+
+    const savedVariants = Array.isArray(existing.pdfVariants) ? existing.pdfVariants.map(v => ({ ...v })) : [];
+    let primaryPdfUrl = existing.pdfUrl || '';
+    let primaryFileName = existing.fileName || '';
+    let primaryFileSize = existing.fileSize || '';
+    let solutionPdfUrl = existing.solutionPdfUrl || '';
+    let solutionFileName = existing.solutionFileName || '';
+
+    const classifiedPdfs = pdfFiles.map((file, idx) => ({
+      file,
+      meta: this.classifyWorksheetPdfVariant(file.name, idx)
+    })).sort((a, b) => (a.meta.order || 99) - (b.meta.order || 99));
+
+    for (const entry of classifiedPdfs) {
+      const vFile = entry.file;
+      const vMeta = entry.meta;
+      const vStorageKey = vMeta.isSolution ? `${existing.id}_sol` : `${existing.id}__${vMeta.key}`;
+      let vUrl = '';
+      if (typeof PDFStorage !== 'undefined') {
+        await PDFStorage.savePdf(vStorageKey, vFile);
+      }
+      if (this.isServerSyncEnabled()) {
+        try { vUrl = await this.uploadPdfToServer(vStorageKey, vFile); } catch (_) {}
+      }
+      if (!vUrl) {
+        vUrl = (typeof PDFStorage !== 'undefined') ? `idb:${vStorageKey}` : (`blob:${vFile.name}`);
+      }
+      this.setPdfCacheVersion(vStorageKey, vUrl);
+
+      const nextVar = {
+        key: vMeta.key,
+        label: vMeta.label,
+        shortLabel: vMeta.shortLabel,
+        url: vUrl,
+        fileName: vFile.name,
+        isSolution: Boolean(vMeta.isSolution),
+        isNoAnswerPractice: Boolean(vMeta.isNoAnswerPractice)
+      };
+      const eIdx = savedVariants.findIndex(x => x.key === vMeta.key);
+      if (eIdx !== -1) savedVariants[eIdx] = nextVar;
+      else savedVariants.push(nextVar);
+
+      if (vMeta.isSolution) {
+        solutionPdfUrl = vUrl;
+        solutionFileName = vFile.name;
+      }
+    }
+
+    const stuVars = savedVariants.filter(v => !v.isSolution && !this.classifyWorksheetPdfVariant(v.key || v.fileName).isSolution);
+    const bestPracticeVar = stuVars.find(v => v.key === 'hs_khongvd_khongoli')
+      || stuVars.find(v => v.isNoAnswerPractice)
+      || stuVars[0]
+      || null;
+    if (bestPracticeVar) {
+      primaryPdfUrl = bestPracticeVar.url;
+      primaryFileName = bestPracticeVar.fileName;
+      const matchedFile = pdfFiles.find(f => f.name === bestPracticeVar.fileName);
+      if (matchedFile && matchedFile.size) {
+        primaryFileSize = (matchedFile.size / 1024 / 1024).toFixed(1) + ' MB';
+      } else if (!primaryFileSize) {
+        primaryFileSize = 'PDF';
+      }
+      if (typeof PDFStorage !== 'undefined') {
+        const rawFile = pdfFiles.find(f => f.name === bestPracticeVar.fileName);
+        if (rawFile) await PDFStorage.savePdf(existing.id, rawFile);
+      }
+    }
+
+    let scoring = existing.scoring || {};
+    let part1 = Array.isArray(existing.part1) ? existing.part1 : [];
+    let part2 = Array.isArray(existing.part2) ? existing.part2 : [];
+    let part3 = Array.isArray(existing.part3) ? existing.part3 : [];
+    let part4 = Array.isArray(existing.part4) ? existing.part4 : [];
+
+    if (parsedTex && ((parsedTex.p1?.length || 0) + (parsedTex.p2?.length || 0) + (parsedTex.p3?.length || 0) + (parsedTex.p4?.length || 0) > 0)) {
+      part1 = (parsedTex.p1 || []).map((a, i) => ({ id: i + 1, correct_answer: String(a || '').trim().toUpperCase() }));
+      part2 = (parsedTex.p2 || []).map((obj, i) => ({
+        id: i + 1,
+        statements: ['a', 'b', 'c', 'd'].map(sub => ({ sub_id: sub, correct: Boolean(obj && obj[sub]) }))
+      }));
+      part3 = (parsedTex.p3 || []).map((a, i) => ({ id: i + 1, correct_answer: String(a ?? '').trim() }));
+      part4 = (parsedTex.p4 || []).map((a, i) => ({ id: i + 1, correct_answer: String(a ?? '').trim() }));
+    }
+
+    const updated = this.normalizeHomeworkRecord({
+      ...existing,
+      pdfUrl: primaryPdfUrl,
+      fileName: primaryFileName,
+      fileSize: primaryFileSize,
+      solutionPdfUrl,
+      solutionFileName,
+      pdfVariants: savedVariants,
+      texFileName,
+      scoring,
+      part1,
+      part2,
+      part3,
+      part4,
+      updatedLabel: new Date().toLocaleDateString('vi-VN')
+    });
+
+    const idx = (this.state.homeworks || []).findIndex(h => h && h.id === updated.id);
+    if (idx !== -1) this.state.homeworks[idx] = updated;
+    else this.state.homeworks.unshift(updated);
+
+    this.saveData({ markAdminDirty: true });
+    this.renderPreservingScroll();
+    return updated;
+  },
+
+  async handleQuickTreeUpload(event) {
+    const files = Array.from(event?.target?.files || []);
+    const hwId = this.state._quickTreeUploadHwId;
+    if (!hwId || files.length === 0) return;
+    const hw = this.findHomeworkById(hwId);
+    if (!hw) return;
+
+    const updated = await this.attachFilesToHomeworkRecord(hwId, files);
+    if (event?.target) event.target.value = '';
+    if (updated) {
+      const texInfo = updated.texFileName ? ` + đáp án từ ${updated.texFileName}` : '';
+      this.notify(
+        `Đã tải lên ${files.length} file vào "${updated.title}"${texInfo} thành công!`,
+        'success',
+        'Upload Cây Thư Mục thành công'
+      );
+    }
+  },
+
+  showCurriculumNodeModal(opts = {}) {
+    if (typeof document === 'undefined') return;
+    const mode = String(opts.mode || 'add-item');
+    const initGrade = Number(opts.grade || (this.state.hwGradeFilter !== 'ALL' ? this.state.hwGradeFilter : 12)) || 12;
+    const cat = this.getCurriculumCatalog();
+    const allMerged = this.getMergedWorksheets({ includeEmptySlots: true });
+    const chapOpts = [...new Set([
+      ...(cat.chapters || []).filter(c => Number(c.grade) === initGrade).map(c => c.chapterCode),
+      ...allMerged.filter(x => Number(x.grade) === initGrade).map(x => x.chapterCode)
+    ])].filter(Boolean);
+    const initChap = String(opts.chapterCode || (this.state.hwChapterFilter !== 'ALL' ? this.state.hwChapterFilter : (chapOpts[0] || 'Chương 1'))).trim();
+    const lessonOpts = [...new Set(
+      allMerged
+        .filter(x => Number(x.grade) === initGrade && (!initChap || String(x.chapterCode || '').toLowerCase() === initChap.toLowerCase()))
+        .map(x => x.lessonTitle)
+    )].filter(Boolean);
+    const initLesson = String(opts.lessonTitle || lessonOpts[0] || 'Bài 1. Chuyên đề trọng tâm').trim();
+
+    const targetHw = opts.hwId ? this.findHomeworkById(opts.hwId) : null;
+    const existingChapMeta = (cat.chapters || []).find(
+      c => Number(c.grade) === initGrade && String(c.chapterCode || '').trim().toLowerCase() === initChap.toLowerCase()
+    ) || {};
+
+    this._activeCurriculumNodeModalOpts = {
+      mode,
+      hwId: targetHw ? targetHw.id : '',
+      oldGrade: targetHw ? Number(targetHw.grade || 12) : initGrade,
+      oldChapterCode: targetHw ? (targetHw.chapterCode || initChap) : initChap,
+      oldLessonTitle: targetHw ? (targetHw.lessonTitle || initLesson) : initLesson
+    };
+
+    const titlesMap = {
+      'rename-item': 'Sửa Tên & Mã Dạng Trong Cây Thư Mục',
+      'add-item': 'Thêm Dạng / Phiếu Mới Vào Cây Thư Mục',
+      'rename-lesson': 'Sửa Tên Bài Học / Thư Mục Con',
+      'add-lesson': 'Thêm Bài Học / Thư Mục Con Mới',
+      'rename-chapter': 'Sửa Tên Chương Trong Cây Thư Mục',
+      'add-chapter': 'Thêm Chương Mới Vào Cây Thư Mục'
+    };
+    const suggestedCode = mode === 'add-item' ? this.getSuggestedNextTopicCode(initGrade, initChap, initLesson) : 'Dạng 01';
+
+    document.getElementById('curriculumNodeModal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'curriculumNodeModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-xl w-full border border-slate-200 shadow-2xl overflow-hidden my-2">
+        <div class="px-4 sm:px-6 py-3.5 sm:py-4 ltac-admin-header text-[#fbf7ef] flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-9 h-9 rounded-xl bg-[#ffe27d] text-[#3d0709] flex items-center justify-center shrink-0">
+              <i class="fa-solid fa-folder-tree text-sm"></i>
+            </div>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-white truncate">${titlesMap[mode] || 'Cập nhật Cây Thư Mục'}</h3>
+              <p class="text-[11px] text-[#ffe27d] truncate">Cập nhật trực tiếp trên Cây Thư Mục &amp; Bảng Sheet</p>
+            </div>
+          </div>
+          <button type="button" onclick="document.getElementById('curriculumNodeModal')?.remove()" class="w-8 h-8 rounded-full bg-white/15 hover:bg-rose-600 text-white flex items-center justify-center cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <form id="curriculumNodeForm" onsubmit="event.preventDefault(); App.handleCurriculumNodeModalSubmit();" class="p-4 sm:p-6 space-y-3.5 text-xs">
+          ${(mode === 'rename-chapter' || mode === 'add-chapter') ? `
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Khối lớp *</label>
+                <select id="currNodeGrade" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-indigo-700 bg-white outline-none">
+                  ${[12, 11, 10, 9, 8, 7, 6].map(g => `<option value="${g}" ${g === initGrade ? 'selected' : ''}>Khối ${g}</option>`).join('')}
+                </select>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="block font-bold text-slate-700 mb-1">Mã Chương (ngắn gọn) *</label>
+                <input type="text" id="currNodeChapterCode" required value="${this.escapeHtmlAttr(mode === 'add-chapter' ? `Chương ${chapOpts.length + 1}` : initChap)}" placeholder="VD: Chương 1, Chuyên đề 1..." class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-slate-800 outline-none focus:border-indigo-600">
+              </div>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Tên hiển thị đầy đủ của Chương *</label>
+              <input type="text" id="currNodeChapterTitle" required value="${this.escapeHtmlAttr(mode === 'add-chapter' ? '' : (opts.chapterTitle || existingChapMeta.chapterTitle || `KHỐI ${initGrade} — ${initChap.toUpperCase()}`))}" placeholder="VD: KHỐI 12 — CHƯƠNG I. ỨNG DỤNG ĐẠO HÀM ĐỂ KHẢO SÁT HÀM SỐ" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold text-slate-800 outline-none focus:border-indigo-600">
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Link Google Drive Thư mục Chương (Tùy chọn)</label>
+              <input type="url" id="currNodeFolderUrl" value="${this.escapeHtmlAttr(mode === 'add-chapter' ? '' : (opts.folderUrl || existingChapMeta.folderUrl || ''))}" placeholder="https://drive.google.com/drive/folders/..." class="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono text-[11px] text-slate-700 outline-none focus:border-indigo-600">
+            </div>
+            ${mode === 'add-chapter' ? `
+              <div class="p-3 rounded-2xl bg-[#fbf7ef] border border-[#e6dbcd] space-y-2.5">
+                <div class="font-extrabold text-[#650f12] text-[11px] uppercase">Tạo sẵn Bài học &amp; Dạng đầu tiên trong Chương</div>
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1">Tên Bài học đầu tiên *</label>
+                  <input type="text" id="currNodeLessonTitle" required value="Bài 1. Chuyên đề mở đầu" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold bg-white outline-none">
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label class="block font-bold text-slate-700 mb-1">Mã dạng</label>
+                    <input type="text" id="currNodeCode" value="Dạng 01" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold bg-white outline-none">
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="block font-bold text-slate-700 mb-1">Tên dạng đầu tiên</label>
+                    <input type="text" id="currNodeTitle" value="Dạng 1. Câu hỏi lý thuyết và bài tập cơ bản" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold bg-white outline-none">
+                  </div>
+                </div>
+              </div>
+            ` : ''}
+          ` : ''}
+
+          ${(mode === 'rename-lesson' || mode === 'add-lesson') ? `
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Khối lớp *</label>
+                <select id="currNodeGrade" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-indigo-700 bg-white outline-none">
+                  ${[12, 11, 10, 9, 8, 7, 6].map(g => `<option value="${g}" ${g === initGrade ? 'selected' : ''}>Khối ${g}</option>`).join('')}
+                </select>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="block font-bold text-slate-700 mb-1">Thuộc Chương *</label>
+                <input type="text" id="currNodeChapterCode" list="currNodeChapList" required value="${this.escapeHtmlAttr(initChap)}" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-slate-800 outline-none focus:border-indigo-600">
+                <datalist id="currNodeChapList">${chapOpts.map(c => `<option value="${this.escapeHtmlAttr(c)}">`).join('')}</datalist>
+              </div>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">${mode === 'rename-lesson' ? 'Tên mới của Bài học / Thư mục con *' : 'Tên Bài học / Thư mục con mới *'}</label>
+              <input type="text" id="currNodeLessonTitle" required value="${this.escapeHtmlAttr(mode === 'rename-lesson' ? initLesson : `Bài ${lessonOpts.length + 1}. `)}" placeholder="VD: Bài 1. Tính đơn điệu và cực trị của hàm số" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold text-slate-800 outline-none focus:border-indigo-600">
+            </div>
+            ${mode === 'add-lesson' ? `
+              <div class="p-3 rounded-2xl bg-[#fbf7ef] border border-[#e6dbcd] grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1">Mã dạng đầu tiên</label>
+                  <input type="text" id="currNodeCode" value="Dạng 01" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold bg-white outline-none">
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="block font-bold text-slate-700 mb-1">Tên phân dạng đầu tiên *</label>
+                  <input type="text" id="currNodeTitle" required value="Dạng 1. Các bài toán trọng tâm" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold bg-white outline-none">
+                </div>
+              </div>
+            ` : ''}
+          ` : ''}
+
+          ${(mode === 'rename-item' || mode === 'add-item') ? `
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Khối lớp *</label>
+                <select id="currNodeGrade" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-indigo-700 bg-white outline-none">
+                  ${[12, 11, 10, 9, 8, 7, 6].map(g => `<option value="${g}" ${g === (targetHw ? Number(targetHw.grade || 12) : initGrade) ? 'selected' : ''}>Khối ${g}</option>`).join('')}
+                </select>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="block font-bold text-slate-700 mb-1">Chương *</label>
+                <input type="text" id="currNodeChapterCode" list="currNodeChapList" required value="${this.escapeHtmlAttr(targetHw ? (targetHw.chapterCode || initChap) : initChap)}" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold text-slate-800 outline-none">
+                <datalist id="currNodeChapList">${chapOpts.map(c => `<option value="${this.escapeHtmlAttr(c)}">`).join('')}</datalist>
+              </div>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Bài học / Thư mục con *</label>
+              <input type="text" id="currNodeLessonTitle" list="currNodeLessonList" required value="${this.escapeHtmlAttr(targetHw ? (targetHw.lessonTitle || initLesson) : initLesson)}" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold text-slate-800 outline-none">
+              <datalist id="currNodeLessonList">${lessonOpts.map(l => `<option value="${this.escapeHtmlAttr(l)}">`).join('')}</datalist>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+              <div class="sm:col-span-4">
+                <label class="block font-bold text-slate-700 mb-1">STT / Mã dạng *</label>
+                <input type="text" id="currNodeCode" required value="${this.escapeHtmlAttr(targetHw ? (targetHw.code || 'Dạng 01') : suggestedCode)}" placeholder="VD: Dạng 01" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-slate-900 outline-none focus:border-indigo-600">
+              </div>
+              <div class="sm:col-span-8">
+                <label class="block font-bold text-slate-700 mb-1">Tên phân dạng / Phiếu bài tập *</label>
+                <input type="text" id="currNodeTitle" required value="${this.escapeHtmlAttr(targetHw ? targetHw.title : '')}" placeholder="VD: Dạng 1. Tìm vectơ pháp tuyến và phương trình mặt phẳng" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-slate-900 outline-none focus:border-indigo-600">
+              </div>
+            </div>
+            <div class="p-3 rounded-2xl bg-indigo-50/50 border border-indigo-200 space-y-1.5">
+              <label class="block font-extrabold text-indigo-950">
+                <i class="fa-solid fa-cloud-arrow-up text-indigo-600 mr-1"></i>Tải kèm file .PDF (Đề HS / Đáp án GV) &amp; file .TEX (Tùy chọn — có thể up sau)
+              </label>
+              <input type="file" id="currNodeFilesInput" multiple accept=".pdf,.tex,application/pdf,text/plain,application/x-tex" class="w-full text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:text-white file:font-bold cursor-pointer">
+              <p class="text-[11px] text-slate-500">Tự động nhận diện các bản PDF học sinh (<code class="font-mono">HS-CoVD-CoOli</code>, <code class="font-mono">HS-KhongVD-KhongOli</code>...), <code class="font-mono">GV-DapAn.pdf</code> và trích xuất đáp án chấm trực tiếp từ file <code class="font-mono">.tex</code>.</p>
+            </div>
+          ` : ''}
+
+          <div class="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            ${targetHw ? `
+              <button type="button" onclick="document.getElementById('curriculumNodeModal')?.remove(); App.showAddHomeworkModal({ editHwId: '${targetHw.id}' });" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer inline-flex items-center gap-1">
+                <i class="fa-solid fa-sliders"></i><span>Mở cấu hình nâng cao</span>
+              </button>
+            ` : '<span></span>'}
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="document.getElementById('curriculumNodeModal')?.remove()" class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-bold text-slate-700 cursor-pointer">Hủy</button>
+              <button type="submit" id="currNodeSubmitBtn" class="px-4 py-2 rounded-xl bg-[#650f12] hover:bg-[#3d0709] text-white font-extrabold shadow-sm cursor-pointer inline-flex items-center gap-1.5">
+                <i class="fa-solid fa-floppy-disk"></i><span>Lưu Vào Cây Thư Mục</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    `;
+    this.openModalElement(modal);
+  },
+
+  async handleCurriculumNodeModalSubmit() {
+    const opts = this._activeCurriculumNodeModalOpts || {};
+    const mode = opts.mode || 'add-item';
+    const grade = Number(document.getElementById('currNodeGrade')?.value || opts.oldGrade || 12) || 12;
+    const chCode = (document.getElementById('currNodeChapterCode')?.value || opts.oldChapterCode || 'Chương 1').trim();
+    const chTitle = (document.getElementById('currNodeChapterTitle')?.value || '').trim();
+    const folderUrl = (document.getElementById('currNodeFolderUrl')?.value || '').trim();
+    const lsTitle = (document.getElementById('currNodeLessonTitle')?.value || opts.oldLessonTitle || '').trim();
+    const code = (document.getElementById('currNodeCode')?.value || '').trim();
+    const title = (document.getElementById('currNodeTitle')?.value || '').trim();
+    const files = Array.from(document.getElementById('currNodeFilesInput')?.files || []);
+
+    if (mode === 'rename-chapter') {
+      this.renameCurriculumChapter(grade, opts.oldChapterCode, {
+        newChapterCode: chCode,
+        newChapterTitle: chTitle,
+        folderUrl
+      });
+      document.getElementById('curriculumNodeModal')?.remove();
+      this.notify(`Đã cập nhật tên Chương "${chTitle || chCode}" thành công!`, 'success', 'Đã lưu Chương');
+      return;
+    }
+
+    if (mode === 'add-chapter') {
+      this.renameCurriculumChapter(grade, chCode, {
+        newChapterCode: chCode,
+        newChapterTitle: chTitle || `KHỐI ${grade} — ${chCode.toUpperCase()}`,
+        folderUrl
+      });
+      await this.addCurriculumTopicSlot({
+        grade,
+        chapterCode: chCode,
+        lessonTitle: lsTitle || 'Bài 1. Chuyên đề mở đầu',
+        code: code || 'Dạng 01',
+        title: title || 'Dạng 1. Câu hỏi và bài tập cơ bản'
+      });
+      document.getElementById('curriculumNodeModal')?.remove();
+      this.notify(`Đã thêm "${chCode}" vào Cây Thư Mục Khối ${grade}!`, 'success', 'Đã thêm Chương');
+      return;
+    }
+
+    if (mode === 'rename-lesson') {
+      this.renameCurriculumLesson(grade, opts.oldChapterCode, opts.oldLessonTitle, lsTitle, chCode);
+      document.getElementById('curriculumNodeModal')?.remove();
+      this.notify(`Đã đổi tên bài học thành "${lsTitle}"!`, 'success', 'Đã lưu Bài học');
+      return;
+    }
+
+    if (mode === 'add-lesson') {
+      await this.addCurriculumTopicSlot({
+        grade,
+        chapterCode: chCode,
+        lessonTitle: lsTitle,
+        code: code || 'Dạng 01',
+        title: title || 'Dạng 1. Các bài toán trọng tâm'
+      });
+      document.getElementById('curriculumNodeModal')?.remove();
+      this.notify(`Đã thêm Bài học "${lsTitle}" vào ${chCode}!`, 'success', 'Đã thêm Bài học');
+      return;
+    }
+
+    if (mode === 'rename-item' && opts.hwId) {
+      const updated = this.renameCurriculumItem(opts.hwId, {
+        code,
+        title,
+        lessonTitle: lsTitle,
+        chapterCode: chCode,
+        grade
+      });
+      if (files.length > 0 && updated) {
+        await this.attachFilesToHomeworkRecord(updated.id, files);
+      }
+      document.getElementById('curriculumNodeModal')?.remove();
+      this.notify(`Đã cập nhật "${title}" trong Cây Thư Mục!`, 'success', 'Đã lưu Dạng');
+      return;
+    }
+
+    if (mode === 'add-item') {
+      const created = await this.addCurriculumTopicSlot({
+        grade,
+        chapterCode: chCode,
+        lessonTitle: lsTitle,
+        code,
+        title,
+        files
+      });
+      document.getElementById('curriculumNodeModal')?.remove();
+      if (created) {
+        this.notify(`Đã thêm "${created.title}" vào Cây Thư Mục!`, 'success', 'Đã thêm Dạng mới');
+      }
+    }
   },
 
   findHomeworkById(hwId) {
@@ -5939,6 +6933,12 @@ const App = {
                 <div class="text-sm font-bold text-slate-800 font-serif">${u.fullName}${u.nickname ? ` <span class="text-xs font-sans font-semibold text-amber-700">(${u.nickname})</span>` : ''}</div>
                 <div class="text-xs text-slate-500">Mã HS: <span class="font-mono font-semibold text-indigo-600">${u.studentId}</span> • Khối ${this.getStudentGrade(u)} • Lớp ${u.className || '12'}</div>
               </div>
+              ${this.isTeacherPreviewingAsStudent() ? `
+                <button type="button" id="studentHeaderBackToAdminBtn" onclick="App.toggleAdminStudentViewMode(false)" class="ui-btn px-2.5 sm:px-3.5 bg-[#650f12] hover:bg-[#3d0709] text-[#ffe27d] border border-[#ffe27d]/60 shadow-xs text-xs font-extrabold" title="Quay lại Trang Giáo Viên (Admin) ngay lập tức">
+                  <i class="fa-solid fa-user-shield"></i>
+                  <span>Về Trang GV</span>
+                </button>
+              ` : ''}
               <button type="button" onclick="App.logout()" class="ui-btn px-2.5 sm:px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 shadow-2xs text-xs font-bold" title="Đăng xuất khỏi hệ thống">
                 <i class="fa-solid fa-right-from-bracket"></i>
                 <span class="hidden sm:inline">Đăng xuất</span>
@@ -5949,6 +6949,7 @@ const App = {
 
         <!-- Main Body -->
         <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 pt-5 sm:pt-8 pb-20 sm:pb-12 flex-1 space-y-5 sm:space-y-6">
+          ${this.renderTeacherPreviewBannerHtml()}
           <!-- Student Banner Đồng Bộ Phong Cách Đỏ Đô & Ánh Vàng Trang Giới Thiệu -->
           <div class="ltac-crimson-banner rounded-2xl sm:rounded-[22px] p-4 sm:p-6 text-white relative overflow-hidden">
             <div class="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -7372,6 +8373,26 @@ const App = {
               <i class="fa-solid fa-grip"></i><span>Thẻ</span>
             </button>
           </div>
+          ${isAdmin ? `
+            <div class="inline-flex flex-wrap items-center gap-1">
+              <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-chapter' })" class="px-2.5 py-1.5 rounded-xl bg-white hover:bg-amber-50 text-[#650f12] border border-[#650f12]/25 text-xs font-extrabold transition cursor-pointer inline-flex items-center gap-1" title="Thêm Chương mới vào Cây Thư Mục">
+                <i class="fa-solid fa-folder-plus"></i><span>+ Chương</span>
+              </button>
+              <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-lesson' })" class="px-2.5 py-1.5 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 text-xs font-extrabold transition cursor-pointer inline-flex items-center gap-1" title="Thêm Bài học / Thư mục con mới">
+                <i class="fa-solid fa-folder-open"></i><span>+ Bài Học</span>
+              </button>
+              <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-item' })" class="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold shadow-2xs transition cursor-pointer inline-flex items-center gap-1" title="Thêm Dạng / Phiếu bài tập mới vào Cây Thư Mục">
+                <i class="fa-solid fa-plus"></i><span>+ Thêm Dạng</span>
+              </button>
+              <button type="button" id="hwToolbarPreviewStudentBtn" onclick="App.toggleAdminStudentViewMode(true, { studentMainTab: 'homeworks', studentHwViewMode: '${mode}' })" class="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-2xs transition cursor-pointer inline-flex items-center gap-1.5" title="Xem ngay Cây Thư Mục &amp; Bảng Sheet dưới góc nhìn Học sinh mà không cần thoát Admin">
+                <i class="fa-solid fa-eye"></i><span>Xem Như Học Sinh</span>
+              </button>
+            </div>
+          ` : (this.isTeacherPreviewingAsStudent() ? `
+            <button type="button" id="hwToolbarBackToAdminBtn" onclick="App.toggleAdminStudentViewMode(false, { adminMainTab: 'homeworks', hwViewMode: '${mode}' })" class="px-2.5 py-1.5 rounded-xl bg-[#650f12] hover:bg-[#3d0709] text-[#ffe27d] border border-[#ffe27d]/60 text-xs font-extrabold shadow-2xs transition cursor-pointer inline-flex items-center gap-1.5" title="Quay lại chế độ Giáo Viên để sửa tên, thêm dạng và upload file">
+              <i class="fa-solid fa-user-shield"></i><span>Chế Độ GV (Sửa Cây Thư Mục)</span>
+            </button>
+          ` : '')}
         </div>
 
         <!-- Lọc nhanh Trạng thái Phiếu + Chương + Thu gọn / Mở rộng -->
@@ -7555,8 +8576,14 @@ const App = {
                             </a>
                           ` : ''}
                           ${isAdmin ? `
-                            <button type="button" onclick="App.showAddHomeworkModal({ itemKind: 'document', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}' })" class="px-2.5 py-1 rounded-lg bg-[#ffe27d] hover:bg-amber-200 text-[#3d0709] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap">
-                              <i class="fa-solid fa-plus"></i><span>Up Phiếu Chương</span>
+                            <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'rename-chapter', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}', chapterTitle: '${this.escapeHtmlAttr(chap.chapterTitle)}', folderUrl: '${this.escapeHtmlAttr(chap.folderUrl || '')}' })" class="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-[11px] font-bold text-white border border-white/25 inline-flex items-center gap-1 cursor-pointer whitespace-nowrap" title="Sửa tên Chương hoặc Link Google Drive">
+                              <i class="fa-solid fa-pen"></i><span>Sửa tên Chương</span>
+                            </button>
+                            <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-lesson', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}' })" class="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-[11px] font-bold text-[#ffe27d] border border-white/25 inline-flex items-center gap-1 cursor-pointer whitespace-nowrap" title="Thêm Bài học mới vào Chương này">
+                              <i class="fa-solid fa-folder-plus"></i><span>+ Bài học</span>
+                            </button>
+                            <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-item', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}' })" class="px-2.5 py-1 rounded-lg bg-[#ffe27d] hover:bg-amber-200 text-[#3d0709] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap" title="Thêm Dạng / Up Phiếu vào Chương này">
+                              <i class="fa-solid fa-plus"></i><span>+ Thêm Dạng / Up Phiếu</span>
                             </button>
                           ` : ''}
                         </div>
@@ -7585,7 +8612,14 @@ const App = {
                           </span>
                         </td>
                         <td class="text-xs font-semibold ${sameLesson ? 'text-slate-400' : 'text-slate-800'}">
-                          ${this.escapeHtmlAttr(hw.lessonTitle || 'Chuyên đề bổ sung')}
+                          <div class="flex items-center justify-between gap-1">
+                            <span>${this.escapeHtmlAttr(hw.lessonTitle || 'Chuyên đề bổ sung')}</span>
+                            ${(isAdmin && !sameLesson) ? `
+                              <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'rename-lesson', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}', lessonTitle: '${this.escapeHtmlAttr(hw.lessonTitle || 'Chuyên đề bổ sung')}' })" class="w-6 h-6 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-700 inline-flex items-center justify-center shrink-0 cursor-pointer" title="Sửa tên Bài học này">
+                                <i class="fa-solid fa-pen text-[10px]"></i>
+                              </button>
+                            ` : ''}
+                          </div>
                         </td>
                         <td>
                           <div class="font-bold text-slate-900 leading-snug">${this.escapeHtmlAttr(hw.title)}</div>
@@ -7635,10 +8669,16 @@ const App = {
                                   <i class="fa-solid fa-list-check text-[11px]"></i>
                                 </button>
                               ` : ''}
-                              <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center justify-center cursor-pointer" title="Up PDF / File .tex / Sửa phân quyền">
+                              <button type="button" onclick="App.triggerQuickTreeUpload('${hw.id}')" class="w-7 h-7 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 inline-flex items-center justify-center cursor-pointer" title="Upload nhanh file .PDF (Đề HS / Đáp án GV) &amp; .TEX cho dạng này">
+                                <i class="fa-solid fa-cloud-arrow-up text-[11px]"></i>
+                              </button>
+                              <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'rename-item', hwId: '${hw.id}' })" class="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center justify-center cursor-pointer" title="Sửa nhanh tên Dạng, Mã dạng &amp; Bài học">
                                 <i class="fa-solid fa-pen text-[11px]"></i>
                               </button>
-                              <button type="button" onclick="App.showAddHomeworkModal({ itemKind: 'document', grade: ${hw.grade || 12}, chapterCode: '${this.escapeHtmlAttr(hw.chapterCode || '')}', lessonTitle: '${this.escapeHtmlAttr(hw.lessonTitle || '')}', code: '${this.escapeHtmlAttr((hw.code || 'Phiếu') + ' (Mới)')}' })" class="w-7 h-7 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 inline-flex items-center justify-center cursor-pointer" title="Thêm phiếu mới vào đúng Bài học này">
+                              <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-indigo-700 inline-flex items-center justify-center cursor-pointer" title="Cấu hình đầy đủ (Phân quyền lớp, hạn nộp, đáp án)">
+                                <i class="fa-solid fa-sliders text-[11px]"></i>
+                              </button>
+                              <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-item', grade: ${hw.grade || 12}, chapterCode: '${this.escapeHtmlAttr(hw.chapterCode || '')}', lessonTitle: '${this.escapeHtmlAttr(hw.lessonTitle || '')}' })" class="w-7 h-7 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 inline-flex items-center justify-center cursor-pointer" title="Thêm Dạng mới vào đúng Bài học này">
                                 <i class="fa-solid fa-plus text-[11px]"></i>
                               </button>
                               <button type="button" onclick="App.deleteHomework('${hw.id}')" class="w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 inline-flex items-center justify-center cursor-pointer" title="Xóa mục này">
@@ -7695,8 +8735,20 @@ const App = {
                     </a>
                   ` : ''}
                   ${isAdmin ? `
-                    <button type="button" onclick="App.showAddHomeworkModal({ itemKind: 'document', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}' })" class="px-2.5 py-1 rounded-lg bg-[#ffe27d] hover:bg-amber-200 text-[#3d0709] text-[11px] font-extrabold cursor-pointer">
-                      <i class="fa-solid fa-plus mr-1"></i>Up Phiếu
+                    <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'rename-chapter', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}', chapterTitle: '${this.escapeHtmlAttr(chap.chapterTitle)}', folderUrl: '${this.escapeHtmlAttr(chap.folderUrl || '')}' })" class="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white border border-white/25 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Sửa tên Chương hoặc Link Google Drive">
+                      <i class="fa-solid fa-pen"></i><span>Sửa tên Chương</span>
+                    </button>
+                    <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-lesson', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}' })" class="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-[#ffe27d] border border-white/25 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Thêm Bài học / Thư mục con mới vào Chương này">
+                      <i class="fa-solid fa-folder-plus"></i><span>+ Thêm Bài</span>
+                    </button>
+                    <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-item', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}' })" class="px-2.5 py-1 rounded-lg bg-[#ffe27d] hover:bg-amber-200 text-[#3d0709] text-[11px] font-extrabold cursor-pointer inline-flex items-center gap-1" title="Thêm Dạng mới hoặc tải phiếu lên Chương này">
+                      <i class="fa-solid fa-plus"></i><span>+ Thêm Dạng</span>
+                    </button>
+                    <button type="button" onclick="App.showBatchWorksheetModal({ grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}' })" class="px-2.5 py-1 rounded-lg bg-[#137333] hover:bg-[#0d5a28] text-white border border-white/20 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Tải hàng loạt file .PDF &amp; .TEX vào Chương này">
+                      <i class="fa-solid fa-cloud-arrow-up"></i><span>Up Hàng Loạt</span>
+                    </button>
+                    <button type="button" onclick="App.deleteCurriculumChapter(${chap.grade}, '${this.escapeHtmlAttr(chap.chapterCode)}')" class="w-7 h-7 rounded-lg bg-white/10 hover:bg-rose-600 text-white/90 hover:text-white border border-white/20 inline-flex items-center justify-center cursor-pointer" title="Xóa Chương này">
+                      <i class="fa-solid fa-trash-can text-[11px]"></i>
                     </button>
                   ` : ''}
                 </div>
@@ -7706,7 +8758,7 @@ const App = {
                 <div class="p-3 sm:p-4 space-y-3" style="background:${chap.tintHex || '#fbf7ef'};">
                   ${chap.lessons.map(ls => {
                     const isLsCollapsed = Boolean(collapsedMap[ls.key]);
-                    const lsReady = ls.items.filter(it => Boolean(it.pdfUrl || it.itemKind === 'homework')).length;
+                    const lsReady = ls.items.filter(it => Boolean(it.pdfUrl || (Array.isArray(it.pdfVariants) && it.pdfVariants.length > 0) || it.itemKind === 'homework')).length;
                     return `
                       <div class="space-y-2">
                         <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white border border-[#e6dbcd] shadow-2xs">
@@ -7717,16 +8769,27 @@ const App = {
                             <span class="px-2 py-0.5 rounded-full text-[10px] font-mono ${lsReady > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'} shrink-0">${lsReady}/${ls.items.length}</span>
                           </button>
                           ${isAdmin ? `
-                            <button type="button" onclick="App.showAddHomeworkModal({ itemKind: 'document', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}', lessonTitle: '${this.escapeHtmlAttr(ls.lessonTitle)}' })" class="px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[11px] font-bold cursor-pointer shrink-0">
-                              <i class="fa-solid fa-plus mr-1"></i>Thêm Phiếu
-                            </button>
+                            <div class="flex flex-wrap items-center gap-1 shrink-0">
+                              <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'rename-lesson', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}', lessonTitle: '${this.escapeHtmlAttr(ls.lessonTitle)}' })" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Sửa tên Bài học / Thư mục con này">
+                                <i class="fa-solid fa-pen text-[10px]"></i><span>Sửa tên Bài</span>
+                              </button>
+                              <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-item', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}', lessonTitle: '${this.escapeHtmlAttr(ls.lessonTitle)}' })" class="px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Thêm Dạng mới vào Bài học này">
+                                <i class="fa-solid fa-plus text-[10px]"></i><span>+ Thêm Dạng</span>
+                              </button>
+                              <button type="button" onclick="App.showBatchWorksheetModal({ grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}', lessonTitle: '${this.escapeHtmlAttr(ls.lessonTitle)}' })" class="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Tải nhiều file .PDF &amp; .TEX vào Bài học này">
+                                <i class="fa-solid fa-cloud-arrow-up text-[10px]"></i><span>Up Hàng Loạt</span>
+                              </button>
+                              <button type="button" onclick="App.deleteCurriculumLesson(${chap.grade}, '${this.escapeHtmlAttr(chap.chapterCode)}', '${this.escapeHtmlAttr(ls.lessonTitle)}')" class="w-6 h-6 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 inline-flex items-center justify-center cursor-pointer" title="Xóa Bài học này">
+                                <i class="fa-solid fa-trash-can text-[10px]"></i>
+                              </button>
+                            </div>
                           ` : ''}
                         </div>
 
                         ${isLsCollapsed ? '' : `
                           <div class="ltac-tree-children space-y-2">
                             ${ls.items.map(hw => {
-                              const hasPdf = Boolean(hw.pdfUrl);
+                              const hasPdf = Boolean(hw.pdfUrl || (Array.isArray(hw.pdfVariants) && hw.pdfVariants.length > 0));
                               const isHw = hw.itemKind === 'homework';
                               const isReady = hasPdf || isHw;
                               const safeTitleJs = String(hw.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -7779,8 +8842,20 @@ const App = {
                                       </span>
                                     ` : ''}
                                     ${isAdmin ? `
-                                      <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold cursor-pointer">
-                                        <i class="fa-solid ${hasPdf ? 'fa-pen' : 'fa-cloud-arrow-up'} mr-1"></i>${hasPdf ? 'Sửa' : 'Up PDF'}
+                                      <button type="button" onclick="App.triggerQuickTreeUpload('${hw.id}')" class="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Chọn 1 hoặc nhiều file .PDF &amp; .TEX tải thẳng vào Dạng này">
+                                        <i class="fa-solid fa-cloud-arrow-up"></i><span>${hasPdf ? 'Up File' : 'Up PDF'}</span>
+                                      </button>
+                                      <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'rename-item', hwId: '${hw.id}' })" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Sửa nhanh tên Dạng, Mã dạng &amp; Bài học">
+                                        <i class="fa-solid fa-pen"></i><span>Sửa tên</span>
+                                      </button>
+                                      <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${hw.id}' })" class="px-2 py-1.5 rounded-lg bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Cấu hình đầy đủ (Phân quyền lớp, hạn nộp, đáp án)">
+                                        <i class="fa-solid fa-sliders"></i><span class="hidden sm:inline">Cấu hình</span>
+                                      </button>
+                                      <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-item', grade: ${hw.grade || 12}, chapterCode: '${this.escapeHtmlAttr(hw.chapterCode || chap.chapterCode)}', lessonTitle: '${this.escapeHtmlAttr(hw.lessonTitle || ls.lessonTitle)}' })" class="w-7 h-7 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 inline-flex items-center justify-center cursor-pointer" title="Thêm Dạng mới vào Bài học này">
+                                        <i class="fa-solid fa-plus text-[11px]"></i>
+                                      </button>
+                                      <button type="button" onclick="App.deleteHomework('${hw.id}')" class="w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 inline-flex items-center justify-center cursor-pointer" title="Xóa Dạng này">
+                                        <i class="fa-solid fa-trash-can text-[11px]"></i>
                                       </button>
                                     ` : (!hasPdf && hw.folderUrl ? `
                                       <a href="${hw.folderUrl}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-semibold inline-flex items-center gap-1">
@@ -8745,6 +9820,12 @@ const App = {
               <span class="sm:hidden">Thoát</span>
               <span class="hidden sm:inline">Trang chủ</span>
             </button>
+            ${(u && (u.role === 'admin' || u._isTeacherPreview)) ? `
+              <button type="button" id="examBackToAdminBtn" onclick="App.toggleAdminStudentViewMode(false)" class="ui-btn px-2 sm:px-3 bg-[#650f12] hover:bg-[#3d0709] text-[#ffe27d] border border-[#ffe27d]/60 text-xs font-extrabold shadow-2xs shrink-0" title="Thoát phòng thi và quay về Trang Giáo Viên">
+                <i class="fa-solid fa-user-shield"></i>
+                <span class="hidden sm:inline">Về Trang GV</span>
+              </button>
+            ` : ''}
 
             <div class="h-5 w-px bg-slate-200 hidden sm:block shrink-0"></div>
 
@@ -11407,6 +12488,11 @@ const App = {
 
               <div class="h-6 w-px bg-white/15 hidden sm:block"></div>
 
+              <button type="button" id="adminPreviewStudentHeaderBtn" onclick="App.toggleAdminStudentViewMode(true)" class="ui-btn px-2.5 sm:px-3.5 bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/50 text-xs font-extrabold shadow-xs" title="Xem ngay giao diện Học sinh (Đề thi, BTVN, Bảng Sheet &amp; Cây Thư Mục) mà không cần đăng xuất">
+                <i class="fa-solid fa-eye text-[#ffe27d]"></i>
+                <span>Xem Như HS</span>
+              </button>
+
               <button type="button" id="adminProfileHeaderBtn" onclick="App.showAdminProfileModal()" class="ui-btn-icon sm:w-auto sm:px-3 bg-white/10 hover:bg-white/20 text-[#fbf7ef] text-xs font-bold border border-white/15 sm:gap-1.5" title="Hồ sơ giáo viên, đổi tên hiển thị & mật khẩu">
                 <i class="fa-solid fa-user-gear text-[#ffe27d]"></i>
                 <span class="hidden sm:inline">${u.fullName}</span>
@@ -11512,6 +12598,18 @@ const App = {
                   <i class="fa-solid fa-sliders shrink-0"></i>
                   <span class="sm:hidden">Cài Đặt</span>
                   <span class="hidden sm:inline">Cài Đặt &amp; Bảo Mật</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="adminTabPreviewStudentBtn"
+                  onclick="App.toggleAdminStudentViewMode(true)"
+                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-extrabold"
+                  title="Chuyển sang xem giao diện Học sinh mà không cần thoát tài khoản Giáo viên"
+                >
+                  <i class="fa-solid fa-user-graduate shrink-0 text-emerald-700"></i>
+                  <span class="sm:hidden">Xem Như HS</span>
+                  <span class="hidden sm:inline">Xem Như Học Sinh</span>
                 </button>
               </nav>
             </div>
@@ -17184,9 +18282,8 @@ const App = {
       this.notify('Vui lòng tích chọn ít nhất 1 nhóm lớp để giao bài!', 'warning', 'Chưa chọn nhóm lớp');
       return;
     }
-    const isEditingCurriculumMetaOnly = Boolean(existingHw && existingHw.isCurriculumSlot);
-    const hasPdfSource = Boolean(file || externalPdfUrl || (existingHw && existingHw.pdfUrl));
-    const needsPdf = (itemKind === 'document' && !isEditingCurriculumMetaOnly) || (itemKind === 'homework' && hwMode === 'interactive');
+    const hasPdfSource = Boolean(file || externalPdfUrl || (existingHw && existingHw.pdfUrl) || (Array.isArray(this.state.tempSelectedHwVariantFiles) && this.state.tempSelectedHwVariantFiles.length > 0));
+    const needsPdf = itemKind === 'homework' && hwMode === 'interactive';
     if (needsPdf && !hasPdfSource) {
       this.notify('Vui lòng chọn file PDF từ máy tính hoặc dán link Google Drive PDF!', 'warning', 'Chưa có file PDF');
       return;
@@ -17317,6 +18414,7 @@ const App = {
         chapterCode,
         lessonTitle,
         itemKind,
+        isCurriculumSlot: itemKind === 'document' ? Boolean(existingHw?.isCurriculumSlot || !pdfUrl) : false,
         hwMode: itemKind === 'homework' ? hwMode : 'none',
         title,
         grade,
