@@ -1,6 +1,6 @@
 {
-  "name": "Phòng Thi & BTVN — Lớp Toán Anh Chí (Toán 6 – 12)",
-  "short_name": "Lớp Toán Anh Chí",
+  "name": "Ch1 Math — Phòng Thi & BTVN (Toán 6 – 12)",
+  "short_name": "Ch1 Math",
   "description": "Phòng thi trực tuyến, xem đề PDF đa trang và nộp BTVN môn Toán Khối 6 – 12 — Thầy Huỳnh Thanh Chí.",
   "lang": "vi",
   "start_url": "./",

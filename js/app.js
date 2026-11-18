@@ -801,7 +801,7 @@ const App = {
       if (!hasDraggedFiles(e)) return;
       e.preventDefault();
       const zone = e.target && e.target.closest ? e.target.closest('[data-drop-target]') : null;
-      try { e.dataTransfer.dropEffect = zone ? 'copy' : 'none'; } catch (_) {}
+      try { e.dataTransfer.dropEffect = 'copy'; } catch (_) {}
       if (zone !== App._activeDropZoneEl) {
         if (App._activeDropZoneEl) App._activeDropZoneEl.classList.remove('is-dragover');
         App._activeDropZoneEl = zone;
@@ -824,6 +824,19 @@ const App = {
       App.clearActiveDropZone();
       if (zone && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         App.handleDropZoneFiles(zone, e.dataTransfer.files);
+        return;
+      }
+
+      // Kéo thả file PDF vào bất kỳ đâu trên trang để mở lướt xem trực tuyến tức thì
+      if (!zone && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        const files = Array.from(e.dataTransfer.files);
+        const pdfFile = files.find(f => f.name && f.name.toLowerCase().endsWith('.pdf'));
+        if (pdfFile) {
+          const blobUrl = URL.createObjectURL(pdfFile);
+          const title = pdfFile.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ');
+          App.openPdfModal(title, blobUrl, `LOCAL_${Date.now()}`);
+          App.notify(`Đã mở file PDF "${pdfFile.name}". Bạn có thể kéo rê chuột để lướt xem các trang.`, 'success', 'Mở File PDF');
+        }
       }
     });
   },
@@ -1038,19 +1051,19 @@ const App = {
 
     const modal = document.createElement('div');
     modal.id = 'antiCheatModal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-red-950/80 backdrop-blur-md animate-fade-in';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-red-950/80 backdrop-blur-md animate-fade-in';
     modal.style.zIndex = '95';
     modal.innerHTML = `
-      <div class="dialog-card bg-white rounded-3xl p-5 sm:p-7 max-w-md w-full shadow-2xl text-center space-y-4 border-2 border-red-500">
-        <div class="w-16 h-16 mx-auto rounded-2xl bg-red-100 text-red-600 flex items-center justify-center text-3xl shadow-inner border border-red-200">
+      <div class="dialog-card bg-white rounded-2xl p-4 sm:p-5 max-w-[380px] w-full shadow-2xl text-center space-y-3 border-2 border-red-500">
+        <div class="w-12 h-12 mx-auto rounded-xl bg-red-100 text-red-600 flex items-center justify-center text-xl shadow-inner border border-red-200">
           <i class="fa-solid ${isScreenshot ? 'fa-camera' : 'fa-triangle-exclamation'}"></i>
         </div>
-        <div class="space-y-1.5">
-          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 text-[11px] font-extrabold uppercase tracking-wider">
+        <div class="space-y-1">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 text-[10px] font-extrabold uppercase tracking-wider">
             <i class="fa-solid ${isScreenshot ? 'fa-volume-high' : 'fa-mobile-screen-button'}"></i>
             <span>${isScreenshot ? 'Cảnh Báo Chống Chụp Màn Hình' : 'Cảnh Báo Quy Chế Phòng Thi'}</span>
           </span>
-          <h3 class="text-base sm:text-lg font-extrabold text-slate-900">
+          <h3 class="text-sm sm:text-base font-extrabold text-slate-900 leading-snug">
             ${isScreenshot ? 'CẢNH BÁO VI PHẠM: PHÁT HIỆN CHỤP MÀN HÌNH!' : 'NHẮC NHỞ VI PHẠM: THOÁT KHỎI MÀN HÌNH THI!'}
           </h3>
           <p class="text-xs text-slate-600 leading-relaxed">
@@ -1059,10 +1072,10 @@ const App = {
               : 'Hệ thống phát hiện bạn vừa thoát ra ngoài ứng dụng trên điện thoại hoặc rời khỏi màn hình trong lúc đang làm bài thi.'}
           </p>
         </div>
-        <div class="bg-red-50 border border-red-200 rounded-2xl p-3.5 text-xs text-red-900 space-y-1.5 text-left">
+        <div class="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-900 space-y-1 text-left">
           <div class="flex items-center justify-between gap-2">
             <span class="font-semibold text-red-800">Tổng số lần vi phạm đã ghi nhận:</span>
-            <strong id="antiCheatCountValue" class="px-2.5 py-0.5 rounded-lg bg-red-600 text-white text-sm font-mono font-extrabold shrink-0">${count} lần</strong>
+            <strong id="antiCheatCountValue" class="px-2 py-0.5 rounded-lg bg-red-600 text-white text-xs font-mono font-extrabold shrink-0">${count} lần</strong>
           </div>
           ${shotCount > 0 ? `
             <div class="flex items-center justify-between gap-2 text-[11px] text-red-800 font-bold">
@@ -1078,7 +1091,7 @@ const App = {
             <i class="fa-solid fa-circle-exclamation mr-1"></i>Mọi thao tác chụp màn hình và rời phòng thi đều được lưu tự động vào biên bản nộp bài gửi Giáo viên (đồng thời mất điểm thưởng kỷ luật).
           </div>
         </div>
-        <button type="button" id="antiCheatAckBtn" onclick="App.clearScreenshotShield(); document.getElementById('antiCheatModal')?.remove();" class="ui-btn-lg w-full bg-red-600 hover:bg-red-700 text-white shadow-md">
+        <button type="button" id="antiCheatAckBtn" onclick="App.clearScreenshotShield(); document.getElementById('antiCheatModal')?.remove();" class="ui-btn w-full py-2.5 bg-red-600 hover:bg-red-700 text-white shadow-md text-xs sm:text-[13px]">
           <i class="fa-solid fa-shield-halved"></i>
           <span>Tôi Đã Hiểu &amp; Quay Lại Làm Bài</span>
         </button>
@@ -2551,25 +2564,25 @@ const App = {
       overlay.id = 'appSystemDialog';
       overlay.setAttribute('role', 'dialog');
       overlay.setAttribute('aria-modal', 'true');
-      overlay.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in';
+      overlay.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in';
       overlay.style.zIndex = '90';
 
       overlay.innerHTML = `
-        <div class="dialog-card bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 text-center space-y-4">
-          <div class="w-14 h-14 mx-auto rounded-2xl border flex items-center justify-center text-2xl shadow-sm ${t.badge}">
+        <div class="dialog-card bg-white rounded-2xl p-4 sm:p-5 max-w-[360px] w-full shadow-2xl border border-slate-200 text-center space-y-3">
+          <div class="w-11 h-11 mx-auto rounded-xl border flex items-center justify-center text-lg shadow-xs ${t.badge}">
             <i class="fa-solid ${finalIcon}"></i>
           </div>
-          <div class="space-y-1.5">
-            <h3 class="text-base sm:text-lg font-extrabold text-slate-900 leading-snug">${finalTitle}</h3>
-            <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">${safeMsg}</p>
+          <div class="space-y-1">
+            <h3 class="text-sm sm:text-[15px] font-extrabold text-slate-900 leading-snug">${finalTitle}</h3>
+            <p class="text-xs sm:text-[13px] text-slate-600 leading-relaxed max-h-[45dvh] overflow-y-auto break-words">${safeMsg}</p>
           </div>
-          <div class="${cancelText ? 'grid grid-cols-2 gap-2.5' : 'flex'} pt-2">
+          <div class="${cancelText ? 'grid grid-cols-2 gap-2' : 'flex'} pt-1">
             ${cancelText ? `
-              <button type="button" id="appDialogCancelBtn" class="ui-btn-lg bg-slate-100 hover:bg-slate-200 text-slate-700">
+              <button type="button" id="appDialogCancelBtn" class="ui-btn py-2 px-3 text-xs sm:text-[13px] bg-slate-100 hover:bg-slate-200 text-slate-700">
                 ${cancelText}
               </button>
             ` : ''}
-            <button type="button" id="appDialogConfirmBtn" class="ui-btn-lg w-full text-white shadow-md ${t.btn}">
+            <button type="button" id="appDialogConfirmBtn" class="ui-btn py-2 px-3 text-xs sm:text-[13px] w-full text-white shadow-md ${t.btn}">
               <span>${confirmText}</span>
             </button>
           </div>
@@ -3215,7 +3228,7 @@ const App = {
     modal.id = 'themeCustomizerModal';
     modal.className = 'fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in';
     modal.innerHTML = `
-      <div class="dialog-card bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+      <div class="dialog-card bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg max-h-[88dvh] flex flex-col overflow-hidden">
         <div class="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-indigo-50/40 flex items-center justify-between gap-2">
           <div class="flex items-center gap-2.5 min-w-0">
             <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
@@ -3457,7 +3470,7 @@ const App = {
     }
 
     return `
-      <div class="dialog-card bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200 text-slate-800">
+      <div class="dialog-card bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[88dvh] flex flex-col overflow-hidden border border-slate-200 text-slate-800">
         <!-- Header -->
         <div class="px-4 sm:px-6 py-3.5 border-b border-slate-200 bg-gradient-to-r from-indigo-50/80 via-white to-slate-50 flex items-center justify-between gap-3 shrink-0">
           <div class="flex items-center gap-3 min-w-0">
@@ -9271,17 +9284,17 @@ const App = {
     const availPts = availablePoints !== null ? availablePoints : this.getStudentRewardStats(sub.studentId).availablePoints;
     const modal = document.createElement('div');
     modal.id = 'scoreModal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl p-5 sm:p-8 max-w-md w-full shadow-2xl text-center space-y-5">
-        <div class="w-20 h-20 mx-auto rounded-full ${(res.percentage ?? 0) >= 80 ? 'bg-emerald-100 text-emerald-600' : 'bg-indigo-100 text-indigo-600'} flex items-center justify-center text-4xl shadow-inner">
+      <div class="dialog-card bg-white rounded-2xl p-4 sm:p-5 max-w-[400px] w-full shadow-2xl border border-slate-200 text-center space-y-3">
+        <div class="w-12 h-12 mx-auto rounded-2xl ${(res.percentage ?? 0) >= 80 ? 'bg-emerald-100 text-emerald-600' : 'bg-indigo-100 text-indigo-600'} flex items-center justify-center text-xl shadow-inner">
           <i class="fa-solid fa-trophy"></i>
         </div>
 
         <div>
-          <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Kết quả bài thi</span>
-          <h3 class="text-xl font-extrabold text-slate-900">${sub.examTitle}</h3>
-          <p class="text-xs text-slate-500 mt-1">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Kết quả bài thi</span>
+          <h3 class="text-sm sm:text-base font-extrabold text-slate-900 leading-snug line-clamp-2 mt-0.5" title="${this.escapeHtmlAttr(sub.examTitle)}">${this.escapeHtmlAttr(sub.examTitle)}</h3>
+          <p class="text-[11px] text-slate-500 mt-0.5">
             Giám sát phòng thi:
             <strong class="${(sub.tabSwitches || 0) > 0 || (sub.screenshotCount || 0) > 0 ? 'text-red-600' : 'text-emerald-600'}">
               ${sub.tabSwitches || 0} lần vi phạm${(sub.screenshotCount || 0) > 0 ? ` (${sub.screenshotCount} lần chụp màn hình)` : ''}
@@ -9289,52 +9302,52 @@ const App = {
           </p>
         </div>
 
-        <div class="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
-          <div class="text-4xl font-extrabold text-indigo-600 font-mono">${res.totalScore} <span class="text-base text-slate-400 font-normal">/ ${res.maxTotal || 10}</span></div>
-          <div class="text-xs font-bold uppercase ${(res.percentage ?? 0) >= 80 ? 'text-emerald-600' : 'text-indigo-600'}">Xếp loại: ${res.rank}</div>
-          <div class="pt-2 border-t border-slate-200/80 flex items-center justify-center gap-2 flex-wrap">
-            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold ${gainedPoints > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
+        <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-1.5">
+          <div class="text-2xl sm:text-3xl font-extrabold text-indigo-600 font-mono leading-none">${res.totalScore} <span class="text-sm text-slate-400 font-normal">/ ${res.maxTotal || 10}</span></div>
+          <div class="text-[11px] font-bold uppercase ${(res.percentage ?? 0) >= 80 ? 'text-emerald-600' : 'text-indigo-600'}">Xếp loại: ${res.rank}</div>
+          <div class="pt-1.5 border-t border-slate-200/80 flex items-center justify-center gap-2 flex-wrap">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-extrabold ${gainedPoints > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
               <i class="fa-solid fa-star text-amber-500"></i>
               <span>${gainedPoints > 0 ? `+${gainedPoints} điểm thưởng mới` : `Tổng khả dụng: ${availPts} điểm`}</span>
             </span>
-            <button type="button" onclick="document.getElementById('scoreModal')?.remove(); App.setStudentMainTab('rewards');" class="text-xs font-extrabold text-amber-700 hover:text-amber-900 underline inline-flex items-center gap-1 cursor-pointer">
-              <i class="fa-solid fa-gift text-[11px]"></i>
+            <button type="button" onclick="document.getElementById('scoreModal')?.remove(); App.setStudentMainTab('rewards');" class="text-[11px] font-extrabold text-amber-700 hover:text-amber-900 underline inline-flex items-center gap-1 cursor-pointer">
+              <i class="fa-solid fa-gift text-[10px]"></i>
               <span>Đổi phần thưởng (${availPts} điểm)</span>
             </button>
           </div>
         </div>
 
-        <div class="grid ${res.part4 && res.part4.totalQuestions > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} gap-2 text-xs">
-          <div class="bg-indigo-50/60 p-2.5 rounded-xl border border-indigo-100">
+        <div class="grid ${res.part4 && res.part4.totalQuestions > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} gap-1.5 text-[11px]">
+          <div class="bg-indigo-50/60 p-2 rounded-lg border border-indigo-100">
             <div class="text-slate-500 font-medium">Phần I</div>
-            <div class="font-bold text-indigo-700 text-sm mt-0.5">${res.part1.score} / ${res.part1.maxScore ?? 3}đ</div>
+            <div class="font-bold text-indigo-700 text-xs mt-0.5">${res.part1.score} / ${res.part1.maxScore ?? 3}đ</div>
           </div>
-          <div class="bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-100">
+          <div class="bg-emerald-50/60 p-2 rounded-lg border border-emerald-100">
             <div class="text-slate-500 font-medium">Phần II</div>
-            <div class="font-bold text-emerald-700 text-sm mt-0.5">${res.part2.score} / ${res.part2.maxScore ?? 4}đ</div>
+            <div class="font-bold text-emerald-700 text-xs mt-0.5">${res.part2.score} / ${res.part2.maxScore ?? 4}đ</div>
           </div>
-          <div class="bg-amber-50/60 p-2.5 rounded-xl border border-amber-100">
+          <div class="bg-amber-50/60 p-2 rounded-lg border border-amber-100">
             <div class="text-slate-500 font-medium">Phần III</div>
-            <div class="font-bold text-amber-700 text-sm mt-0.5">${res.part3.score} / ${res.part3.maxScore ?? 3}đ</div>
+            <div class="font-bold text-amber-700 text-xs mt-0.5">${res.part3.score} / ${res.part3.maxScore ?? 3}đ</div>
           </div>
           ${res.part4 && res.part4.totalQuestions > 0 ? `
-            <div class="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100">
+            <div class="bg-purple-50/60 p-2 rounded-lg border border-purple-100">
               <div class="text-slate-500 font-medium">Phần IV (TL)</div>
-              <div class="font-bold text-purple-700 text-sm mt-0.5">${res.part4.pendingManual ? 'Chờ chấm' : `${res.part4.score} / ${res.part4.maxScore}đ`}</div>
+              <div class="font-bold text-purple-700 text-xs mt-0.5">${res.part4.pendingManual ? 'Chờ chấm' : `${res.part4.score} / ${res.part4.maxScore}đ`}</div>
             </div>
           ` : ''}
         </div>
         ${res.part4 && res.part4.totalQuestions > 0 && res.part4.pendingManual ? `
-          <div class="text-[11px] text-purple-700 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2">
+          <div class="text-[11px] text-purple-700 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1.5 leading-snug">
             <i class="fa-solid fa-pen-fancy mr-1"></i>Phần IV (Tự luận — tối đa ${res.part4.maxScore}đ) đã lưu bài làm và sẽ cộng vào tổng điểm sau khi Giáo viên chấm.
           </div>
         ` : ''}
 
-        <div class="flex gap-2.5 pt-2">
-          <button onclick="document.getElementById('scoreModal').remove(); App.viewSubmissionDetail('${sub.id}');" class="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md transition cursor-pointer">
+        <div class="flex gap-2 pt-1">
+          <button onclick="document.getElementById('scoreModal').remove(); App.viewSubmissionDetail('${sub.id}');" class="flex-1 py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs sm:text-[13px] shadow-md transition cursor-pointer">
             Xem Lời Giải Chi Tiết
           </button>
-          <button onclick="document.getElementById('scoreModal').remove();" class="px-4 sm:px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold text-xs sm:text-sm transition cursor-pointer shrink-0">
+          <button onclick="document.getElementById('scoreModal').remove();" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold text-xs sm:text-[13px] transition cursor-pointer shrink-0">
             Đóng
           </button>
         </div>
@@ -17976,9 +17989,9 @@ const App = {
     modal.id = 'teacherIntroModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fade-in';
     modal.innerHTML = `
-      <div class="bg-white rounded-3xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-3 sm:my-8 text-slate-800 animate-pop-in">
+      <div class="dialog-card bg-white rounded-2xl sm:rounded-3xl max-w-xl w-full max-h-[88dvh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden text-slate-800">
         <!-- Header màu Đỏ Đô Thương Hiệu (#650f12) & Giấy Ấm (#fbf7ef) -->
-        <div class="p-5 sm:p-6 bg-gradient-to-r from-[#650f12] via-[#7d1c20] to-[#4a090b] text-[#fbf7ef] relative overflow-hidden">
+        <div class="p-4 sm:p-5 bg-gradient-to-r from-[#650f12] via-[#7d1c20] to-[#4a090b] text-[#fbf7ef] relative overflow-hidden shrink-0">
           <div class="relative z-10 flex items-start justify-between gap-3">
             <div class="flex items-center gap-3.5 min-w-0">
               <div class="h-14 sm:h-16 px-2.5 py-1.5 rounded-2xl bg-[#fffdf8] flex items-center justify-center shadow-lg shrink-0 border-2 border-amber-300/40">
@@ -18003,7 +18016,7 @@ const App = {
           <img src="icons/logo-mark.png" alt="" class="absolute -right-3 -bottom-3 w-28 h-28 object-contain opacity-15 pointer-events-none select-none">
         </div>
 
-        <div class="p-5 sm:p-7 space-y-5 text-sm max-h-[75vh] overflow-y-auto">
+        <div class="p-4 sm:p-5 space-y-4 text-sm overflow-y-auto flex-1 min-h-0">
           <!-- Triết lý đứng lớp -->
           <div class="p-4 rounded-2xl bg-[#fbf7ef] border border-[#e6dbcd] text-slate-800 space-y-1.5">
             <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#650f12]">
@@ -18155,7 +18168,7 @@ const App = {
     modal.id = 'iosAppGuideModal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-slate-950/75 backdrop-blur-sm overflow-y-auto animate-fade-in';
     modal.innerHTML = `
-      <div class="dialog-card bg-white rounded-3xl max-w-3xl w-full max-h-[92dvh] border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
+      <div class="dialog-card bg-white rounded-3xl max-w-xl w-full max-h-[88dvh] border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
         <!-- Header -->
         <div class="px-5 py-4 border-b border-slate-200 ${isAndroidTab ? 'bg-gradient-to-r from-emerald-50/80 via-white to-slate-50' : 'bg-gradient-to-r from-indigo-50/80 via-white to-slate-50'} flex items-center justify-between gap-3 shrink-0">
           <div class="flex items-center gap-3 min-w-0">
@@ -18583,6 +18596,7 @@ const App = {
 
       const scrollEl = document.getElementById(`${containerId}_scroll`);
       if (scrollEl) {
+        this.initPdfViewerPan(scrollEl, containerId);
         scrollEl.addEventListener('scroll', () => {
           const pages = scrollEl.querySelectorAll('[data-pdf-page]');
           if (!pages.length) return;
@@ -18650,7 +18664,7 @@ const App = {
     for (let pageNum = 1; pageNum <= total; pageNum++) {
       const wrap = document.createElement('div');
       wrap.setAttribute('data-pdf-page', String(pageNum));
-      wrap.className = 'w-full overflow-x-auto flex justify-center';
+      wrap.className = 'w-full min-w-fit flex justify-center';
       wrap.style.minHeight = `${estHeightPx}px`;
       const placeholder = document.createElement('div');
       placeholder.className = 'bg-slate-900/60 rounded-lg border border-slate-800/80 flex items-center justify-center text-[11px] font-mono text-slate-500';
@@ -18748,6 +18762,134 @@ const App = {
       vState.zoomFactor = Math.max(0.6, Math.min(2.6, Math.round((vState.zoomFactor + Number(action || 0)) * 100) / 100));
     }
     this.renderPdfPages(containerId);
+  },
+
+  // Thao tác Kéo chuột (Grab-to-Pan / Drag-to-Scroll) lướt xem trang PDF mượt mà có quán tính
+  initPdfViewerPan(scrollEl, containerId) {
+    if (!scrollEl || scrollEl._panBound) return;
+    scrollEl._panBound = true;
+
+    let isDown = false;
+    let hasDragged = false;
+    let startX = 0;
+    let startY = 0;
+    let startScrollLeft = 0;
+    let startScrollTop = 0;
+    let startWinY = 0;
+    let lastX = 0;
+    let lastY = 0;
+    let lastTime = 0;
+    let vx = 0;
+    let vy = 0;
+    let momentumRaf = null;
+
+    const stopMomentum = () => {
+      if (momentumRaf && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(momentumRaf);
+        momentumRaf = null;
+      }
+    };
+
+    const onMouseDown = (e) => {
+      if (e.button !== 0) return;
+      if (e.target && e.target.closest && e.target.closest('button, a, input, select, textarea, [role="button"]')) return;
+
+      stopMomentum();
+      isDown = true;
+      hasDragged = false;
+      startX = e.clientX;
+      startY = e.clientY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      lastTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      vx = 0;
+      vy = 0;
+      startScrollLeft = scrollEl.scrollLeft;
+      startScrollTop = scrollEl.scrollTop;
+      startWinY = typeof window !== 'undefined' ? (window.scrollY || window.pageYOffset || 0) : 0;
+      scrollEl.classList.add('panning');
+    };
+
+    const onMouseMove = (e) => {
+      if (!isDown) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+
+      if (!hasDragged && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+        hasDragged = true;
+      }
+      if (!hasDragged) return;
+
+      if (e.cancelable && typeof e.preventDefault === 'function') e.preventDefault();
+
+      const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      const dt = Math.max(1, now - lastTime);
+      const curVx = (e.clientX - lastX) / dt;
+      const curVy = (e.clientY - lastY) / dt;
+      vx = curVx * 0.7 + vx * 0.3;
+      vy = curVy * 0.7 + vy * 0.3;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      lastTime = now;
+
+      const vState = this._pdfViewers && this._pdfViewers[containerId];
+      if (vState && vState.flowWithPage && typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+        window.scrollTo({ top: startWinY - dy, behavior: 'instant' });
+      } else {
+        scrollEl.scrollTop = startScrollTop - dy;
+      }
+      scrollEl.scrollLeft = startScrollLeft - dx;
+    };
+
+    const onMouseUp = () => {
+      if (!isDown) return;
+      isDown = false;
+      scrollEl.classList.remove('panning');
+
+      if (hasDragged && typeof window !== 'undefined') {
+        const captureClick = (ev) => {
+          if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+          if (typeof ev.preventDefault === 'function') ev.preventDefault();
+        };
+        window.addEventListener('click', captureClick, { capture: true, once: true });
+        setTimeout(() => window.removeEventListener('click', captureClick, { capture: true }), 120);
+
+        const vState = this._pdfViewers && this._pdfViewers[containerId];
+        const isFlow = Boolean(vState && vState.flowWithPage);
+        let speedX = vx * 15;
+        let speedY = vy * 15;
+
+        speedX = Math.max(-45, Math.min(45, speedX));
+        speedY = Math.max(-45, Math.min(45, speedY));
+
+        if ((Math.abs(speedX) > 1.2 || Math.abs(speedY) > 1.2) && typeof requestAnimationFrame === 'function') {
+          const stepMomentum = () => {
+            speedX *= 0.92;
+            speedY *= 0.92;
+
+            if (isFlow && typeof window.scrollBy === 'function') {
+              window.scrollBy({ top: -speedY, behavior: 'instant' });
+            } else {
+              scrollEl.scrollTop -= speedY;
+            }
+            scrollEl.scrollLeft -= speedX;
+
+            if (Math.abs(speedX) > 0.4 || Math.abs(speedY) > 0.4) {
+              momentumRaf = requestAnimationFrame(stepMomentum);
+            } else {
+              momentumRaf = null;
+            }
+          };
+          momentumRaf = requestAnimationFrame(stepMomentum);
+        }
+      }
+    };
+
+    scrollEl.addEventListener('mousedown', onMouseDown);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('mousemove', onMouseMove, { passive: false });
+      window.addEventListener('mouseup', onMouseUp);
+    }
   }
 };
 

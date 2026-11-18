@@ -1712,8 +1712,11 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v24"), 'sw.js must bump shell cache to v24');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v26"), 'sw.js must bump shell cache to v26');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
+  assert.ok(cssSrc.includes(':where([id$="Modal"].fixed.inset-0:not(#previewPdfModal), #appSystemDialog.fixed.inset-0) > div'), 'app.css must use zero-specificity :where() fallback so desktop .max-w-* classes on modals are never overridden');
+  assert.ok(cssSrc.includes('max-height: calc(100dvh'), 'app.css must constrain modal card height within viewport');
+  assert.ok(cssSrc.includes('.pdf-viewer-scroll.panning') && cssSrc.includes('cursor: var(--cursor-grabbing)'), 'app.css must define grabbing cursor during PDF pan');
   assert.ok(/@media\s*\(max-width:\s*1023px\)\s*\{\s*\.scroll-top-fab\s*\{\s*display:\s*none\s*!important;/.test(cssSrc), 'app.css must hide floating .scroll-top-fab on mobile/tablet to prevent overlapping right-aligned buttons');
   assert.ok(/body\.in-exam\s+\.scroll-top-fab\s*\{\s*display:\s*none\s*!important;/.test(cssSrc), 'app.css must hide .scroll-top-fab inside exam room');
   assert.ok(cssSrc.includes('text-overflow: clip;') && cssSrc.includes('overflow-wrap: anywhere;'), 'app.css must allow mobile .ui-btn labels to wrap cleanly instead of chopping text');
@@ -1732,6 +1735,8 @@ const PDFStorage = require('../js/pdf_storage.js');
   // Test 29: Đồng bộ 1:1 Giao diện Vở Ô Ly & Đỏ Đô Thầy Chí (#650f12) với Website Giới Thiệu (https://thanhchi113.github.io/)
   console.log('--- TEST 29: Ruled Math Notebook & Crimson Academic UI Sync ---');
   const manifestSrc = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'manifest.webmanifest'), 'utf8'));
+  assert.strictEqual(manifestSrc.short_name, 'Ch1 Math', 'PWA manifest short_name must be Ch1 Math');
+  assert.ok(indexHtmlSrc.includes('content="Ch1 Math"'), 'index.html apple-mobile-web-app-title must be Ch1 Math');
   assert.strictEqual(manifestSrc.theme_color, '#650f12', 'PWA manifest theme_color must be #650f12');
   assert.strictEqual(manifestSrc.background_color, '#fbf7ef', 'PWA manifest background_color must be #fbf7ef');
   assert.ok(indexHtmlSrc.includes('content="#650f12"'), 'index.html meta theme-color must be #650f12');
@@ -1887,6 +1892,76 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.strictEqual(parsedRows[0].pdfUrl, 'https://drive.google.com/file/d/abc123XYZ/view', 'Extracts Drive PDF link from =HYPERLINK formula');
   assert.strictEqual(parsedRows[0].solutionPdfUrl, 'https://drive.google.com/file/d/sol789XYZ/view', 'Extracts Drive Solution link from =HYPERLINK formula');
   global.window = prevWin30;
+
+  // 30.7 Kiểm tra hồi quy bảng thông báo & kết quả thi gọn nhẹ (không bị tràn màn hình)
+  let compactScoreNode = null;
+  let compactDialogNode = null;
+  const prevAppend30 = global.document.body.appendChild;
+  const prevCreateEl30 = global.document.createElement;
+  const prevAddDocEvt30 = global.document.addEventListener;
+  const prevRemDocEvt30 = global.document.removeEventListener;
+  const prevDocListeners = [];
+  global.document.addEventListener = (_, fn) => prevDocListeners.push(fn);
+  global.document.removeEventListener = () => {};
+  global.document.createElement = (tag) => {
+    const el = {
+      tagName: tag.toUpperCase(),
+      id: '',
+      className: '',
+      innerHTML: '',
+      style: {},
+      attributes: {},
+      setAttribute(k, v) { this.attributes[k] = v; },
+      addEventListener() {},
+      remove() {},
+      querySelector(sel) {
+        if (sel === '#appDialogConfirmBtn') return { addEventListener() {}, focus() {} };
+        return null;
+      }
+    };
+    return el;
+  };
+  global.document.body.appendChild = (node) => {
+    if (node.id === 'scoreModal') compactScoreNode = node;
+    if (node.id === 'appSystemDialog') compactDialogNode = node;
+    return node;
+  };
+  App.showScoreModal({
+    id: 'SUB-COMPACT-1',
+    examTitle: 'Dạng 1. Xét tính đơn điệu từ công thức – [Phiếu 1]',
+    studentId: 'HS901',
+    scoreResult: {
+      totalScore: 8.5, maxTotal: 10, percentage: 85, rank: 'Giỏi',
+      part1: { score: 3, maxScore: 3 },
+      part2: { score: 3, maxScore: 4 },
+      part3: { score: 2.5, maxScore: 3 },
+      part4: { totalQuestions: 1, maxScore: 1, pendingManual: true, score: 0 }
+    }
+  }, 5, 15);
+  assert.ok(compactScoreNode && compactScoreNode.innerHTML.includes('max-w-[400px]') && compactScoreNode.innerHTML.includes('line-clamp-2'), '#scoreModal must use compact max-w-[400px] width and 2-line title clamp');
+  App.showDialog({ type: 'info', title: 'Thông báo', message: 'Nội dung kiểm tra gọn nhẹ' });
+  assert.ok(compactDialogNode && compactDialogNode.innerHTML.includes('max-w-[360px]'), '#appSystemDialog must use compact max-w-[360px] width');
+  global.document.body.appendChild = prevAppend30;
+  global.document.createElement = prevCreateEl30;
+  global.document.addEventListener = prevAddDocEvt30;
+  global.document.removeEventListener = prevRemDocEvt30;
+
+  // 30.8 Kiểm tra thao tác kéo rê chuột (drag-to-pan / lướt xem PDF) & nhả quán tính
+  assert.strictEqual(typeof App.initPdfViewerPan, 'function', 'App.initPdfViewerPan must be defined');
+  const mockScrollEl = {
+    scrollLeft: 10,
+    scrollTop: 20,
+    classList: {
+      _classes: new Set(),
+      add(c) { this._classes.add(c); },
+      remove(c) { this._classes.delete(c); },
+      contains(c) { return this._classes.has(c); }
+    },
+    addEventListener(name, fn) { this[`on_${name}`] = fn; }
+  };
+  App.initPdfViewerPan(mockScrollEl, 'testViewer');
+  assert.strictEqual(mockScrollEl._panBound, true, 'initPdfViewerPan must bind pan handler');
+  assert.strictEqual(typeof mockScrollEl.on_mousedown, 'function', 'scrollEl must listen to mousedown');
 
   console.log('[OK] Test 30 Passed: Curriculum Sheet/Tree views, Drive online viewer, view-only lock, direct practice & batch upload verified 100%.');
   console.log('[OK] TẤT CẢ 30 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');

@@ -261,9 +261,18 @@ body.in-exam {
 .pdf-viewer-scroll {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  cursor: var(--cursor-grab) !important;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .pdf-viewer-scroll.pdf-viewer-flow {
   overscroll-behavior: auto;
+}
+.pdf-viewer-scroll.panning,
+.pdf-viewer-scroll.panning * {
+  cursor: var(--cursor-grabbing) !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 .pdf-page-canvas {
   display: block;
@@ -271,6 +280,9 @@ body.in-exam {
   background: #ffffff;
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 body {
@@ -1686,16 +1698,29 @@ header.sticky.top-0 {
   padding-right: max(0.75rem, env(safe-area-inset-right, 0px)) !important;
 }
 
+:where([id$="Modal"].fixed.inset-0:not(#previewPdfModal), #appSystemDialog.fixed.inset-0) > div {
+  max-width: min(100%, calc(100vw - 1.5rem));
+}
+
 [id$="Modal"].fixed.inset-0:not(#previewPdfModal) > div,
 #appSystemDialog.fixed.inset-0 > div {
   margin-top: auto !important;
   margin-bottom: auto !important;
-  max-width: min(100%, calc(100vw - 1.5rem));
   min-width: 0;
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 1.75rem) !important;
 }
 
-[id$="Modal"].fixed.inset-0:not(#previewPdfModal) > div[class*="max-h-"] {
-  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 1.5rem) !important;
+[id$="Modal"].fixed.inset-0:not(#previewPdfModal) > div:not(.flex-col),
+#appSystemDialog.fixed.inset-0 > div:not(.flex-col) {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 639px) {
+  [id$="Modal"].fixed.inset-0:not(#previewPdfModal) > div,
+  #appSystemDialog.fixed.inset-0 > div {
+    max-width: min(100%, calc(100vw - 1.5rem));
+  }
 }
 
 #previewPdfModal.fixed.inset-0 {
