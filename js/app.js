@@ -8356,25 +8356,62 @@ const App = {
     ])].filter(Boolean);
 
     return `
-      <div class="mb-4 p-3 sm:p-3.5 rounded-2xl border border-[#e6dbcd] bg-[#fbf7ef]/80 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
-        <!-- Chuyển 3 chế độ hiển thị: Bảng Sheet | Cây Thư Mục | Thẻ Chi Tiết -->
-        <div class="flex flex-wrap items-center gap-1.5">
-          <span class="text-[11px] font-extrabold text-[#3d0709] mr-1 inline-flex items-center gap-1">
-            <i class="fa-solid fa-table-list text-[#650f12]"></i><span>Chế độ xem:</span>
-          </span>
-          <div class="inline-flex flex-wrap items-center gap-1 p-1 rounded-xl bg-white border border-[#e2d5c4] shadow-2xs">
-            <button type="button" id="hwModeBtn_${scope}_sheet" onclick="App.setHwViewMode('${scope}', 'sheet')" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${mode === 'sheet' ? 'bg-[#137333] text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'}">
-              <i class="fa-solid fa-table"></i><span>Bảng Sheet</span>
-            </button>
-            <button type="button" id="hwModeBtn_${scope}_tree" onclick="App.setHwViewMode('${scope}', 'tree')" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${mode === 'tree' ? 'bg-[#650f12] text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'}">
-              <i class="fa-solid fa-folder-tree"></i><span>Cây Thư Mục</span>
-            </button>
-            <button type="button" id="hwModeBtn_${scope}_cards" onclick="App.setHwViewMode('${scope}', 'cards')" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${mode === 'cards' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'}">
-              <i class="fa-solid fa-grip"></i><span>Thẻ</span>
-            </button>
+      <div class="mb-4 p-3 sm:p-3.5 rounded-2xl border border-[#e6dbcd] bg-[#fbf7ef]/80 space-y-2.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <!-- Chuyển 3 chế độ hiển thị: Bảng Sheet | Cây Thư Mục | Thẻ Chi Tiết -->
+          <div class="flex flex-wrap items-center gap-1.5 min-w-0">
+            <span class="text-[11px] font-extrabold text-[#3d0709] mr-0.5 inline-flex items-center gap-1 shrink-0">
+              <i class="fa-solid fa-table-list text-[#650f12]"></i><span>Chế độ xem:</span>
+            </span>
+            <div class="inline-flex flex-wrap items-center gap-1 p-1 rounded-xl bg-white border border-[#e2d5c4] shadow-2xs">
+              <button type="button" id="hwModeBtn_${scope}_sheet" onclick="App.setHwViewMode('${scope}', 'sheet')" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${mode === 'sheet' ? 'bg-[#137333] text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'}">
+                <i class="fa-solid fa-table"></i><span>Bảng Sheet</span>
+              </button>
+              <button type="button" id="hwModeBtn_${scope}_tree" onclick="App.setHwViewMode('${scope}', 'tree')" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${mode === 'tree' ? 'bg-[#650f12] text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'}">
+                <i class="fa-solid fa-folder-tree"></i><span>Cây Thư Mục</span>
+              </button>
+              <button type="button" id="hwModeBtn_${scope}_cards" onclick="App.setHwViewMode('${scope}', 'cards')" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${mode === 'cards' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'}">
+                <i class="fa-solid fa-grip"></i><span>Thẻ</span>
+              </button>
+            </div>
           </div>
-          ${isAdmin ? `
-            <div class="inline-flex flex-wrap items-center gap-1">
+
+          <!-- Lọc nhanh Trạng thái Phiếu + Chương + Thu gọn / Mở rộng -->
+          <div class="flex flex-wrap items-center gap-1.5 text-xs min-w-0">
+            <button type="button" onclick="App.onCurriculumFilterInput('${scope}', 'roadmap', 'ALL')" class="px-2.5 py-1.5 rounded-xl font-bold border transition cursor-pointer ${rFilter === 'ALL' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}">
+              Tất cả (${filteredItems.length})
+            </button>
+            <button type="button" onclick="App.onCurriculumFilterInput('${scope}', 'roadmap', 'READY')" class="px-2.5 py-1.5 rounded-xl font-bold border transition cursor-pointer inline-flex items-center gap-1 ${rFilter === 'READY' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-50'}">
+              <i class="fa-solid fa-file-circle-check"></i><span>Đã có file (${readyCount})</span>
+            </button>
+            <button type="button" onclick="App.onCurriculumFilterInput('${scope}', 'roadmap', 'PRACTICE')" class="px-2.5 py-1.5 rounded-xl font-bold border transition cursor-pointer inline-flex items-center gap-1 ${rFilter === 'PRACTICE' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-800 border-indigo-200 hover:bg-indigo-50'}">
+              <i class="fa-solid fa-pen-to-square"></i><span>Làm trực tiếp (${practiceCount})</span>
+            </button>
+
+            ${allChapOptions.length > 0 ? `
+              <select aria-label="Lọc theo Chương" onchange="App.onCurriculumFilterInput('${scope}', 'chapter', this.value)" class="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 text-xs outline-none cursor-pointer max-w-[200px] truncate">
+                <option value="ALL" ${chFilter === 'ALL' ? 'selected' : ''}>Tất cả các Chương</option>
+                ${allChapOptions.map(c => `<option value="${this.escapeHtmlAttr(c)}" ${chFilter === c ? 'selected' : ''}>${this.escapeHtmlAttr(c)}</option>`).join('')}
+              </select>
+            ` : ''}
+
+            ${mode !== 'cards' && groupedChapters.length > 0 ? `
+              <button type="button" onclick="App.setAllCurriculumCollapse(false, '${scope}', ${chapKeysJson})" class="px-2 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer" title="Mở rộng toàn bộ các chương">
+                <i class="fa-solid fa-angles-down mr-1"></i>Mở hết
+              </button>
+              <button type="button" onclick="App.setAllCurriculumCollapse(true, '${scope}', ${chapKeysJson})" class="px-2 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer" title="Thu gọn tất cả các chương">
+                <i class="fa-solid fa-angles-up mr-1"></i>Thu gọn
+              </button>
+            ` : ''}
+          </div>
+        </div>
+
+        ${isAdmin ? `
+          <div class="pt-2 border-t border-dashed border-[#dfd3c3] flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="text-[11px] font-extrabold text-[#650f12] mr-0.5 inline-flex items-center gap-1">
+                <i class="fa-solid fa-wand-magic-sparkles"></i><span>Quản trị Cây Thư Mục:</span>
+              </span>
               <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-chapter' })" class="px-2.5 py-1.5 rounded-xl bg-white hover:bg-amber-50 text-[#650f12] border border-[#650f12]/25 text-xs font-extrabold transition cursor-pointer inline-flex items-center gap-1" title="Thêm Chương mới vào Cây Thư Mục">
                 <i class="fa-solid fa-folder-plus"></i><span>+ Chương</span>
               </button>
@@ -8384,45 +8421,18 @@ const App = {
               <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'add-item' })" class="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold shadow-2xs transition cursor-pointer inline-flex items-center gap-1" title="Thêm Dạng / Phiếu bài tập mới vào Cây Thư Mục">
                 <i class="fa-solid fa-plus"></i><span>+ Thêm Dạng</span>
               </button>
-              <button type="button" id="hwToolbarPreviewStudentBtn" onclick="App.toggleAdminStudentViewMode(true, { studentMainTab: 'homeworks', studentHwViewMode: '${mode}' })" class="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-2xs transition cursor-pointer inline-flex items-center gap-1.5" title="Xem ngay Cây Thư Mục &amp; Bảng Sheet dưới góc nhìn Học sinh mà không cần thoát Admin">
-                <i class="fa-solid fa-eye"></i><span>Xem Như Học Sinh</span>
-              </button>
             </div>
-          ` : (this.isTeacherPreviewingAsStudent() ? `
-            <button type="button" id="hwToolbarBackToAdminBtn" onclick="App.toggleAdminStudentViewMode(false, { adminMainTab: 'homeworks', hwViewMode: '${mode}' })" class="px-2.5 py-1.5 rounded-xl bg-[#650f12] hover:bg-[#3d0709] text-[#ffe27d] border border-[#ffe27d]/60 text-xs font-extrabold shadow-2xs transition cursor-pointer inline-flex items-center gap-1.5" title="Quay lại chế độ Giáo Viên để sửa tên, thêm dạng và upload file">
+            <button type="button" id="hwToolbarPreviewStudentBtn" onclick="App.toggleAdminStudentViewMode(true, { studentMainTab: 'homeworks', studentHwViewMode: '${mode}' })" class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-2xs transition cursor-pointer inline-flex items-center gap-1.5" title="Xem ngay Cây Thư Mục &amp; Bảng Sheet dưới góc nhìn Học sinh mà không cần thoát Admin">
+              <i class="fa-solid fa-eye"></i><span>Xem Như Học Sinh</span>
+            </button>
+          </div>
+        ` : (this.isTeacherPreviewingAsStudent() ? `
+          <div class="pt-2 border-t border-dashed border-[#dfd3c3] flex flex-wrap items-center justify-end">
+            <button type="button" id="hwToolbarBackToAdminBtn" onclick="App.toggleAdminStudentViewMode(false, { adminMainTab: 'homeworks', hwViewMode: '${mode}' })" class="px-3 py-1.5 rounded-xl bg-[#650f12] hover:bg-[#3d0709] text-[#ffe27d] border border-[#ffe27d]/60 text-xs font-extrabold shadow-2xs transition cursor-pointer inline-flex items-center gap-1.5" title="Quay lại chế độ Giáo Viên để sửa tên, thêm dạng và upload file">
               <i class="fa-solid fa-user-shield"></i><span>Chế Độ GV (Sửa Cây Thư Mục)</span>
             </button>
-          ` : '')}
-        </div>
-
-        <!-- Lọc nhanh Trạng thái Phiếu + Chương + Thu gọn / Mở rộng -->
-        <div class="flex flex-wrap items-center gap-1.5 text-xs">
-          <button type="button" onclick="App.onCurriculumFilterInput('${scope}', 'roadmap', 'ALL')" class="px-2.5 py-1.5 rounded-xl font-bold border transition cursor-pointer ${rFilter === 'ALL' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}">
-            Tất cả (${filteredItems.length})
-          </button>
-          <button type="button" onclick="App.onCurriculumFilterInput('${scope}', 'roadmap', 'READY')" class="px-2.5 py-1.5 rounded-xl font-bold border transition cursor-pointer inline-flex items-center gap-1 ${rFilter === 'READY' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-50'}">
-            <i class="fa-solid fa-file-circle-check"></i><span>Đã có file (${readyCount})</span>
-          </button>
-          <button type="button" onclick="App.onCurriculumFilterInput('${scope}', 'roadmap', 'PRACTICE')" class="px-2.5 py-1.5 rounded-xl font-bold border transition cursor-pointer inline-flex items-center gap-1 ${rFilter === 'PRACTICE' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-800 border-indigo-200 hover:bg-indigo-50'}">
-            <i class="fa-solid fa-pen-to-square"></i><span>Làm trực tiếp (${practiceCount})</span>
-          </button>
-
-          ${allChapOptions.length > 0 ? `
-            <select aria-label="Lọc theo Chương" onchange="App.onCurriculumFilterInput('${scope}', 'chapter', this.value)" class="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 text-xs outline-none cursor-pointer">
-              <option value="ALL" ${chFilter === 'ALL' ? 'selected' : ''}>Tất cả các Chương</option>
-              ${allChapOptions.map(c => `<option value="${this.escapeHtmlAttr(c)}" ${chFilter === c ? 'selected' : ''}>${this.escapeHtmlAttr(c)}</option>`).join('')}
-            </select>
-          ` : ''}
-
-          ${mode !== 'cards' && groupedChapters.length > 0 ? `
-            <button type="button" onclick="App.setAllCurriculumCollapse(false, '${scope}', ${chapKeysJson})" class="px-2 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer" title="Mở rộng toàn bộ các chương">
-              <i class="fa-solid fa-angles-down mr-1"></i>Mở hết
-            </button>
-            <button type="button" onclick="App.setAllCurriculumCollapse(true, '${scope}', ${chapKeysJson})" class="px-2 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-[11px] font-bold text-slate-600 cursor-pointer" title="Thu gọn tất cả các chương">
-              <i class="fa-solid fa-angles-up mr-1"></i>Thu gọn
-            </button>
-          ` : ''}
-        </div>
+          </div>
+        ` : '')}
       </div>
     `;
   },
@@ -8551,7 +8561,7 @@ const App = {
                 <th class="min-w-[230px] text-center">File Đề (Xem / Tải Về)</th>
                 <th class="w-40 text-center">Đáp Án PDF</th>
                 <th class="w-36 text-center">Làm Trực Tiếp</th>
-                ${isAdmin ? '<th class="w-32 text-center">Thao tác GV</th>' : ''}
+                ${isAdmin ? '<th class="w-44 text-center">Thao tác GV</th>' : ''}
               </tr>
             </thead>
             <tbody>
@@ -8563,13 +8573,13 @@ const App = {
                   <tr class="ltac-sheet-chap-banner" style="background:${chap.colorHex}; color:#ffffff;">
                     <td colspan="${colSpan}">
                       <div class="flex flex-wrap items-center justify-between gap-2">
-                        <button type="button" onclick="App.toggleCurriculumCollapse('${this.escapeHtmlAttr(chap.key)}', '${scope}')" class="flex items-center gap-2 text-left font-extrabold text-xs sm:text-[13px] cursor-pointer text-white hover:opacity-90">
+                        <button type="button" onclick="App.toggleCurriculumCollapse('${this.escapeHtmlAttr(chap.key)}', '${scope}')" class="flex items-center gap-2 text-left font-extrabold text-xs sm:text-[13px] cursor-pointer text-white hover:opacity-90 min-w-[200px] flex-1">
                           <i class="fa-solid ${isCollapsed ? 'fa-chevron-right' : 'fa-chevron-down'} w-3.5 text-center text-[#ffe27d]"></i>
                           <span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-black/25 text-[#ffe27d] border border-white/20 shrink-0">TOÁN ${chap.grade || 12}</span>
                           <span>${this.escapeHtmlAttr(chap.chapterTitle)}</span>
                           <span class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white/15 text-[#ffe27d] border border-white/20 shrink-0">${readyCnt}/${chap.items.length} phiếu sẵn sàng</span>
                         </button>
-                        <div class="flex items-center gap-1.5 shrink-0">
+                        <div class="flex flex-wrap items-center gap-1.5 max-w-full">
                           ${chap.folderUrl ? `
                             <a href="${chap.folderUrl}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-[11px] font-bold text-[#ffe27d] hover:text-white inline-flex items-center gap-1 border border-white/20 whitespace-nowrap">
                               <i class="fa-brands fa-google-drive"></i><span>Thư mục Chương</span>
@@ -8663,7 +8673,7 @@ const App = {
                         </td>
                         ${isAdmin ? `
                           <td class="text-center">
-                            <div class="inline-flex items-center justify-center gap-1">
+                            <div class="inline-flex flex-wrap items-center justify-center gap-1 min-w-[144px]">
                               ${isHw ? `
                                 <button type="button" onclick="App.showHomeworkSubmissionsModal('${hw.id}')" class="w-7 h-7 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 inline-flex items-center justify-center cursor-pointer" title="Theo dõi &amp; Chấm bài">
                                   <i class="fa-solid fa-list-check text-[11px]"></i>
@@ -8721,13 +8731,13 @@ const App = {
           const readyCnt = chap.items.filter(it => Boolean(it.pdfUrl || it.itemKind === 'homework')).length;
           return `
             <div class="ltac-tree-branch">
-              <div class="px-3.5 sm:px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2" style="background:${chap.colorHex}; color:#ffffff;">
-                <button type="button" onclick="App.toggleCurriculumCollapse('${this.escapeHtmlAttr(chap.key)}', '${scope}')" class="flex items-start sm:items-center gap-2.5 text-left font-extrabold text-xs sm:text-sm text-white cursor-pointer flex-1 min-w-0">
+              <div class="px-3.5 sm:px-4 py-3 flex flex-wrap items-center justify-between gap-2" style="background:${chap.colorHex}; color:#ffffff;">
+                <button type="button" onclick="App.toggleCurriculumCollapse('${this.escapeHtmlAttr(chap.key)}', '${scope}')" class="flex items-start sm:items-center gap-2.5 text-left font-extrabold text-xs sm:text-sm text-white cursor-pointer flex-1 min-w-[220px]">
                   <i class="fa-solid ${isChapCollapsed ? 'fa-folder' : 'fa-folder-open'} text-[#ffe27d] text-base shrink-0 mt-0.5 sm:mt-0"></i>
                   <span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-black/25 text-[#ffe27d] border border-white/20 shrink-0">TOÁN ${chap.grade || 12}</span>
                   <span class="leading-snug flex-1 min-w-0">${this.escapeHtmlAttr(chap.chapterTitle)}</span>
                 </button>
-                <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                <div class="flex flex-wrap items-center gap-1.5 max-w-full">
                   <span class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white/15 text-[#ffe27d] border border-white/20 shrink-0">${readyCnt}/${chap.items.length} phiếu</span>
                   ${chap.folderUrl ? `
                     <a href="${chap.folderUrl}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-[11px] font-bold text-[#ffe27d] inline-flex items-center gap-1 border border-white/20">
@@ -8762,14 +8772,14 @@ const App = {
                     return `
                       <div class="space-y-2">
                         <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white border border-[#e6dbcd] shadow-2xs">
-                          <button type="button" onclick="App.toggleCurriculumCollapse('${this.escapeHtmlAttr(ls.key)}', '${scope}')" class="flex items-center gap-2 text-left text-xs sm:text-[13px] font-extrabold text-[#3d0709] cursor-pointer flex-1 min-w-0">
+                          <button type="button" onclick="App.toggleCurriculumCollapse('${this.escapeHtmlAttr(ls.key)}', '${scope}')" class="flex items-center gap-2 text-left text-xs sm:text-[13px] font-extrabold text-[#3d0709] cursor-pointer flex-1 min-w-[180px]">
                             <i class="fa-solid ${isLsCollapsed ? 'fa-chevron-right' : 'fa-chevron-down'} text-[10px] text-slate-400 w-3 shrink-0"></i>
                             <i class="fa-solid ${isLsCollapsed ? 'fa-folder' : 'fa-folder-open'} text-amber-600 shrink-0"></i>
                             <span class="truncate">${this.escapeHtmlAttr(ls.lessonTitle)}</span>
                             <span class="px-2 py-0.5 rounded-full text-[10px] font-mono ${lsReady > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'} shrink-0">${lsReady}/${ls.items.length}</span>
                           </button>
                           ${isAdmin ? `
-                            <div class="flex flex-wrap items-center gap-1 shrink-0">
+                            <div class="flex flex-wrap items-center gap-1 max-w-full">
                               <button type="button" onclick="App.showCurriculumNodeModal({ mode: 'rename-lesson', grade: ${chap.grade}, chapterCode: '${this.escapeHtmlAttr(chap.chapterCode)}', lessonTitle: '${this.escapeHtmlAttr(ls.lessonTitle)}' })" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1" title="Sửa tên Bài học / Thư mục con này">
                                 <i class="fa-solid fa-pen text-[10px]"></i><span>Sửa tên Bài</span>
                               </button>
@@ -8801,7 +8811,7 @@ const App = {
                               const canViewSol = Boolean(hw.solutionPdfUrl && (isAdmin || (hw.allowViewSolution !== false && (!isHw || latestSub || dueMeta.isOverdue))));
 
                               return `
-                                <div class="ltac-tree-leaf ${isReady ? 'ltac-tree-leaf-ready' : ''} p-3 flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+                                <div class="ltac-tree-leaf ${isReady ? 'ltac-tree-leaf-ready' : ''} p-3 flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
                                   <div class="flex items-start gap-2.5 min-w-0 flex-1">
                                     <div class="w-8 h-8 rounded-lg ${hasPdf ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-100 text-slate-400 border-slate-200'} border flex items-center justify-center shrink-0 mt-0.5">
                                       <i class="fa-solid ${isHw ? 'fa-pen-ruler' : (hasPdf ? 'fa-file-pdf' : 'fa-file-circle-question')} text-sm"></i>
@@ -8818,7 +8828,7 @@ const App = {
                                     </div>
                                   </div>
 
-                                  <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                                  <div class="flex flex-wrap items-center gap-1.5 max-w-full">
                                     ${hasPdf && canPractice ? `
                                       <button type="button" onclick="App.launchWorksheetDirectPractice('${hw.id}')" class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs" title="Mở đề PDF không đáp án và chấm tự động theo đáp án file .tex">
                                         <i class="fa-solid fa-pen-to-square"></i><span>Làm Trực Tiếp</span>
@@ -12435,8 +12445,8 @@ const App = {
       <div class="min-h-screen bg-slate-100 flex flex-col">
         <!-- Top Nav Đỏ Đô Học Thuật Đồng Bộ Lớp Toán Anh Chí -->
         <header class="ltac-admin-header text-[#fbf7ef] sticky top-0 z-30">
-          <div class="w-full max-w-[97%] mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
-            <div class="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer min-w-0 sm:shrink-0" onclick="App.goHome()" title="Về trang chủ">
+          <div class="w-full max-w-[97%] mx-auto px-2.5 sm:px-5 min-h-[56px] sm:min-h-[62px] py-1.5 flex items-center justify-between gap-2">
+            <div class="flex items-center space-x-2 sm:space-x-2.5 cursor-pointer min-w-0 flex-1 sm:flex-initial" onclick="App.goHome()" title="Về trang chủ">
               <div class="h-9 sm:h-10 px-1.5 py-1 rounded-xl bg-[#fffdf8] flex items-center justify-center shadow-md border border-[#ffe27d]/60 shrink-0">
                 <img src="icons/logo-ch1math.png" alt="Ch1 Math" class="h-full w-auto object-contain">
               </div>
@@ -12446,7 +12456,7 @@ const App = {
               </div>
             </div>
 
-            <div class="flex items-center gap-1.5 shrink-0">
+            <div class="flex items-center justify-end gap-1 sm:gap-1.5 shrink-0 max-w-full">
               <!-- Chỉ báo tự động lưu Server -->
               <span id="adminAutoCloudBadge" class="hidden 2xl:inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[11px] font-bold border ${isCloudSyncing ? 'bg-amber-400/20 text-[#ffe27d] border-[#ffe27d]/40' : 'bg-emerald-500/20 text-emerald-200 border-emerald-400/35'}" title="Mọi đề thi, file PDF và cài đặt được tự động lưu lên máy chủ ngay khi tải lên">
                 <i class="fa-solid ${isCloudSyncing ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-up'}"></i>
@@ -12454,52 +12464,53 @@ const App = {
               </span>
 
               <!-- Nút Về Trang Chủ -->
-              <button type="button" onclick="App.goHome()" class="hidden xl:inline-flex ui-btn bg-white/10 hover:bg-white/20 text-[#fbf7ef] border border-white/15 shadow-xs" title="Về trang chủ">
+              <button type="button" onclick="App.goHome()" class="hidden 2xl:inline-flex ui-btn bg-white/10 hover:bg-white/20 text-[#fbf7ef] border border-white/15 shadow-xs" title="Về trang chủ">
                 <i class="fa-solid fa-house text-[#ffe27d]"></i>
                 <span>Trang chủ</span>
               </button>
 
               <!-- Nút Xem trước & Chọn Bố cục Đề PDF + Ô Đáp Án -->
-              <button type="button" id="adminLayoutBtn" onclick="App.showExamLayoutModal()" class="hidden sm:inline-flex ui-btn-icon lg:w-auto lg:px-3 bg-white/10 hover:bg-white/20 text-[#fbf7ef] text-xs font-bold border border-white/15 shadow-xs lg:gap-1.5" title="Xem trước & chọn bố cục hiển thị Đề PDF và Ô điền đáp án">
+              <button type="button" id="adminLayoutBtn" onclick="App.showExamLayoutModal()" class="hidden md:inline-flex ui-btn-icon xl:w-auto xl:px-3 bg-white/10 hover:bg-white/20 text-[#fbf7ef] text-xs font-bold border border-white/15 shadow-xs xl:gap-1.5" title="Xem trước & chọn bố cục hiển thị Đề PDF và Ô điền đáp án">
                 <i class="fa-solid ${this.getExamLayoutMeta().icon} text-[#ffe27d]"></i>
-                <span class="hidden lg:inline">Bố cục</span>
+                <span class="hidden xl:inline">Bố cục</span>
               </button>
 
               <!-- Nút Quét QR Tạo App Điện Thoại (Android & iOS) -->
-              <button type="button" id="adminIosAppBtn" onclick="App.showIosAppModal()" class="hidden sm:inline-flex ui-btn-icon md:w-auto md:px-3 bg-[#ffe27d] hover:bg-amber-200 text-[#3d0709] text-xs font-extrabold shadow-xs md:gap-1.5" title="Hiển thị mã QR để học sinh quét tạo App trên điện thoại Android & iOS">
+              <button type="button" id="adminIosAppBtn" onclick="App.showIosAppModal()" class="hidden sm:inline-flex ui-btn-icon xl:w-auto xl:px-3 bg-[#ffe27d] hover:bg-amber-200 text-[#3d0709] text-xs font-extrabold shadow-xs xl:gap-1.5" title="Hiển thị mã QR để học sinh quét tạo App trên điện thoại Android & iOS">
                 <i class="fa-solid fa-qrcode"></i>
-                <span class="hidden md:inline">App / QR</span>
+                <span class="hidden xl:inline">App / QR</span>
               </button>
 
               <!-- Nút Giới Thiệu Web Thầy Chí -->
-              <button type="button" id="adminTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="hidden md:inline-flex ui-btn-icon xl:w-auto xl:px-3 bg-white/10 hover:bg-white/20 text-[#ffe27d] text-xs font-bold border border-white/15 shadow-xs xl:gap-1.5" title="Giới thiệu & liên kết trang web Thầy Chí (Lớp Toán Anh Chí)">
+              <button type="button" id="adminTeacherIntroBtn" onclick="App.showTeacherIntroModal()" class="hidden lg:inline-flex ui-btn-icon 2xl:w-auto 2xl:px-3 bg-white/10 hover:bg-white/20 text-[#ffe27d] text-xs font-bold border border-white/15 shadow-xs 2xl:gap-1.5" title="Giới thiệu & liên kết trang web Thầy Chí (Lớp Toán Anh Chí)">
                 <i class="fa-solid fa-graduation-cap text-[#ffe27d]"></i>
-                <span class="hidden xl:inline">Web Thầy Chí</span>
+                <span class="hidden 2xl:inline">Web Thầy Chí</span>
               </button>
 
               <!-- Chuyển nhanh Sáng/Tối & Bảng màu -->
               <button type="button" id="adminQuickThemeBtn" onclick="App.cycleTheme()" class="hidden sm:inline-flex ui-btn-icon bg-white/10 hover:bg-white/20 text-[#fbf7ef] border border-white/15" title="Chuyển nhanh chế độ: Giấy vở / Dịu mắt / Tối">
                 <i class="fa-solid ${thMeta.icon} text-[#ffe27d]"></i>
               </button>
-              <button type="button" id="adminThemeHeaderBtn" onclick="App.showThemeModal()" class="hidden sm:inline-flex ui-btn-icon 2xl:w-auto 2xl:px-3 bg-white/10 hover:bg-white/20 text-[#fbf7ef] text-xs font-bold border border-white/15 2xl:gap-1.5" title="Tùy chỉnh Giấy vở/Tối, Bộ màu & Độ tương phản">
+              <button type="button" id="adminThemeHeaderBtn" onclick="App.showThemeModal()" class="hidden md:inline-flex ui-btn-icon 2xl:w-auto 2xl:px-3 bg-white/10 hover:bg-white/20 text-[#fbf7ef] text-xs font-bold border border-white/15 2xl:gap-1.5" title="Tùy chỉnh Giấy vở/Tối, Bộ màu & Độ tương phản">
                 <span data-appearance-swatch-dot class="w-3.5 h-3.5 rounded-full border border-white/40 shrink-0" style="background:${swatchHex};"></span>
                 <span class="hidden 2xl:inline">Giao diện</span>
               </button>
 
               <div class="h-6 w-px bg-white/15 hidden sm:block"></div>
 
-              <button type="button" id="adminPreviewStudentHeaderBtn" onclick="App.toggleAdminStudentViewMode(true)" class="ui-btn px-2.5 sm:px-3.5 bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/50 text-xs font-extrabold shadow-xs" title="Xem ngay giao diện Học sinh (Đề thi, BTVN, Bảng Sheet &amp; Cây Thư Mục) mà không cần đăng xuất">
+              <button type="button" id="adminPreviewStudentHeaderBtn" onclick="App.toggleAdminStudentViewMode(true)" class="ui-btn h-9 px-2.5 sm:px-3 bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/50 text-xs font-extrabold shadow-xs shrink-0" title="Xem ngay giao diện Học sinh (Đề thi, BTVN, Bảng Sheet &amp; Cây Thư Mục) mà không cần đăng xuất">
                 <i class="fa-solid fa-eye text-[#ffe27d]"></i>
-                <span>Xem Như HS</span>
+                <span class="hidden sm:inline">Xem Như HS</span>
+                <span class="sm:hidden">HS</span>
               </button>
 
-              <button type="button" id="adminProfileHeaderBtn" onclick="App.showAdminProfileModal()" class="ui-btn-icon sm:w-auto sm:px-3 bg-white/10 hover:bg-white/20 text-[#fbf7ef] text-xs font-bold border border-white/15 sm:gap-1.5" title="Hồ sơ giáo viên, đổi tên hiển thị & mật khẩu">
+              <button type="button" id="adminProfileHeaderBtn" onclick="App.showAdminProfileModal()" class="ui-btn-icon lg:w-auto lg:px-3 bg-white/10 hover:bg-white/20 text-[#fbf7ef] text-xs font-bold border border-white/15 lg:gap-1.5 shrink-0" title="Hồ sơ giáo viên, đổi tên hiển thị & mật khẩu (${this.escapeHtmlAttr(u.fullName)})">
                 <i class="fa-solid fa-user-gear text-[#ffe27d]"></i>
-                <span class="hidden sm:inline">${u.fullName}</span>
+                <span class="hidden lg:inline max-w-[130px] truncate">${u.fullName}</span>
               </button>
-              <button type="button" onclick="App.logout()" class="ui-btn px-2.5 sm:px-3 bg-white/10 hover:bg-rose-600 text-[#ffd9d2] hover:text-white border border-white/15 text-xs font-bold" title="Đăng xuất khỏi hệ thống">
+              <button type="button" onclick="App.logout()" class="ui-btn h-9 px-2.5 sm:px-3 bg-white/10 hover:bg-rose-600 text-[#ffd9d2] hover:text-white border border-white/15 text-xs font-bold shrink-0" title="Đăng xuất khỏi hệ thống">
                 <i class="fa-solid fa-right-from-bracket"></i>
-                <span class="hidden sm:inline">Đăng xuất</span>
+                <span class="hidden md:inline">Đăng xuất</span>
               </button>
             </div>
           </div>
@@ -12507,21 +12518,20 @@ const App = {
 
         <!-- Main Body -->
         <main class="w-full max-w-[97%] mx-auto px-3.5 sm:px-6 pt-5 sm:pt-8 pb-20 sm:pb-12 flex-1 space-y-5 sm:space-y-6">
-          <!-- Thanh Điều Hướng Cổng Giáo Viên -->
+          <!-- Thanh Điều Hướng Cổng Giáo Viên (Taskbar Không Tràn Nút Ở Mọi Độ Phân Giải) -->
           <div class="bg-white rounded-2xl p-2 sm:p-2.5 border border-slate-200 shadow-sm">
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <nav class="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-1.5 sm:gap-2 w-full">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <nav class="grid grid-cols-2 sm:grid-cols-4 xl:flex xl:flex-nowrap items-stretch xl:items-center gap-1.5 w-full">
                 <button
                   type="button"
                   id="adminTabMainBtn"
                   onclick="App.setAdminMainTab('main')"
-                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'main' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2 2xl:px-3 min-w-0 xl:flex-1 ${this.state.adminMainTab === 'main' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-chart-pie shrink-0"></i>
-                  <span class="sm:hidden">Sổ Điểm</span>
-                  <span class="hidden sm:inline">Tổng Quan &amp; Sổ Điểm</span>
-                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'main' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
-                    ${examsList.length}<span class="hidden sm:inline"> đề</span>
+                  <span class="truncate"><span class="hidden 2xl:inline">Tổng Quan &amp; </span>Sổ Điểm</span>
+                  <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'main' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                    ${examsList.length}
                   </span>
                 </button>
 
@@ -12529,12 +12539,11 @@ const App = {
                   type="button"
                   id="adminTabStudentsBtn"
                   onclick="App.setAdminMainTab('students')"
-                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'students' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2 2xl:px-3 min-w-0 xl:flex-1 ${this.state.adminMainTab === 'students' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-users shrink-0"></i>
-                  <span class="sm:hidden">Học Sinh</span>
-                  <span class="hidden sm:inline">Quản Lý Học Sinh</span>
-                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'students' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                  <span class="truncate"><span class="hidden 2xl:inline">Quản Lý </span>Học Sinh</span>
+                  <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'students' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
                     ${this.state.students.length}
                   </span>
                 </button>
@@ -12543,12 +12552,11 @@ const App = {
                   type="button"
                   id="adminTabExamsBtn"
                   onclick="App.setAdminMainTab('exams')"
-                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2 2xl:px-3 min-w-0 xl:flex-1 ${this.state.adminMainTab === 'exams' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-file-lines shrink-0"></i>
-                  <span class="sm:hidden">Đề Thi</span>
-                  <span class="hidden sm:inline">Quản Lý Đề Thi</span>
-                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'exams' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                  <span class="truncate"><span class="hidden 2xl:inline">Quản Lý </span>Đề Thi</span>
+                  <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'exams' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
                     ${this.state.exams.length}
                   </span>
                 </button>
@@ -12557,13 +12565,11 @@ const App = {
                   type="button"
                   id="adminTabHomeworksBtn"
                   onclick="App.setAdminMainTab('homeworks')"
-                  class="ui-btn min-h-[40px] px-1.5 xs:px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2 2xl:px-3 min-w-0 xl:flex-1 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-house-laptop shrink-0"></i>
-                  <span class="xs:hidden">BTVN</span>
-                  <span class="hidden xs:inline sm:hidden">BTVN &amp; TL</span>
-                  <span class="hidden sm:inline">Giao BTVN &amp; Tài Liệu</span>
-                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
+                  <span class="truncate"><span class="hidden 2xl:inline">Giao </span>BTVN &amp; TL</span>
+                  <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
                     ${this.state.homeworks.length}
                   </span>
                   ${pendingHwGradeCount > 0 ? `
@@ -12577,13 +12583,12 @@ const App = {
                   type="button"
                   id="adminTabRewardsBtn"
                   onclick="App.setAdminMainTab('rewards')"
-                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'rewards' ? 'bg-amber-500 text-white shadow-md shadow-amber-200 ring-2 ring-amber-400/30' : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'}"
+                  class="ui-btn h-10 px-2 2xl:px-3 min-w-0 xl:flex-1 ${this.state.adminMainTab === 'rewards' ? 'bg-amber-500 text-white shadow-md shadow-amber-200 ring-2 ring-amber-400/30' : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'}"
                 >
                   <i class="fa-solid fa-gift shrink-0"></i>
-                  <span class="sm:hidden">Đổi Thưởng</span>
-                  <span class="hidden sm:inline">Tích Điểm &amp; Thưởng</span>
+                  <span class="truncate"><span class="hidden 2xl:inline">Tích Điểm &amp; </span>Đổi Thưởng</span>
                   ${pendingRedemptions > 0 ? `
-                    <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold shrink-0 bg-red-600 text-white">
+                    <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono font-extrabold shrink-0 bg-red-600 text-white">
                       ${pendingRedemptions}
                     </span>
                   ` : ''}
@@ -12593,23 +12598,21 @@ const App = {
                   type="button"
                   id="adminTabSettingsBtn"
                   onclick="App.setAdminMainTab('settings')"
-                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 ${this.state.adminMainTab === 'settings' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2 2xl:px-3 min-w-0 xl:flex-1 ${this.state.adminMainTab === 'settings' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
                   <i class="fa-solid fa-sliders shrink-0"></i>
-                  <span class="sm:hidden">Cài Đặt</span>
-                  <span class="hidden sm:inline">Cài Đặt &amp; Bảo Mật</span>
+                  <span class="truncate">Cài Đặt<span class="hidden 2xl:inline"> &amp; Bảo Mật</span></span>
                 </button>
 
                 <button
                   type="button"
                   id="adminTabPreviewStudentBtn"
                   onclick="App.toggleAdminStudentViewMode(true)"
-                  class="ui-btn h-10 px-2.5 sm:px-3.5 min-w-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-extrabold"
+                  class="col-span-2 sm:col-span-2 xl:col-span-1 ui-btn h-10 px-2 2xl:px-3 min-w-0 xl:flex-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-extrabold"
                   title="Chuyển sang xem giao diện Học sinh mà không cần thoát tài khoản Giáo viên"
                 >
                   <i class="fa-solid fa-user-graduate shrink-0 text-emerald-700"></i>
-                  <span class="sm:hidden">Xem Như HS</span>
-                  <span class="hidden sm:inline">Xem Như Học Sinh</span>
+                  <span class="truncate">Xem Như HS</span>
                 </button>
               </nav>
             </div>
