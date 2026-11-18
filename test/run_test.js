@@ -1712,7 +1712,7 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v26"), 'sw.js must bump shell cache to v26');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v27"), 'sw.js must bump shell cache to v27');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
   assert.ok(cssSrc.includes(':where([id$="Modal"].fixed.inset-0:not(#previewPdfModal), #appSystemDialog.fixed.inset-0) > div'), 'app.css must use zero-specificity :where() fallback so desktop .max-w-* classes on modals are never overridden');
   assert.ok(cssSrc.includes('max-height: calc(100dvh'), 'app.css must constrain modal card height within viewport');
@@ -1802,17 +1802,77 @@ const PDFStorage = require('../js/pdf_storage.js');
 
   console.log('[OK] Test 29 Passed: 1:1 Ruled Math Notebook, Crimson Academic UI & Ch1 Math Logo verified 100%.');
 
-  // Test 30: Kho Phiếu Bài Tập 3 Chế Độ (Bảng Google Sheet / Cây Thư Mục / Thẻ) + Xem Online Kiểu Drive + Làm Trực Tiếp / Tải In + Upload Hàng Loạt
-  console.log('--- TEST 30: Curriculum Sheet/Tree Explorer, Drive Viewer & Batch Upload ---');
+  // Test 30: Kho Phiếu Bài Tập 3 Chế Độ (Bảng Google Sheet / Cây Thư Mục / Thẻ) Khối 10, 11, 12 + Phân Quyền Khối & Giáo Viên Cấp Quyền
+  console.log('--- TEST 30: Curriculum Sheet/Tree Explorer (Grades 10, 11, 12), Grade Isolation & Teacher Access ---');
   const curriculumData = require('../js/curriculum_data.js');
-  assert.strictEqual(curriculumData.chapters.length, 6, 'Toan 12 curriculum must have 6 chapters');
-  assert.strictEqual(curriculumData.items.length, 56, 'Toan 12 curriculum must have 56 dang items');
+  assert.strictEqual(curriculumData.chapters.filter(c => c.grade === 12).length, 6, 'Toan 12 curriculum must have 6 chapters');
+  assert.strictEqual(curriculumData.chapters.filter(c => c.grade === 11).length, 9, 'Toan 11 curriculum must have 9 chapters');
+  assert.strictEqual(curriculumData.chapters.filter(c => c.grade === 10).length, 9, 'Toan 10 curriculum must have 9 chapters');
+  assert.strictEqual(curriculumData.items.filter(it => it.grade === 12).length, 56, 'Toan 12 curriculum must have 56 dang items');
+  assert.strictEqual(curriculumData.items.filter(it => it.grade === 11).length, 48, 'Toan 11 curriculum must have 48 dang items');
+  assert.strictEqual(curriculumData.items.filter(it => it.grade === 10).length, 46, 'Toan 10 curriculum must have 46 dang items');
+  assert.strictEqual(curriculumData.items.length, 150, 'Total curriculum items across Grades 10, 11, 12 must be 150');
   curriculumData.items.forEach((it) => {
-    assert.ok(it.lessonTitle && it.lessonTitle.trim().length > 0, `${it.code} must have non-empty lessonTitle (including merged cells)`);
-    assert.ok(it.title && it.title.trim().length > 0, `${it.code} must have non-empty title`);
+    assert.ok(it.lessonTitle && it.lessonTitle.trim().length > 0, `${it.id} (${it.code}) must have non-empty lessonTitle`);
+    assert.ok(it.title && it.title.trim().length > 0, `${it.id} (${it.code}) must have non-empty title`);
+    assert.strictEqual(it.accessType, 'grade', `${it.id} must default to grade-restricted access`);
+    assert.strictEqual(it.allowedAll, false, `${it.id} must not allow public/all-grade access by default`);
   });
   const dang01 = App.findHomeworkById('CUR-12-D01');
-  assert.ok(dang01 && dang01.pdfUrl.includes('drive.google.com/file/d/') && dang01.solutionPdfUrl.includes('drive.google.com/file/d/'), 'Dạng 01 must include Drive question & solution URLs');
+  const dang11_01 = App.findHomeworkById('CUR-11-D01');
+  const dang10_01 = App.findHomeworkById('CUR-10-D01');
+  assert.ok(dang01 && dang01.pdfUrl.includes('drive.google.com/file/d/') && dang01.solutionPdfUrl.includes('drive.google.com/file/d/'), 'Dạng 01 Khối 12 must include Drive question & solution URLs');
+  assert.ok(dang11_01 && dang11_01.grade === 11 && dang11_01.chapterTitle.includes('LƯỢNG GIÁC'), 'CUR-11-D01 must belong to Grade 11 Chapter I');
+  assert.ok(dang10_01 && dang10_01.grade === 10 && dang10_01.chapterTitle.includes('MỆNH ĐỀ VÀ TẬP HỢP'), 'CUR-10-D01 must belong to Grade 10 Chapter I');
+
+  // 30.0 Kiểm tra phân quyền nghiêm ngặt theo Khối (10, 11, 12) & Cấp quyền từ Giáo viên
+  const stu10 = { studentId: 'HS052', fullName: 'Hoài Giang', role: 'student', grade: 10, className: '10A 2K11' };
+  const stu10Other = { studentId: 'HS053', fullName: 'Minh Khôi', role: 'student', grade: 10, className: '10B 2K11' };
+  const stu11 = { studentId: 'HS017', fullName: 'Bảo Nghi', role: 'student', grade: 11, className: '11B 2K10' };
+  const stu12 = { studentId: 'HS001', fullName: 'Quốc Việt', role: 'student', grade: 12, className: '12B 2K9' };
+
+  // Khách chưa đăng nhập không xem được lộ trình của bất kỳ khối nào
+  App.state.currentUser = null;
+  App.state.studentHwGradeFilter = 'ALL';
+  assert.strictEqual(App.getFilteredCurriculumItems('public').filter(it => it.isCurriculumSlot).length, 0, 'Unauthenticated guest must see 0 curriculum items by default');
+  assert.strictEqual(await App.downloadHomeworkPdf('CUR-12-D01'), false, 'Unauthenticated guest cannot download Grade 12 PDF');
+
+  // Học sinh Khối 10 chỉ xem được đúng 46 dạng của Khối 10, bị chặn Khối 11 & 12
+  App.state.currentUser = stu10;
+  App.state.studentHwGradeFilter = 'ALL';
+  const itemsForStu10 = App.getFilteredCurriculumItems('student').filter(it => it.isCurriculumSlot);
+  assert.strictEqual(itemsForStu10.length, 46, 'Grade 10 student must see exactly 46 Grade 10 curriculum items');
+  assert.ok(itemsForStu10.every(it => it.grade === 10), 'Grade 10 student items must all be Grade 10');
+  assert.strictEqual(App.isStudentAllowedHomework(dang10_01, stu10), true, 'Grade 10 student allowed on CUR-10-D01');
+  assert.strictEqual(App.isStudentAllowedHomework(dang11_01, stu10), false, 'Grade 10 student blocked on CUR-11-D01');
+  assert.strictEqual(App.isStudentAllowedHomework(dang01, stu10), false, 'Grade 10 student blocked on CUR-12-D01');
+  assert.strictEqual(App.onStudentHwFilterInput('grade', '12'), false, 'Grade 10 student blocked from switching filter to Grade 12');
+
+  // Học sinh Khối 11 chỉ xem được đúng 48 dạng của Khối 11, bị chặn Khối 10 & 12
+  App.state.currentUser = stu11;
+  App.state.studentHwGradeFilter = 'ALL';
+  const itemsForStu11 = App.getFilteredCurriculumItems('student').filter(it => it.isCurriculumSlot);
+  assert.strictEqual(itemsForStu11.length, 48, 'Grade 11 student must see exactly 48 Grade 11 curriculum items');
+  assert.ok(itemsForStu11.every(it => it.grade === 11), 'Grade 11 student items must all be Grade 11');
+  assert.strictEqual(App.isStudentAllowedHomework(dang11_01, stu11), true, 'Grade 11 student allowed on CUR-11-D01');
+  assert.strictEqual(App.isStudentAllowedHomework(dang10_01, stu11), false, 'Grade 11 student blocked on CUR-10-D01');
+  assert.strictEqual(App.isStudentAllowedHomework(dang01, stu11), false, 'Grade 11 student blocked on CUR-12-D01');
+
+  // Học sinh Khối 12 chỉ xem được đúng 56 dạng của Khối 12, bị chặn Khối 10 & 11
+  App.state.currentUser = stu12;
+  App.state.studentHwGradeFilter = 'ALL';
+  const itemsForStu12 = App.getFilteredCurriculumItems('student').filter(it => it.isCurriculumSlot);
+  assert.strictEqual(itemsForStu12.length, 56, 'Grade 12 student must see exactly 56 Grade 12 curriculum items');
+  assert.ok(itemsForStu12.every(it => it.grade === 12), 'Grade 12 student items must all be Grade 12');
+
+  // Giáo viên (Thầy Chí) cấp quyền cho lớp '11B 2K10' và học sinh 'HS052' được xem thêm Khối 12
+  App.grantCurriculumAccess({ grade: 12, classNames: ['11B 2K10'], studentIds: ['HS052'] });
+  assert.strictEqual(App.isStudentAllowedHomework(dang01, stu11), true, 'Grade 11 student in granted class 11B 2K10 can now access CUR-12-D01');
+  assert.strictEqual(App.isStudentAllowedHomework(dang01, stu10), true, 'Grade 10 student HS052 explicitly granted by teacher can now access CUR-12-D01');
+  assert.strictEqual(App.isStudentAllowedHomework(dang01, stu10Other), false, 'Other Grade 10 student HS053 remains blocked from CUR-12-D01');
+  // Khôi phục lại mặc định chỉ học sinh đúng khối được xem
+  App.grantCurriculumAccess({ grade: 12, classNames: [], studentIds: [], allowAllStudents: false, allowPublic: false });
+  assert.strictEqual(App.isStudentAllowedHomework(dang01, stu11), false, 'Revoking teacher grant restores strict grade isolation');
 
   // 30.1 Chuẩn hóa URL Google Drive (/preview iframe thuần không bọc <object type="application/pdf"> & uc?export=download)
   const driveNorm = App.normalizeExternalPdfUrl(dang01.pdfUrl);
@@ -1821,11 +1881,11 @@ const PDFStorage = require('../js/pdf_storage.js');
   const driveEmbedHtml = App.renderPdfFallbackHtml(driveNorm.embedUrl, driveNorm.isExternalEmbed);
   assert.ok(driveEmbedHtml.includes('<iframe') && !driveEmbedHtml.includes('type="application/pdf"'), 'Drive preview must render clean <iframe> without <object type="application/pdf">');
 
-  // 30.2 Render Bảng Google Sheet và Cây Thư Mục cho Học sinh & Admin
+  // 30.2 Render Bảng Google Sheet và Cây Thư Mục cho Học sinh & Admin (Khối 10, 11, 12)
   const allMergedItems = App.getMergedWorksheets({ includeEmptySlots: true });
-  assert.ok(allMergedItems.length >= 56, 'Merged worksheets include all 56 curriculum slots');
+  assert.ok(allMergedItems.length >= 150, 'Merged worksheets include all 150 curriculum slots across Grades 10, 11, 12');
   const sheetHtmlStu = App.renderCurriculumSheetHtml({ scope: 'student', items: allMergedItems });
-  assert.ok(sheetHtmlStu.includes('CHƯƠNG I.') && sheetHtmlStu.includes('CHƯƠNG VI.') && sheetHtmlStu.includes('Dạng 01') && sheetHtmlStu.includes('Làm Trực Tiếp'), 'Sheet view renders all 6 chapters, Dạng 01 and Làm Trực Tiếp action');
+  assert.ok(sheetHtmlStu.includes('TOÁN 12') && sheetHtmlStu.includes('TOÁN 11') && sheetHtmlStu.includes('TOÁN 10') && sheetHtmlStu.includes('Dạng 01') && sheetHtmlStu.includes('Làm Trực Tiếp'), 'Sheet view renders TOÁN 12, TOÁN 11, TOÁN 10 chapters, Dạng 01 and Làm Trực Tiếp action');
   const treeHtmlAdmin = App.renderCurriculumTreeHtml({ scope: 'admin', items: allMergedItems });
   assert.ok(treeHtmlAdmin.includes('ltac-tree-branch') && treeHtmlAdmin.includes('Bài 1.') && treeHtmlAdmin.includes('Up PDF'), 'Tree view renders hierarchical chapters, lessons and admin upload buttons');
 

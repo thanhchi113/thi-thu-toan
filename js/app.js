@@ -1285,6 +1285,10 @@ const App = {
     s.bonusPoints = Number(s.bonusPoints || 0) || 0;
     s.redemptions = Array.isArray(s.redemptions) ? s.redemptions : [];
     s.grade = this.getStudentGrade(s);
+    s.extraAllowedGrades = Array.isArray(s.extraAllowedGrades)
+      ? [...new Set(s.extraAllowedGrades.map(Number).filter(g => Number.isInteger(g) && g >= 6 && g <= 12 && g !== s.grade))]
+      : [];
+    if (!Array.isArray(s.allowedHomeworks)) s.allowedHomeworks = [];
     return s;
   },
 
@@ -1408,12 +1412,16 @@ const App = {
       ? (hw.allowDirectPractice !== false)
       : (hw.allowDirectPractice !== undefined ? Boolean(hw.allowDirectPractice) : Boolean(hw.pdfUrl));
     if (!Array.isArray(hw.allowedClasses)) hw.allowedClasses = [];
-    if (!Array.isArray(hw.allowedGrades)) hw.allowedGrades = [Number(hw.grade || 12)];
+    if (!Array.isArray(hw.allowedGrades) || hw.allowedGrades.length === 0) hw.allowedGrades = [Number(hw.grade || 12)];
     if (!Array.isArray(hw.allowedStudents)) hw.allowedStudents = [];
+    if ((hw.isCurriculumSlot || /^CUR-(10|11|12)-/i.test(String(hw.id || ''))) && !hw._adminCustomAccess && hw.accessType === 'all') {
+      hw.accessType = 'grade';
+      hw.allowedAll = false;
+    }
     if (!hw.accessType) {
       hw.accessType = hw.allowedAll
         ? 'all'
-        : (hw.allowedClasses.length ? 'class' : 'selected');
+        : (hw.allowedClasses.length ? 'class' : (hw.allowedStudents.length ? 'selected' : 'grade'));
     }
     hw.allowedAll = hw.accessType === 'all';
     if (!Array.isArray(hw.part1)) hw.part1 = [];
@@ -1855,6 +1863,14 @@ const App = {
     const hw = this.findHomeworkById(hwId);
     if (!hw) return false;
     const isAdmin = this.state.currentUser && this.state.currentUser.role === 'admin';
+    if (!isAdmin && !this.isStudentAllowedHomework(hw, this.state.currentUser)) {
+      this.notify(
+        `Phiếu bài tập này thuộc Chương trình Khối ${hw.grade || 12}. Chỉ học sinh Khối ${hw.grade || 12} hoặc học sinh được Thầy Chí cho phép truy cập mới được tải về!`,
+        'warning',
+        'Chưa được cấp quyền truy cập'
+      );
+      return false;
+    }
     if (!isAdmin && hw.allowDownload === false) {
       this.notify('Phiếu bài tập này đang ở chế độ Chỉ xem online trên Drive (không cho phép tải về in).', 'warning', 'Chỉ xem online');
       return false;
@@ -2671,6 +2687,9 @@ const App = {
       } else if (parsed.role === 'student') {
         const fresh = this.state.students.find(x => x.studentId === parsed.studentId);
         this.state.currentUser = fresh ? { role: 'student', ...fresh } : { ...parsed, grade: this.getStudentGrade(parsed) };
+        if (!this.state.studentHwGradeFilter || this.state.studentHwGradeFilter === 'ALL') {
+          this.state.studentHwGradeFilter = String(this.getStudentGrade(this.state.currentUser));
+        }
         this.saveSessionUser(this.state.currentUser);
       } else {
         this.state.currentUser = parsed;
@@ -2691,6 +2710,8 @@ const App = {
       return false;
     }
     this.state.currentUser = { role: 'student', ...s };
+    this.state.studentHwGradeFilter = String(this.getStudentGrade(s));
+    this.state.studentHwChapterFilter = 'ALL';
     this.saveSessionUser(this.state.currentUser);
     this.render();
     this.syncFromCloud({ silent: true });
@@ -3612,13 +3633,34 @@ const App = {
     }
   },
 
+  async handlePublicModalLogin() {
+    const idEl = document.getElementById('publicModalStudentId');
+    const passEl = document.getElementById('publicModalStudentPass');
+    if (!idEl || !passEl) return false;
+    const id = this.forceUppercaseInput(idEl);
+    const pass = passEl.value;
+    const matchedLocal = this.state.students.some(
+      x => x.studentId.trim().toUpperCase() === id.trim().toUpperCase() && x.password === pass
+    );
+    if (!matchedLocal) {
+      await this.syncFromCloud({ silent: true });
+    }
+    const ok = this.loginStudent(id, pass);
+    if (ok) {
+      document.getElementById('publicCurriculumModal')?.remove();
+      this.setStudentMainTab('homeworks');
+    }
+    return ok;
+  },
+
   showPublicCurriculumModal() {
     if (typeof document === 'undefined') return;
     const old = document.getElementById('publicCurriculumModal');
     if (old) old.remove();
     const cat = this.getCurriculumCatalog();
+    const u = this.state.currentUser;
     const publicItems = this.getMergedWorksheets({ includeEmptySlots: true }).filter(h =>
-      h && h.is_active !== false && (h.allowedAll || h.accessType === 'all')
+      this.isStudentAllowedHomework(h, u)
     );
 
     const modal = document.createElement('div');
@@ -3630,12 +3672,12 @@ const App = {
           <div class="flex items-center gap-3 min-w-0">
             <span class="ltac-brand-badge" style="height:34px;"><img src="icons/logo-ch1math.png" alt="Ch1 Math"></span>
             <div class="min-w-0">
-              <h3 class="font-extrabold font-serif text-sm sm:text-base text-white truncate">Kho Phiếu Bài Tập &amp; Lộ Trình Toán (Cây Thư Mục / Bảng Sheet)</h3>
-              <p class="text-[11px] text-[#ffe27d] truncate">Xem file online như Google Drive, tải file PDF về để in hoặc đăng nhập làm trực tiếp</p>
+              <h3 class="font-extrabold font-serif text-sm sm:text-base text-white truncate">Kho Phiếu Bài Tập &amp; Lộ Trình Toán Khối 10 · 11 · 12 (Bảng Sheet &amp; Cây Thư Mục)</h3>
+              <p class="text-[11px] text-[#ffe27d] truncate">Chỉ học sinh thuộc đúng Khối (10, 11, 12) hoặc được Thầy Chí cho phép mới được xem &amp; tải phiếu</p>
             </div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
-            ${cat.sheetUrl ? `
+            ${(u && u.role === 'admin' && cat.sheetUrl) ? `
               <a href="${cat.sheetUrl}" target="_blank" rel="noopener noreferrer" class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 text-xs font-bold text-[#ffe27d] border border-white/20">
                 <i class="fa-solid fa-table"></i><span>Mở Google Sheet gốc</span>
               </a>
@@ -3646,28 +3688,95 @@ const App = {
           </div>
         </div>
 
-        <div class="px-4 sm:px-6 py-3 border-b border-slate-200 bg-slate-50/70 space-y-2 shrink-0">
-          ${this.renderExamGradePillsHtml(publicItems, this.state.studentHwGradeFilter, 'App.onStudentHwFilterInput')}
-          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <div class="flex-1 relative">
-              <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-2.5 text-slate-400 text-xs"></i>
-              <input
-                type="text"
-                oninput="App.onStudentHwFilterInput('query', this.value)"
-                placeholder="Tìm theo tên Chương, Bài học, Phân dạng (VD: Dạng 01, Nguyên hàm, Oxyz, Bayes)..."
-                value="${this.state.studentHwSearchQuery || ''}"
-                class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:border-indigo-500 outline-none"
-              />
+        ${(!u && publicItems.length === 0) ? `
+          <div class="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5 bg-[#fbf7ef]/60">
+            <div class="p-4 sm:p-5 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div class="flex items-start gap-3">
+                <div class="w-10 h-10 rounded-xl bg-[#650f12] text-[#ffe27d] flex items-center justify-center shrink-0">
+                  <i class="fa-solid fa-shield-halved text-base"></i>
+                </div>
+                <div class="text-xs sm:text-sm text-slate-800 space-y-1">
+                  <div class="font-extrabold text-[#3d0709]">Phân quyền bảo mật theo từng Khối lớp (Khối 10 · Khối 11 · Khối 12)</div>
+                  <p class="text-xs text-slate-600 leading-relaxed">
+                    Hệ thống Bảng Sheet &amp; Cây Thư Mục được phân quyền riêng: <strong>Học sinh Khối 10 xem Khối 10, Học sinh Khối 11 xem Khối 11, Học sinh Khối 12 xem Khối 12</strong> (hoặc xem thêm Khối khác khi được <strong>Thầy Chí</strong> cấp quyền truy cập).
+                  </p>
+                </div>
+              </div>
             </div>
-            <button type="button" onclick="App.resetStudentHwFilter()" class="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer shrink-0">
-              <i class="fa-solid fa-rotate-left mr-1"></i>Đặt lại
-            </button>
-          </div>
-        </div>
 
-        <div id="publicCurriculumExplorerHost" class="p-4 sm:p-6 overflow-y-auto flex-1">
-          ${this.renderStudentHwExplorerHtml({ isPublicGuest: true })}
-        </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+              <div class="p-4 rounded-2xl bg-white border border-[#e6dbcd] shadow-2xs space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="px-2.5 py-0.5 rounded-lg bg-[#650f12] text-[#ffe27d] text-xs font-extrabold">KHỐI 12 · THPT QG</span>
+                  <span class="text-[11px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200"><i class="fa-solid fa-lock mr-1"></i>Chỉ HS Khối 12</span>
+                </div>
+                <div class="font-serif font-extrabold text-sm text-slate-900">6 Chương · 56 Phân Dạng Chuẩn GDPT 2018</div>
+                <p class="text-xs text-slate-500 leading-relaxed">Khảo sát hàm số, Vectơ &amp; Hệ trục Oxyz, Mẫu số liệu ghép nhóm, Nguyên hàm – Tích phân, Phương trình mặt phẳng – đường thẳng – mặt cầu &amp; Xác suất Bayes.</p>
+              </div>
+
+              <div class="p-4 rounded-2xl bg-white border border-[#e6dbcd] shadow-2xs space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="px-2.5 py-0.5 rounded-lg bg-[#0c625d] text-white text-xs font-extrabold">KHỐI 11 · CHUYÊN SÂU</span>
+                  <span class="text-[11px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200"><i class="fa-solid fa-lock mr-1"></i>Chỉ HS Khối 11</span>
+                </div>
+                <div class="font-serif font-extrabold text-sm text-slate-900">9 Chương · 48 Phân Dạng Chuẩn GDPT 2018</div>
+                <p class="text-xs text-slate-500 leading-relaxed">Lượng giác, Dãy số – CSC – CSN, Thống kê ghép nhóm, Quan hệ song song, Giới hạn – Liên tục, Mũ – Lôgarit, Quan hệ vuông góc – Khoảng cách – Thể tích, Xác suất &amp; Đạo hàm.</p>
+              </div>
+
+              <div class="p-4 rounded-2xl bg-white border border-[#e6dbcd] shadow-2xs space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="px-2.5 py-0.5 rounded-lg bg-[#1c4587] text-white text-xs font-extrabold">KHỐI 10 · NỀN TẢNG</span>
+                  <span class="text-[11px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200"><i class="fa-solid fa-lock mr-1"></i>Chỉ HS Khối 10</span>
+                </div>
+                <div class="font-serif font-extrabold text-sm text-slate-900">9 Chương · 46 Phân Dạng Chuẩn GDPT 2018</div>
+                <p class="text-xs text-slate-500 leading-relaxed">Mệnh đề – Tập hợp, Hệ BPT bậc nhất hai ẩn, Hệ thức lượng tam giác, Vectơ, Thống kê, Hàm số bậc hai – Tam thức, Phương pháp tọa độ Oxy (Đường thẳng, Đường tròn, Conic), Tổ hợp &amp; Xác suất.</p>
+              </div>
+            </div>
+
+            <form onsubmit="event.preventDefault(); App.handlePublicModalLogin();" class="p-4 sm:p-5 rounded-2xl bg-white border-2 border-[#650f12]/25 shadow-sm max-w-xl mx-auto space-y-3">
+              <div class="text-xs sm:text-sm font-extrabold text-[#3d0709] flex items-center gap-2">
+                <i class="fa-solid fa-key text-[#650f12]"></i>
+                <span>Đăng nhập Mã Học Sinh để mở Bảng Sheet &amp; Cây Thư Mục Khối của em:</span>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                <div class="sm:col-span-5">
+                  <input type="text" id="publicModalStudentId" required placeholder="Mã HS (VD: HS001, HS017, HS052)" oninput="App.forceUppercaseInput(this)" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold text-xs uppercase text-indigo-700 outline-none focus:border-indigo-600">
+                </div>
+                <div class="sm:col-span-4">
+                  <input type="password" id="publicModalStudentPass" required placeholder="Mật khẩu" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono text-xs outline-none focus:border-indigo-600">
+                </div>
+                <div class="sm:col-span-3">
+                  <button type="submit" class="w-full h-full py-2.5 px-3 rounded-xl bg-[#650f12] hover:bg-[#3d0709] text-white font-extrabold text-xs cursor-pointer inline-flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-unlock-keyhole"></i><span>Mở Kho</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        ` : `
+          <div class="px-4 sm:px-6 py-3 border-b border-slate-200 bg-slate-50/70 space-y-2 shrink-0">
+            ${this.renderCurriculumGradeAccessBarHtml('public', publicItems)}
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <div class="flex-1 relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-2.5 text-slate-400 text-xs"></i>
+                <input
+                  type="text"
+                  oninput="App.onStudentHwFilterInput('query', this.value)"
+                  placeholder="Tìm theo tên Chương, Bài học, Phân dạng (VD: Dạng 01, Nguyên hàm, Oxyz, Lượng giác, Vectơ)..."
+                  value="${this.state.studentHwSearchQuery || ''}"
+                  class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:border-indigo-500 outline-none"
+                />
+              </div>
+              <button type="button" onclick="App.resetStudentHwFilter()" class="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer shrink-0">
+                <i class="fa-solid fa-rotate-left mr-1"></i>Đặt lại
+              </button>
+            </div>
+          </div>
+
+          <div id="publicCurriculumExplorerHost" class="p-4 sm:p-6 overflow-y-auto flex-1">
+            ${this.renderStudentHwExplorerHtml({ isPublicGuest: true })}
+          </div>
+        `}
       </div>
     `;
     this.openModalElement(modal);
@@ -4185,19 +4294,109 @@ const App = {
     ].some(v => v && String(v).toLowerCase().includes(q));
   },
 
-  isStudentAllowedHomework(hw, u) {
-    if (!hw || hw.is_active === false || !u) return false;
-    if (hw.allowedAll || hw.accessType === 'all') return true;
-    if (hw.accessType === 'class') {
-      const myCls = u.className || '';
-      return Array.isArray(hw.allowedClasses) && hw.allowedClasses.some(c => this.isSameClassName(c, myCls));
+  getGradeAccessConfig(grade) {
+    const g = Number(grade || 12);
+    const map = (this.state.settings && this.state.settings.curriculumGradeAccess) || {};
+    const cfg = map[g] || map[String(g)] || {};
+    return {
+      grade: g,
+      allowPublic: Boolean(cfg.allowPublic),
+      allowAllStudents: Boolean(cfg.allowAllStudents),
+      allowedClasses: Array.isArray(cfg.allowedClasses) ? cfg.allowedClasses : [],
+      allowedStudents: Array.isArray(cfg.allowedStudents) ? cfg.allowedStudents : []
+    };
+  },
+
+  isStudentAllowedGradeCurriculum(grade, u = this.state.currentUser) {
+    const g = Number(grade || 12);
+    if (u && u.role === 'admin') return true;
+    const cfg = this.getGradeAccessConfig(g);
+    if (cfg.allowPublic) return true;
+    if (!u) return false;
+    if (cfg.allowAllStudents) return true;
+    const stuRecord = (this.state.students || []).find(s => s && s.studentId === u.studentId) || u;
+    const myGrade = this.getStudentGrade(stuRecord);
+    if (myGrade === g) return true;
+    if (Array.isArray(stuRecord.extraAllowedGrades) && stuRecord.extraAllowedGrades.map(Number).includes(g)) return true;
+    if (Array.isArray(u.extraAllowedGrades) && u.extraAllowedGrades.map(Number).includes(g)) return true;
+    if (cfg.allowedStudents.includes(u.studentId)) return true;
+    const myCls = stuRecord.className || u.className || '';
+    if (myCls && cfg.allowedClasses.some(c => this.isSameClassName(c, myCls))) return true;
+    return false;
+  },
+
+  getStudentAllowedGrades(u = this.state.currentUser) {
+    if (u && u.role === 'admin') return [12, 11, 10, 9, 8, 7, 6];
+    const grades = [12, 11, 10, 9, 8, 7, 6].filter(g => this.isStudentAllowedGradeCurriculum(g, u));
+    if (u && grades.length === 0) {
+      return [this.getStudentGrade(u)];
     }
-    const studentGrade = this.getStudentGrade(u);
-    if (hw.accessType === 'grade') {
-      const gList = Array.isArray(hw.allowedGrades) && hw.allowedGrades.length ? hw.allowedGrades.map(Number) : [Number(hw.grade || 12)];
-      return gList.includes(studentGrade);
+    return grades;
+  },
+
+  grantCurriculumAccess({ grade = 12, studentIds = null, classNames = null, allowAllStudents = undefined, allowPublic = undefined } = {}) {
+    const g = Number(grade || 12);
+    if (!this.state.settings || typeof this.state.settings !== 'object') this.state.settings = {};
+    if (!this.state.settings.curriculumGradeAccess || typeof this.state.settings.curriculumGradeAccess !== 'object') {
+      this.state.settings.curriculumGradeAccess = {};
     }
-    return Array.isArray(hw.allowedStudents) && hw.allowedStudents.includes(u.studentId);
+    const prev = this.getGradeAccessConfig(g);
+    const next = {
+      grade: g,
+      allowPublic: allowPublic !== undefined ? Boolean(allowPublic) : prev.allowPublic,
+      allowAllStudents: allowAllStudents !== undefined ? Boolean(allowAllStudents) : prev.allowAllStudents,
+      allowedClasses: Array.isArray(classNames) ? [...new Set(classNames.map(c => String(c || '').trim()).filter(Boolean))] : prev.allowedClasses,
+      allowedStudents: Array.isArray(studentIds) ? [...new Set(studentIds.map(id => String(id || '').trim().toUpperCase()).filter(Boolean))] : prev.allowedStudents
+    };
+    this.state.settings.curriculumGradeAccess[g] = next;
+
+    // Đồng bộ trường extraAllowedGrades trên từng hồ sơ học sinh
+    if (Array.isArray(studentIds)) {
+      const idSet = new Set(next.allowedStudents);
+      (this.state.students || []).forEach(st => {
+        if (!st || this.getStudentGrade(st) === g) return;
+        const curExtra = new Set(Array.isArray(st.extraAllowedGrades) ? st.extraAllowedGrades.map(Number) : []);
+        if (idSet.has(String(st.studentId || '').toUpperCase())) curExtra.add(g);
+        else curExtra.delete(g);
+        st.extraAllowedGrades = Array.from(curExtra);
+      });
+      if (this.state.currentUser && this.state.currentUser.role === 'student') {
+        const freshStu = (this.state.students || []).find(s => s.studentId === this.state.currentUser.studentId);
+        if (freshStu) {
+          this.state.currentUser = { ...this.state.currentUser, ...freshStu };
+          this.saveSessionUser(this.state.currentUser);
+        }
+      }
+    }
+    this.saveData({ markAdminDirty: true });
+    return next;
+  },
+
+  isStudentAllowedHomework(hw, u = this.state.currentUser) {
+    if (!hw || hw.is_active === false || hw.isActive === false) return false;
+    if (u && u.role === 'admin') return true;
+    const hwGrade = Number(hw.grade || 12);
+    const gradeCfg = this.getGradeAccessConfig(hwGrade);
+
+    if (!u) {
+      return Boolean(gradeCfg.allowPublic && (hw.allowedAll || hw.accessType === 'all' || hw.accessType === 'grade'));
+    }
+
+    const stuRecord = (this.state.students || []).find(s => s && s.studentId === u.studentId) || u;
+    const myCls = stuRecord.className || u.className || '';
+
+    // Học sinh hoặc lớp được Thầy Chí chỉ định đích danh trên phiếu bài tập
+    if (Array.isArray(hw.allowedStudents) && hw.allowedStudents.includes(u.studentId)) return true;
+    if (Array.isArray(stuRecord.allowedHomeworks) && stuRecord.allowedHomeworks.includes(hw.id)) return true;
+    if (myCls && Array.isArray(hw.allowedClasses) && hw.allowedClasses.some(c => this.isSameClassName(c, myCls))) return true;
+
+    if (hw.accessType === 'class' || hw.accessType === 'selected' || hw.accessType === 'student') {
+      return false;
+    }
+
+    // Mọi phiếu thuộc Khối nào (10, 11, 12) chỉ học sinh đúng Khối đó hoặc được Thầy Chí cấp quyền Khối đó mới xem được
+    const gList = Array.isArray(hw.allowedGrades) && hw.allowedGrades.length ? hw.allowedGrades.map(Number) : [hwGrade];
+    return gList.some(g => this.isStudentAllowedGradeCurriculum(g, u));
   },
 
   getCurriculumCatalog() {
@@ -5722,7 +5921,7 @@ const App = {
                   </button>
                 </div>
 
-                ${this.renderExamGradePillsHtml(allRoadmapHomeworks, this.state.studentHwGradeFilter, 'App.onStudentHwFilterInput')}
+                ${this.renderCurriculumGradeAccessBarHtml('student', allRoadmapHomeworks)}
 
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-slate-200/70">
                   <div class="flex-1 relative">
@@ -6457,18 +6656,263 @@ const App = {
     this.refreshHwExplorerDom(scope);
   },
 
+  renderCurriculumGradeAccessBarHtml(scope = 'student', allowedItems = null) {
+    const isAdmin = scope === 'admin';
+    const u = this.state.currentUser;
+    const allMerged = this.getMergedWorksheets({ includeEmptySlots: true });
+    const list = allowedItems || (isAdmin ? allMerged : allMerged.filter(h => this.isStudentAllowedHomework(h, u)));
+    const curGrade = isAdmin ? (this.state.hwGradeFilter || 'ALL') : (this.state.studentHwGradeFilter || 'ALL');
+    const fnName = isAdmin ? 'App.onHwFilterInput' : 'App.onStudentHwFilterInput';
+    const cat = this.getCurriculumCatalog();
+
+    if (isAdmin) {
+      return `
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap pb-0.5 sm:pb-0">
+            <span class="text-[11px] font-bold text-slate-500 mr-1 inline-flex items-center gap-1 shrink-0">
+              <i class="fa-solid fa-layer-group text-indigo-500"></i><span>Bảng Sheet &amp; Cây Thư Mục theo Khối:</span>
+            </span>
+            <button type="button" onclick="${fnName}('grade', 'ALL')" class="h-8 px-3 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 inline-flex items-center ${curGrade === 'ALL' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}">
+              Tất cả (${list.length})
+            </button>
+            ${[12, 11, 10, 9, 8, 7, 6].map(g => {
+              const cnt = list.filter(e => Number(e.grade || 12) === g).length;
+              if (g < 10 && cnt === 0) return '';
+              const chCnt = (cat.chapters || []).filter(c => Number(c.grade) === g).length;
+              const active = String(curGrade) === String(g);
+              return `
+                <button type="button" onclick="${fnName}('grade', '${g}')" class="h-8 px-3 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 inline-flex items-center gap-1.5 ${active ? 'bg-[#650f12] text-[#ffe27d] shadow-sm' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'}">
+                  <span>Khối ${g}</span>
+                  <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono ${active ? 'bg-white/20 text-white' : 'bg-amber-50 text-[#650f12] border border-amber-200'}">${chCnt > 0 ? `${chCnt}C · ` : ''}${cnt}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+          <button type="button" id="openCurriculumAccessModalBtn" onclick="App.showCurriculumAccessModal(${curGrade !== 'ALL' && Number(curGrade) >= 10 ? Number(curGrade) : 12})" class="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-[#650f12] border border-amber-300 text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer shrink-0">
+            <i class="fa-solid fa-user-shield text-amber-700"></i>
+            <span>Phân Quyền Truy Cập Khối (10 · 11 · 12)</span>
+          </button>
+        </div>
+      `;
+    }
+
+    const myGrade = u ? this.getStudentGrade(u) : null;
+    const allowedGrades = this.getStudentAllowedGrades(u);
+    return `
+      <div class="space-y-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap pb-0.5 sm:pb-0">
+            <span class="text-[11px] font-bold text-slate-600 mr-1 inline-flex items-center gap-1 shrink-0">
+              <i class="fa-solid fa-shield-halved text-[#650f12]"></i><span>Khối được phép xem:</span>
+            </span>
+            ${allowedGrades.length > 1 ? `
+              <button type="button" onclick="${fnName}('grade', 'ALL')" class="h-8 px-3 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 inline-flex items-center ${curGrade === 'ALL' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}">
+                Tất cả Khối được mở (${list.length})
+              </button>
+            ` : ''}
+            ${[12, 11, 10].map(g => {
+              const isPermitted = allowedGrades.includes(g) || list.some(it => Number(it.grade || 12) === g);
+              const cnt = list.filter(e => Number(e.grade || 12) === g).length;
+              const chCnt = (cat.chapters || []).filter(c => Number(c.grade) === g).length;
+              const active = String(curGrade) === String(g) || (curGrade === 'ALL' && allowedGrades.length === 1 && allowedGrades[0] === g);
+              if (isPermitted) {
+                const isExtraGranted = myGrade && g !== myGrade;
+                return `
+                  <button type="button" onclick="${fnName}('grade', '${g}')" class="h-8 px-3 rounded-xl text-xs font-extrabold transition cursor-pointer shrink-0 inline-flex items-center gap-1.5 ${active ? 'bg-[#650f12] text-[#ffe27d] shadow-sm' : 'bg-white text-slate-800 border border-emerald-300 hover:bg-emerald-50'}">
+                    <i class="fa-solid fa-unlock-keyhole text-[10px] ${active ? 'text-[#ffe27d]' : 'text-emerald-600'}"></i>
+                    <span>Khối ${g}${isExtraGranted ? ' (Được Thầy cấp quyền)' : ''}</span>
+                    <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono ${active ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'}">${chCnt}C · ${cnt}</span>
+                  </button>
+                `;
+              }
+              return `
+                <button type="button" onclick="App.onStudentHwFilterInput('grade', '${g}')" class="h-8 px-3 rounded-xl text-xs font-semibold bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed shrink-0 inline-flex items-center gap-1.5" title="Chỉ học sinh Khối ${g} hoặc được Thầy Chí cho phép mới xem được">
+                  <i class="fa-solid fa-lock text-[10px]"></i>
+                  <span>Khối ${g} (Chỉ HS Khối ${g})</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+          ${u ? `
+            <span class="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5">
+              <i class="fa-solid fa-user-check text-emerald-600"></i>
+              <span>HS Khối ${myGrade} (${this.escapeHtmlAttr(u.className || 'K' + myGrade)}) • Xem được: <strong>Khối ${allowedGrades.join(', Khối ')}</strong></span>
+            </span>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  },
+
+  showCurriculumAccessModal(initialGrade = 12) {
+    if (typeof document === 'undefined') return;
+    const g = [10, 11, 12].includes(Number(initialGrade)) ? Number(initialGrade) : 12;
+    this._activeAccessModalGrade = g;
+    const cfg = this.getGradeAccessConfig(g);
+    const cat = this.getCurriculumCatalog();
+    const chaps = (cat.chapters || []).filter(c => Number(c.grade) === g);
+    const items = (cat.items || []).filter(it => Number(it.grade) === g);
+    const otherClasses = this.getClassGroups().filter(cg => Number(cg.grade) !== g);
+    const otherStudents = (this.state.students || []).filter(st => this.getStudentGrade(st) !== g);
+    const grantedStudentSet = new Set([
+      ...cfg.allowedStudents.map(s => String(s).toUpperCase()),
+      ...otherStudents.filter(st => Array.isArray(st.extraAllowedGrades) && st.extraAllowedGrades.map(Number).includes(g)).map(st => String(st.studentId).toUpperCase())
+    ]);
+
+    document.getElementById('curriculumAccessModal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'curriculumAccessModal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/65 backdrop-blur-sm overflow-y-auto animate-fade-in';
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col border-2 border-[#650f12] shadow-2xl overflow-hidden my-2 sm:my-6">
+        <div class="px-4 sm:px-6 py-4 ltac-admin-header text-[#fbf7ef] flex items-center justify-between gap-2 shrink-0">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-[#ffe27d] text-[#3d0709] flex items-center justify-center shrink-0">
+              <i class="fa-solid fa-user-shield text-base"></i>
+            </div>
+            <div class="min-w-0">
+              <h3 class="font-extrabold text-sm sm:text-base text-white truncate">Phân Quyền Xem Bảng Sheet &amp; Cây Thư Mục (Khối 10 · 11 · 12)</h3>
+              <p class="text-[11px] text-[#ffe27d] truncate">Mặc định chỉ học sinh thuộc Khối đó được phép xem • Thầy có thể cấp quyền thêm cho Lớp hoặc Học sinh khác</p>
+            </div>
+          </div>
+          <button type="button" onclick="document.getElementById('curriculumAccessModal')?.remove()" class="w-8 h-8 rounded-full bg-white/15 hover:bg-rose-600 text-white flex items-center justify-center cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <div class="px-4 sm:px-6 pt-3 pb-2 bg-[#fbf7ef] border-b border-[#e6dbcd] flex flex-wrap items-center gap-2 shrink-0">
+          ${[12, 11, 10].map(gradeTab => {
+            const active = gradeTab === g;
+            const cCnt = (cat.chapters || []).filter(c => Number(c.grade) === gradeTab).length;
+            const iCnt = (cat.items || []).filter(it => Number(it.grade) === gradeTab).length;
+            return `
+              <button type="button" onclick="App.showCurriculumAccessModal(${gradeTab})" class="px-3.5 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer inline-flex items-center gap-2 ${active ? 'bg-[#650f12] text-[#ffe27d] shadow-xs' : 'bg-white text-slate-700 border border-[#dfd3c3] hover:bg-amber-50'}">
+                <i class="fa-solid fa-folder-tree"></i>
+                <span>Lộ Trình Khối ${gradeTab} (${cCnt} Chương · ${iCnt} Dạng)</span>
+              </button>
+            `;
+          }).join('')}
+        </div>
+
+        <form id="curriculumAccessForm" onsubmit="event.preventDefault(); App.saveCurriculumAccessModal(${g});" class="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1">
+          <div class="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 flex items-start gap-2.5 text-emerald-950">
+            <i class="fa-solid fa-circle-check text-emerald-600 text-base mt-0.5"></i>
+            <div>
+              <div class="font-extrabold">Quy tắc mặc định cho Bảng Sheet &amp; Cây Thư Mục Khối ${g} (${chaps.length} Chương · ${items.length} Dạng):</div>
+              <p class="mt-0.5 text-emerald-800">Tất cả học sinh thuộc <strong>Khối ${g}</strong> luôn được phép xem và làm bài trong Kho Phiếu Khối ${g}. Học sinh các khối khác bị khóa mặc định trừ khi được Thầy tích cho phép bên dưới.</p>
+            </div>
+          </div>
+
+          <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+            <div class="font-extrabold text-slate-800 uppercase tracking-wider text-[11px]">Tùy chọn mở rộng toàn cục cho Khối ${g}:</div>
+            <label class="flex items-center gap-2.5 cursor-pointer font-bold text-slate-800">
+              <input type="checkbox" id="curAccessAllowAllStudents" ${cfg.allowAllStudents ? 'checked' : ''} class="rounded text-indigo-600">
+              <span>Cho phép tất cả học sinh các khối khác (đã đăng nhập) cũng được xem Kho Phiếu Khối ${g}</span>
+            </label>
+            <label class="flex items-center gap-2.5 cursor-pointer font-bold text-slate-800">
+              <input type="checkbox" id="curAccessAllowPublic" ${cfg.allowPublic ? 'checked' : ''} class="rounded text-emerald-600">
+              <span>Cho phép khách chưa đăng nhập xem trước Bảng Sheet &amp; Cây Thư Mục Khối ${g}</span>
+            </label>
+          </div>
+
+          <div class="p-3.5 rounded-2xl bg-amber-50/50 border border-amber-200 space-y-2">
+            <div class="font-extrabold text-amber-950 flex items-center gap-1.5">
+              <i class="fa-solid fa-people-roof text-amber-600"></i>
+              <span>Cấp quyền theo Nhóm Lớp khác được xem thêm Khối ${g} (VD: cho lớp dưới học vượt):</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              ${otherClasses.map(cg => {
+                const checked = cfg.allowedClasses.some(c => this.isSameClassName(c, cg.name));
+                return `
+                  <label class="inline-flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl bg-white border border-amber-200 cursor-pointer hover:border-amber-400 font-bold text-slate-800">
+                    <span class="inline-flex items-center gap-1.5 truncate">
+                      <input type="checkbox" name="curAccessClassPick" value="${this.escapeHtmlAttr(cg.name)}" ${checked ? 'checked' : ''} class="rounded text-amber-600">
+                      <span class="truncate">${cg.name}</span>
+                    </span>
+                    <span class="text-[10px] font-mono text-slate-400 shrink-0">K${cg.grade}</span>
+                  </label>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+            <div class="font-extrabold text-slate-800 flex items-center justify-between gap-2">
+              <span><i class="fa-solid fa-user-check text-indigo-600 mr-1.5"></i>Cấp quyền cho từng Học sinh thuộc khối khác xem thêm Khối ${g}:</span>
+              <span class="text-[11px] font-mono text-indigo-700">Đang chọn: ${grantedStudentSet.size} HS</span>
+            </div>
+            <div class="max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
+              ${otherStudents.map(st => {
+                const sid = String(st.studentId || '').toUpperCase();
+                const isChecked = grantedStudentSet.has(sid);
+                return `
+                  <label class="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 cursor-pointer hover:border-indigo-300">
+                    <input type="checkbox" name="curAccessStudentPick" value="${sid}" ${isChecked ? 'checked' : ''} class="rounded text-indigo-600">
+                    <span class="font-mono font-bold text-[11px] text-indigo-700">${sid}</span>
+                    <span class="truncate font-semibold text-slate-800">${this.escapeHtmlAttr(st.fullName)}</span>
+                    <span class="text-[10px] font-mono text-slate-400 ml-auto shrink-0">K${this.getStudentGrade(st)} • ${this.escapeHtmlAttr(st.className || '')}</span>
+                  </label>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </form>
+
+        <div class="px-4 sm:px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+          <button type="button" onclick="document.getElementById('curriculumAccessModal')?.remove()" class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-bold text-xs text-slate-700 cursor-pointer">Đóng</button>
+          <button type="submit" form="curriculumAccessForm" class="px-5 py-2.5 rounded-xl bg-[#650f12] hover:bg-[#3d0709] text-[#ffe27d] font-extrabold text-xs shadow-sm cursor-pointer inline-flex items-center gap-1.5">
+            <i class="fa-solid fa-floppy-disk"></i><span>Lưu Phân Quyền Khối ${g}</span>
+          </button>
+        </div>
+      </div>
+    `;
+    this.openModalElement(modal);
+  },
+
+  saveCurriculumAccessModal(grade = 12) {
+    const g = Number(grade || this._activeAccessModalGrade || 12);
+    const allowAllStudents = Boolean(document.getElementById('curAccessAllowAllStudents')?.checked);
+    const allowPublic = Boolean(document.getElementById('curAccessAllowPublic')?.checked);
+    const classNames = Array.from(document.querySelectorAll('#curriculumAccessModal input[name="curAccessClassPick"]:checked')).map(el => el.value);
+    const studentIds = Array.from(document.querySelectorAll('#curriculumAccessModal input[name="curAccessStudentPick"]:checked')).map(el => el.value);
+
+    this.grantCurriculumAccess({
+      grade: g,
+      allowAllStudents,
+      allowPublic,
+      classNames,
+      studentIds
+    });
+
+    document.getElementById('curriculumAccessModal')?.remove();
+    this.renderPreservingScroll();
+    this.notify(
+      `Đã lưu phân quyền Bảng Sheet & Cây Thư Mục Khối ${g}: Học sinh Khối ${g}${classNames.length ? ` + Lớp (${classNames.join(', ')})` : ''}${studentIds.length ? ` + ${studentIds.length} HS được cấp quyền` : ''}!`,
+      'success',
+      `Đã cập nhật quyền Khối ${g}`
+    );
+  },
+
   onCurriculumFilterInput(scope, field, val) {
     if (scope === 'student' || scope === 'public') {
       if (field === 'roadmap') this.state.studentHwRoadmapFilter = val;
       if (field === 'chapter') this.state.studentHwChapterFilter = val;
-      if (field === 'grade') this.state.studentHwGradeFilter = val;
+      if (field === 'grade') {
+        if (val !== 'ALL' && !this.isStudentAllowedGradeCurriculum(Number(val), this.state.currentUser)) {
+          this.notify(`Bảng Sheet & Cây Thư Mục Khối ${val} chỉ dành cho học sinh Khối ${val} hoặc học sinh được Thầy Chí cho phép truy cập!`, 'warning', `Khóa quyền Khối ${val}`);
+          return;
+        }
+        this.state.studentHwGradeFilter = val;
+        this.state.studentHwChapterFilter = 'ALL';
+      }
       if (field === 'query') this.state.studentHwSearchQuery = val;
       this.refreshHwExplorerDom(scope);
       return;
     }
     if (field === 'roadmap') this.state.hwRoadmapFilter = val;
     if (field === 'chapter') this.state.hwChapterFilter = val;
-    if (field === 'grade') this.state.hwGradeFilter = val;
+    if (field === 'grade') {
+      this.state.hwGradeFilter = val;
+      this.state.hwChapterFilter = 'ALL';
+    }
     if (field === 'query') this.state.hwSearchQuery = val;
     this.refreshHwExplorerDom('admin');
   },
@@ -6486,7 +6930,7 @@ const App = {
 
     const source = allowedList || (isAdmin
       ? allItems
-      : (u ? allItems.filter(h => this.isStudentAllowedHomework(h, u)) : allItems.filter(h => h.is_active !== false && (h.allowedAll || h.accessType === 'all'))));
+      : allItems.filter(h => this.isStudentAllowedHomework(h, u)));
 
     return source.filter(hw => {
       if (gFilter !== 'ALL' && String(hw.grade || 12) !== String(gFilter)) return false;
@@ -6558,7 +7002,7 @@ const App = {
 
     const groups = Array.from(groupsMap.values()).sort((a, b) => {
       if (Number(b.grade) !== Number(a.grade)) return Number(b.grade) - Number(a.grade);
-      return Number(a.order || 99) - Number(b.order || 99);
+      return Number(a.chapterNo || a.order || 99) - Number(b.chapterNo || b.order || 99);
     });
 
     groups.forEach(grp => {
@@ -6584,12 +7028,18 @@ const App = {
       : (scope === 'public' ? (this.state.publicHwViewMode || 'sheet') : (this.state.studentHwViewMode || 'sheet'));
     const rFilter = isAdmin ? (this.state.hwRoadmapFilter || 'ALL') : (this.state.studentHwRoadmapFilter || 'ALL');
     const chFilter = isAdmin ? (this.state.hwChapterFilter || 'ALL') : (this.state.studentHwChapterFilter || 'ALL');
+    const gFilter = isAdmin ? (this.state.hwGradeFilter || 'ALL') : (this.state.studentHwGradeFilter || 'ALL');
     const cat = this.getCurriculumCatalog();
     const readyCount = filteredItems.filter(it => Boolean(it.pdfUrl || it.itemKind === 'homework')).length;
     const practiceCount = filteredItems.filter(it => it.itemKind === 'homework' || (it.pdfUrl && it.allowDirectPractice !== false)).length;
     const chapKeysJson = JSON.stringify(groupedChapters.map(g => g.key)).replace(/"/g, '&quot;');
+    const relevantChaps = (cat.chapters || []).filter(c =>
+      gFilter === 'ALL'
+        ? (isAdmin || this.isStudentAllowedGradeCurriculum(c.grade, this.state.currentUser))
+        : String(c.grade) === String(gFilter)
+    );
     const allChapOptions = [...new Set([
-      ...(cat.chapters || []).map(c => c.chapterCode),
+      ...relevantChaps.map(c => c.chapterCode),
       ...groupedChapters.map(g => g.chapterCode)
     ])].filter(Boolean);
 
@@ -6696,6 +7146,7 @@ const App = {
                       <div class="flex flex-wrap items-center justify-between gap-2">
                         <button type="button" onclick="App.toggleCurriculumCollapse('${this.escapeHtmlAttr(chap.key)}', '${scope}')" class="flex items-center gap-2 text-left font-extrabold text-xs sm:text-[13px] cursor-pointer text-white hover:opacity-90">
                           <i class="fa-solid ${isCollapsed ? 'fa-chevron-right' : 'fa-chevron-down'} w-3.5 text-center text-[#ffe27d]"></i>
+                          <span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-black/25 text-[#ffe27d] border border-white/20 shrink-0">TOÁN ${chap.grade || 12}</span>
                           <span>${this.escapeHtmlAttr(chap.chapterTitle)}</span>
                           <span class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white/15 text-[#ffe27d] border border-white/20 shrink-0">${readyCnt}/${chap.items.length} phiếu sẵn sàng</span>
                         </button>
@@ -6858,6 +7309,7 @@ const App = {
               <div class="px-3.5 sm:px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2" style="background:${chap.colorHex}; color:#ffffff;">
                 <button type="button" onclick="App.toggleCurriculumCollapse('${this.escapeHtmlAttr(chap.key)}', '${scope}')" class="flex items-start sm:items-center gap-2.5 text-left font-extrabold text-xs sm:text-sm text-white cursor-pointer flex-1 min-w-0">
                   <i class="fa-solid ${isChapCollapsed ? 'fa-folder' : 'fa-folder-open'} text-[#ffe27d] text-base shrink-0 mt-0.5 sm:mt-0"></i>
+                  <span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-black/25 text-[#ffe27d] border border-white/20 shrink-0">TOÁN ${chap.grade || 12}</span>
                   <span class="leading-snug flex-1 min-w-0">${this.escapeHtmlAttr(chap.chapterTitle)}</span>
                 </button>
                 <div class="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -7208,18 +7660,39 @@ const App = {
         return;
       }
     }
-    if (field === 'grade') this.state.studentHwGradeFilter = val;
+    if (field === 'grade') {
+      if (val !== 'ALL' && !this.isStudentAllowedGradeCurriculum(Number(val), this.state.currentUser)) {
+        const hasAnyAllowedInGrade = this.getMergedWorksheets({ includeEmptySlots: true }).some(
+          h => Number(h.grade || 12) === Number(val) && this.isStudentAllowedHomework(h, this.state.currentUser)
+        );
+        if (!hasAnyAllowedInGrade) {
+          this.notify(
+            `Bảng Sheet & Cây Thư Mục Khối ${val} chỉ dành cho học sinh Khối ${val} hoặc học sinh được Thầy Chí cho phép truy cập!`,
+            'warning',
+            `Khóa quyền Khối ${val}`
+          );
+          return false;
+        }
+      }
+      this.state.studentHwGradeFilter = val;
+      this.state.studentHwChapterFilter = 'ALL';
+    }
     if (field === 'kind') this.state.studentHwKindFilter = val;
     if (document.getElementById('publicCurriculumExplorerHost')) {
       this.refreshHwExplorerDom('public');
-      return;
+      return true;
     }
     this.render();
+    return true;
   },
 
   resetStudentHwFilter() {
     this.state.studentHwSearchQuery = '';
-    this.state.studentHwGradeFilter = 'ALL';
+    const u = this.state.currentUser;
+    const allowedGrades = this.getStudentAllowedGrades(u);
+    this.state.studentHwGradeFilter = (u && u.role === 'student' && allowedGrades.length === 1)
+      ? String(allowedGrades[0])
+      : 'ALL';
     this.state.studentHwKindFilter = 'ALL';
     this.state.studentHwRoadmapFilter = 'ALL';
     this.state.studentHwChapterFilter = 'ALL';
@@ -10906,7 +11379,7 @@ const App = {
 
             <!-- Thanh Phân Khối 6 – 12, Lọc Loại (BTVN / Tài liệu), Lọc Nhóm Lớp & Tìm Kiếm -->
             <div class="p-5 sm:p-6 pt-4 pb-4 border-b border-slate-100 bg-slate-50/70 space-y-2.5">
-              ${this.renderExamGradePillsHtml(this.getMergedWorksheets({ includeEmptySlots: true }), this.state.hwGradeFilter, 'App.onHwFilterInput')}
+              ${this.renderCurriculumGradeAccessBarHtml('admin')}
 
               <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
                 <div class="inline-flex flex-wrap items-center gap-1.5">
@@ -12516,6 +12989,22 @@ const App = {
             <input type="text" id="newStudentNotes" placeholder="VD: Học sinh khá, cần củng cố hình học không gian..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none">
           </div>
 
+          <div class="p-3 rounded-xl bg-amber-50/60 border border-amber-200/80 space-y-1.5">
+            <div class="text-xs font-extrabold text-amber-950 flex items-center gap-1.5">
+              <i class="fa-solid fa-folder-tree text-amber-600"></i>
+              <span>Quyền xem thêm Bảng Sheet &amp; Cây Thư Mục Khối khác (Tùy chọn):</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2.5 pt-0.5 text-xs">
+              <span class="text-slate-600 font-semibold">Cho phép xem thêm:</span>
+              ${[10, 11, 12].map(g => `
+                <label class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-amber-200 cursor-pointer font-bold text-slate-800">
+                  <input type="checkbox" name="newStudentExtraGrade" value="${g}" class="rounded text-indigo-600">
+                  <span>Khối ${g}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+
           <div class="pt-4 border-t border-slate-200 flex justify-end space-x-2.5">
             <button type="button" onclick="document.getElementById('addStudentModal').remove()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition cursor-pointer">
               Hủy
@@ -12552,6 +13041,10 @@ const App = {
       return;
     }
 
+    const extraAllowedGrades = Array.from(document.querySelectorAll('#addStudentModal input[name="newStudentExtraGrade"]:checked'))
+      .map(el => parseInt(el.value, 10))
+      .filter(g => Number.isInteger(g) && g !== grade);
+
     this.state.students.push({
       studentId: id,
       fullName: name,
@@ -12565,7 +13058,8 @@ const App = {
       status: 'active',
       createdAt: new Date().toISOString(),
       allowedExams: [],
-      allowedHomeworks: []
+      allowedHomeworks: [],
+      extraAllowedGrades
     });
 
     this.saveData({ markAdminDirty: true });
@@ -12673,6 +13167,25 @@ const App = {
             </div>
           </div>
 
+          <div class="p-3 rounded-xl bg-amber-50/60 border border-amber-200/80 space-y-1.5">
+            <div class="text-xs font-extrabold text-amber-950 flex items-center gap-1.5">
+              <i class="fa-solid fa-folder-tree text-amber-600"></i>
+              <span>Quyền truy cập Bảng Sheet &amp; Cây Thư Mục (Mặc định học sinh được xem Khối ${curGrade}):</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2.5 pt-0.5 text-xs">
+              <span class="text-slate-600 font-semibold">Cho phép xem thêm:</span>
+              ${[10, 11, 12].filter(g => g !== curGrade).map(g => {
+                const isExtra = Array.isArray(student.extraAllowedGrades) && student.extraAllowedGrades.map(Number).includes(g);
+                return `
+                  <label class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-amber-200 cursor-pointer font-bold text-slate-800">
+                    <input type="checkbox" name="editStudentExtraGrade" value="${g}" ${isExtra ? 'checked' : ''} class="rounded text-indigo-600">
+                    <span>Khối ${g}</span>
+                  </label>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
           <div class="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
             <button type="button" onclick="App.deleteStudent('${student.studentId}')" class="text-xs font-bold text-red-600 hover:text-red-700 hover:underline flex items-center gap-1 cursor-pointer">
               <i class="fa-solid fa-trash-can"></i>Xóa học sinh này
@@ -12743,6 +13256,10 @@ const App = {
       }
     }
 
+    const extraAllowedGrades = Array.from(document.querySelectorAll('#editStudentModal input[name="editStudentExtraGrade"]:checked'))
+      .map(el => parseInt(el.value, 10))
+      .filter(g => Number.isInteger(g) && g !== grade);
+
     student.studentId = newId;
     student.fullName = name;
     student.nickname = nickname;
@@ -12753,6 +13270,7 @@ const App = {
     student.parentName = parent;
     student.status = status;
     student.notes = notes;
+    student.extraAllowedGrades = extraAllowedGrades;
     student.updatedAt = new Date().toISOString();
 
     if (this.state.currentUser && this.state.currentUser.studentId === newId) {
@@ -14955,6 +15473,14 @@ const App = {
     const isViewingSol = /_sol$/.test(String(storageId || '')) || Boolean(opts && opts.docKind === 'solution');
     const hw = this.findHomeworkById(baseId);
     const isAdmin = Boolean(this.state.currentUser && this.state.currentUser.role === 'admin');
+    if (hw && !isAdmin && !this.isStudentAllowedHomework(hw, this.state.currentUser)) {
+      this.notify(
+        `Tài liệu này thuộc Chương trình Khối ${hw.grade || 12}. Chỉ học sinh Khối ${hw.grade || 12} hoặc học sinh được Thầy Chí cho phép truy cập mới được xem!`,
+        'warning',
+        'Chưa được cấp quyền truy cập'
+      );
+      return;
+    }
     if (hw && hw.allowOnlineView === false && !isAdmin) {
       this.notify('Phiếu bài tập này hiện chưa mở chế độ xem online!', 'warning', 'Chưa mở xem online');
       return;
@@ -15391,7 +15917,7 @@ const App = {
 
     const initAccess = existingHw
       ? (existingHw.allowedAll || existingHw.accessType === 'all' ? 'all' : (existingHw.accessType || 'grade'))
-      : (preClass ? 'class' : (initKind === 'homework' ? 'class' : 'all'));
+      : (preClass ? 'class' : (initKind === 'homework' ? 'class' : 'grade'));
 
     const initClasses = existingHw
       ? (Array.isArray(existingHw.allowedClasses) ? existingHw.allowedClasses : [])
@@ -15951,7 +16477,10 @@ const App = {
         return;
       }
     }
-    if (field === 'grade') this.state.hwGradeFilter = val;
+    if (field === 'grade') {
+      this.state.hwGradeFilter = val;
+      this.state.hwChapterFilter = 'ALL';
+    }
     if (field === 'kind') this.state.hwKindFilter = val;
     if (field === 'class') this.state.hwClassFilter = val;
     this.render();
@@ -16208,6 +16737,8 @@ const App = {
         dateAdded: existingHw && existingHw.dateAdded ? existingHw.dateAdded : new Date().toISOString().split('T')[0],
         accessType,
         allowedAll: accessType === 'all',
+        allowedGrades: [grade],
+        _adminCustomAccess: true,
         allowedClasses: accessType === 'class' ? checkedClasses : [],
         allowedStudents: accessType === 'selected' ? pickedIds : [],
         scoring: parts.scoring,
@@ -16500,8 +17031,9 @@ const App = {
         allowOnlineView,
         allowDownload,
         allowDirectPractice,
-        accessType: 'all',
-        allowedAll: true
+        accessType: 'grade',
+        allowedAll: false,
+        allowedGrades: [grade]
       });
       this.state.homeworks.unshift(rec);
       uploadedCount++;
@@ -16594,8 +17126,9 @@ const App = {
         sourceTag: sourceTag || (pdfUrl ? 'Google Sheet' : 'Chưa tải lên'),
         updatedLabel: updatedLabel === '-' ? '' : updatedLabel,
         itemKind: matchByCode ? matchByCode.itemKind : 'document',
-        accessType: 'all',
-        allowedAll: true,
+        accessType: matchByCode && matchByCode._adminCustomAccess ? matchByCode.accessType : 'grade',
+        allowedAll: matchByCode && matchByCode._adminCustomAccess ? Boolean(matchByCode.allowedAll) : false,
+        allowedGrades: [Number(defaultGrade || 12)],
         allowOnlineView: true,
         allowDownload: true,
         allowDirectPractice: true
@@ -16604,9 +17137,18 @@ const App = {
     return results;
   },
 
+  onGoogleSheetGradeChange(gradeVal) {
+    const tabInp = document.getElementById('gsSyncTabInput');
+    if (tabInp) tabInp.value = `Toan${gradeVal}`;
+  },
+
   showGoogleSheetSyncModal() {
     if (typeof document === 'undefined') return;
     const cat = this.getCurriculumCatalog();
+    const initG = (this.state.hwGradeFilter && this.state.hwGradeFilter !== 'ALL' && Number(this.state.hwGradeFilter) >= 6)
+      ? Number(this.state.hwGradeFilter)
+      : 12;
+    const initTab = (cat.sheetsByGrade && cat.sheetsByGrade[initG] && cat.sheetsByGrade[initG].tab) || `Toan${initG}`;
     document.getElementById('googleSheetSyncModal')?.remove();
     const modal = document.createElement('div');
     modal.id = 'googleSheetSyncModal';
@@ -16619,8 +17161,8 @@ const App = {
               <i class="fa-solid fa-table"></i>
             </div>
             <div class="min-w-0">
-              <h3 class="font-extrabold text-sm sm:text-base text-white">Đồng Bộ Lộ Trình Từ Google Sheet</h3>
-              <p class="text-[11px] text-[#ffe27d] truncate">Cập nhật tự động link PDF Đề &amp; Đáp án từ Sheet "QUẢN LÝ BÀI HỌC &amp; ĐỀ TOÁN 12"</p>
+              <h3 class="font-extrabold text-sm sm:text-base text-white">Đồng Bộ Lộ Trình Khối 10 · 11 · 12 Từ Google Sheet</h3>
+              <p class="text-[11px] text-[#ffe27d] truncate">Cập nhật tự động link PDF Đề &amp; Đáp án cho từng Khối (Toan10, Toan11, Toan12)</p>
             </div>
           </div>
           <button type="button" onclick="document.getElementById('googleSheetSyncModal')?.remove()" class="w-8 h-8 rounded-full bg-white/15 hover:bg-rose-600 text-white flex items-center justify-center cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
@@ -16635,19 +17177,19 @@ const App = {
                 <i class="fa-solid fa-cloud-arrow-down mr-1"></i>Tải dữ liệu từ Link Sheet
               </button>
             </div>
-            <p class="text-[11px] text-slate-600">Lưu ý: Nếu Google Sheet đang để riêng tư, bạn chỉ cần chọn toàn bộ các dòng trong Sheet (<kbd class="px-1 py-0.5 bg-white border rounded">Ctrl+A</kbd> → <kbd class="px-1 py-0.5 bg-white border rounded">Ctrl+C</kbd>) rồi dán vào ô bên dưới.</p>
+            <p class="text-[11px] text-slate-600">Lưu ý: Nếu Google Sheet đang để riêng tư, bạn chỉ cần chọn toàn bộ các dòng trong Sheet (<kbd class="px-1 py-0.5 bg-white border rounded">Ctrl+A</kbd> &rarr; <kbd class="px-1 py-0.5 bg-white border rounded">Ctrl+C</kbd>) rồi dán vào ô bên dưới.</p>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Khối áp dụng</label>
-              <select id="gsSyncGradeSelect" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-indigo-700 bg-white outline-none">
-                ${[6, 7, 8, 9, 10, 11, 12].map(g => `<option value="${g}" ${g === 12 ? 'selected' : ''}>Khối ${g}</option>`).join('')}
+              <label class="block font-bold text-slate-700 mb-1">Khối áp dụng (Chỉ HS Khối đó được xem mặc định)</label>
+              <select id="gsSyncGradeSelect" onchange="App.onGoogleSheetGradeChange(this.value)" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-indigo-700 bg-white outline-none">
+                ${[6, 7, 8, 9, 10, 11, 12].map(g => `<option value="${g}" ${g === initG ? 'selected' : ''}>Khối ${g}</option>`).join('')}
               </select>
             </div>
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Tên Sheet tab (nếu tải qua link)</label>
-              <input type="text" id="gsSyncTabInput" value="${this.escapeHtmlAttr(cat.sheetTab || 'Toan12')}" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold bg-white outline-none">
+              <label class="block font-bold text-slate-700 mb-1">Tên Sheet tab (Toan10 / Toan11 / Toan12)</label>
+              <input type="text" id="gsSyncTabInput" value="${this.escapeHtmlAttr(initTab)}" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold bg-white outline-none">
             </div>
           </div>
 
