@@ -168,6 +168,13 @@ const App = {
     studentHwViewMode: 'sheet', // 'sheet' | 'tree' | 'cards'
     studentHwRoadmapFilter: 'ALL',
     studentHwChapterFilter: 'ALL',
+    readingSearchQuery: '',
+    readingGradeFilter: 'ALL',
+    readingClassFilter: 'ALL',
+    readingTopicFilter: 'ALL',
+    studentReadingSearchQuery: '',
+    studentReadingGradeFilter: 'ALL',
+    studentReadingTopicFilter: 'ALL',
     collapsedCurriculumKeys: {},
     adminPreviewAsStudent: false,
     adminPreviewGrade: 'ALL',
@@ -525,6 +532,8 @@ const App = {
     if (tabParam === 'homeworks' || tabParam === 'homework' || tabParam === 'btvn') {
       this.state.studentMainTab = 'homeworks';
       if (tabParam === 'btvn' || tabParam === 'homework') this.state.studentHwKindFilter = 'homework';
+    } else if (tabParam === 'readings' || tabParam === 'tailieu' || tabParam === 'reading') {
+      this.state.studentMainTab = 'readings';
     } else if (tabParam === 'exams' || tabParam === 'grades' || tabParam === 'rewards') {
       this.state.studentMainTab = tabParam;
     }
@@ -1580,9 +1589,15 @@ const App = {
         hw.grade = m ? parseInt(m[1], 10) : (/vào\s*(?:lớp\s*)?10/i.test(txt) ? 9 : 12);
       }
     }
-    const isHwKind = hw.itemKind === 'homework' || hw.hwMode === 'photo' || hw.hwMode === 'interactive';
-    hw.itemKind = isHwKind ? 'homework' : 'document';
+    const isReadingKind = hw.itemKind === 'reading';
+    const isHwKind = !isReadingKind && (hw.itemKind === 'homework' || hw.hwMode === 'photo' || hw.hwMode === 'interactive');
+    hw.itemKind = isReadingKind ? 'reading' : (isHwKind ? 'homework' : 'document');
     hw.hwMode = isHwKind ? (hw.hwMode === 'interactive' ? 'interactive' : 'photo') : 'none';
+    hw.readingTopic = String(hw.readingTopic || (isReadingKind ? (hw.chapterCode || 'Tài liệu tự đọc') : '')).trim();
+    if (isReadingKind) {
+      hw.isCurriculumSlot = false;
+      if (typeof hw.allowDirectPractice === 'undefined') hw.allowDirectPractice = false;
+    }
     hw.dueAt = hw.dueAt ? String(hw.dueAt) : '';
     hw.maxScore = Number(hw.maxScore || 10) || 10;
     hw.time_minutes = Math.max(0, parseInt(hw.time_minutes || 0, 10) || 0);
@@ -6623,11 +6638,12 @@ const App = {
     return curHit ? this.normalizeHomeworkRecord({ ...curHit }) : null;
   },
 
-  getMergedWorksheets({ includeEmptySlots = true } = {}) {
+  getMergedWorksheets({ includeEmptySlots = true, includeReadings = false } = {}) {
     const delSet = new Set(this.state.deletedIds || []);
     const customList = (this.state.homeworks || [])
       .filter(h => h && h.id && !delSet.has(h.id))
-      .map(h => this.normalizeHomeworkRecord({ ...h }));
+      .map(h => this.normalizeHomeworkRecord({ ...h }))
+      .filter(h => includeReadings ? true : h.itemKind !== 'reading');
     const overrideIds = new Set(customList.map(h => h.id));
     const cat = this.getCurriculumCatalog();
     const curItems = (cat.items || [])
@@ -6638,6 +6654,330 @@ const App = {
       return combined.filter(it => !(it.isCurriculumSlot && !it.pdfUrl && it.itemKind !== 'homework'));
     }
     return combined;
+  },
+
+  // --- KHO TÀI LIỆU TỰ ĐỌC (TÁCH RIÊNG HOÀN TOÀN KHỎI MỤC CHUYÊN ĐỀ & PHIẾU BÀI TẬP) ---
+  READING_TOPIC_PRESETS: [
+    'Tài liệu tự đọc',
+    'Sổ tay công thức',
+    'Bài giảng đọc thêm',
+    'Chuyên đề tham khảo',
+    'Đề tự luyện đọc thêm'
+  ],
+
+  getReadingDocuments({ scope = 'admin', user = this.state.currentUser } = {}) {
+    const delSet = new Set(this.state.deletedIds || []);
+    const list = (this.state.homeworks || [])
+      .filter(h => h && h.id && !delSet.has(h.id))
+      .map(h => this.normalizeHomeworkRecord({ ...h }))
+      .filter(h => h.itemKind === 'reading');
+
+    const visible = scope === 'admin'
+      ? list
+      : list.filter(h => this.isStudentAllowedHomework(h, user));
+
+    return visible.sort((a, b) => {
+      const ta = Number(String(a.id || '').replace(/\D/g, '')) || 0;
+      const tb = Number(String(b.id || '').replace(/\D/g, '')) || 0;
+      return tb - ta;
+    });
+  },
+
+  getFilteredReadingDocuments(scope = 'student') {
+    const isAdmin = scope === 'admin';
+    const base = this.getReadingDocuments({ scope, user: this.state.currentUser });
+    const gFilter = isAdmin ? (this.state.readingGradeFilter || 'ALL') : (this.state.studentReadingGradeFilter || 'ALL');
+    const cFilter = isAdmin ? (this.state.readingClassFilter || 'ALL') : 'ALL';
+    const tFilter = isAdmin ? (this.state.readingTopicFilter || 'ALL') : (this.state.studentReadingTopicFilter || 'ALL');
+    const q = isAdmin ? (this.state.readingSearchQuery || '') : (this.state.studentReadingSearchQuery || '');
+
+    return base.filter(doc => {
+      if (gFilter !== 'ALL' && String(doc.grade || 12) !== String(gFilter)) return false;
+      const topic = String(doc.readingTopic || 'Tài liệu tự đọc').trim();
+      if (tFilter !== 'ALL' && topic.toLowerCase() !== String(tFilter).toLowerCase()) return false;
+      if (isAdmin && cFilter !== 'ALL') {
+        const classes = Array.isArray(doc.allowedClasses) ? doc.allowedClasses : [];
+        if (doc.accessType === 'class') {
+          if (!classes.some(c => this.isSameClassName(c, cFilter))) return false;
+        } else {
+          const cg = this.getClassGroups().find(x => this.isSameClassName(x.name, cFilter));
+          if (cg && !doc.allowedAll && doc.accessType === 'grade' && Number(doc.grade || 12) !== cg.grade) return false;
+        }
+      }
+      if (!q) return true;
+      const ql = String(q).toLowerCase().trim();
+      return [doc.title, doc.description, doc.readingTopic, doc.fileName, `Khối ${doc.grade}`, ...(doc.allowedClasses || [])]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(ql);
+    });
+  },
+
+  onReadingFilterInput(scope, field, val) {
+    const isAdmin = scope === 'admin';
+    if (isAdmin) {
+      if (field === 'grade') this.state.readingGradeFilter = val;
+      if (field === 'class') this.state.readingClassFilter = val;
+      if (field === 'topic') this.state.readingTopicFilter = val;
+      if (field === 'query') this.state.readingSearchQuery = val;
+    } else {
+      if (field === 'grade') this.state.studentReadingGradeFilter = val;
+      if (field === 'topic') this.state.studentReadingTopicFilter = val;
+      if (field === 'query') this.state.studentReadingSearchQuery = val;
+    }
+    const host = document.getElementById(isAdmin ? 'adminReadingListContainer' : 'studentReadingListContainer');
+    if (host && field === 'query') {
+      host.innerHTML = this.renderReadingCardsHtml(scope);
+    } else {
+      this.renderPreservingScroll();
+    }
+  },
+
+  resetReadingFilter(scope = 'student') {
+    if (scope === 'admin') {
+      this.state.readingSearchQuery = '';
+      this.state.readingGradeFilter = 'ALL';
+      this.state.readingClassFilter = 'ALL';
+      this.state.readingTopicFilter = 'ALL';
+    } else {
+      this.state.studentReadingSearchQuery = '';
+      this.state.studentReadingGradeFilter = 'ALL';
+      this.state.studentReadingTopicFilter = 'ALL';
+    }
+    this.renderPreservingScroll();
+  },
+
+  renderReadingCardsHtml(scope = 'student') {
+    const isAdmin = scope === 'admin';
+    const items = this.getFilteredReadingDocuments(scope);
+    if (!items.length) {
+      return `
+        <div class="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/70 p-8 text-center">
+          <div class="w-12 h-12 mx-auto rounded-2xl bg-teal-50 text-teal-700 flex items-center justify-center mb-3">
+            <i class="fa-solid fa-book-bookmark text-xl"></i>
+          </div>
+          <div class="font-serif font-extrabold text-slate-800 text-sm sm:text-base">
+            ${isAdmin ? 'Chưa có tài liệu tự đọc nào trong bộ lọc này' : 'Thầy Chí chưa gửi tài liệu tự đọc nào cho mục lọc này'}
+          </div>
+          <p class="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+            ${isAdmin
+              ? 'Bấm nút "Gửi Tài Liệu Tự Đọc" ở góc trên để tải lên PDF / Link Drive sổ tay công thức, tài liệu đọc thêm hoặc bài giảng bổ sung (hoàn toàn tách biệt với mục Chuyên Đề).'
+              : 'Khi Thầy Chí gửi thêm sổ tay công thức, bài giảng đọc thêm hoặc tài liệu tham khảo cho lớp/khối của bạn, tài liệu sẽ xuất hiện ngay tại đây.'}
+          </p>
+          ${isAdmin ? `
+            <button type="button" onclick="App.showAddHomeworkModal({ itemKind: 'reading' })"
+              class="mt-4 px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-extrabold shadow-xs inline-flex items-center gap-1.5 cursor-pointer">
+              <i class="fa-solid fa-plus"></i><span>Gửi Tài Liệu Tự Đọc Đầu Tiên</span>
+            </button>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        ${items.map(doc => {
+          const isHidden = doc.isActive === false;
+          const topic = doc.readingTopic || 'Tài liệu tự đọc';
+          const hasPdf = Boolean(doc.pdfUrl);
+          const isDrive = /drive\.google\.com/i.test(doc.pdfUrl || '');
+          const accessLabel = doc.allowedAll || doc.accessType === 'all'
+            ? 'Tất cả HS'
+            : (doc.accessType === 'class' && Array.isArray(doc.allowedClasses) && doc.allowedClasses.length
+              ? `Lớp ${doc.allowedClasses.join(', ')}`
+              : `Khối ${doc.grade || 12}`);
+          const canDownload = isAdmin || doc.allowDownload !== false;
+
+          return `
+            <article class="rounded-2xl border ${isHidden ? 'border-slate-200 bg-slate-50/70 opacity-75' : 'border-[#e2d5c4] bg-[#fffdf8] hover:border-teal-500/50'} p-4 shadow-2xs transition flex flex-col justify-between gap-3">
+              <div class="space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-1.5">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="px-2 py-0.5 rounded-full text-[10.5px] font-extrabold bg-teal-50 text-teal-800 border border-teal-200">
+                      <i class="fa-solid fa-book-bookmark mr-1 text-[9px]"></i>${this.escapeHtmlAttr(topic)}
+                    </span>
+                    <span class="px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      Khối ${doc.grade || 12}
+                    </span>
+                    <span class="px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                      ${this.escapeHtmlAttr(accessLabel)}
+                    </span>
+                    ${isHidden ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-200 text-slate-600">Đang ẩn</span>` : ''}
+                  </div>
+                  ${doc.updatedLabel || doc.dateAdded ? `<span class="text-[10.5px] font-mono text-slate-400">${this.escapeHtmlAttr(doc.updatedLabel || doc.dateAdded)}</span>` : ''}
+                </div>
+
+                <div>
+                  <h4 class="font-serif font-extrabold text-sm sm:text-[15px] text-slate-900 leading-snug">
+                    ${this.escapeHtmlAttr(doc.title)}
+                  </h4>
+                  ${doc.description ? `<p class="text-xs text-slate-600 mt-1 leading-relaxed">${this.escapeHtmlAttr(doc.description)}</p>` : ''}
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                  <span class="inline-flex items-center gap-1 font-medium">
+                    <i class="fa-solid ${isDrive ? 'fa-brands fa-google-drive text-emerald-600' : 'fa-file-pdf text-rose-600'}"></i>
+                    <span class="truncate max-w-[220px]">${this.escapeHtmlAttr(doc.fileName || (hasPdf ? 'Tài liệu PDF tự đọc' : 'Chưa đính kèm PDF'))}</span>
+                  </span>
+                  ${doc.fileSize ? `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono text-[10px]">${this.escapeHtmlAttr(doc.fileSize)}</span>` : ''}
+                </div>
+              </div>
+
+              <div class="pt-2.5 border-t border-dashed border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  ${hasPdf ? `
+                    <button type="button" onclick="App.openHomeworkPdf('${doc.id}')"
+                      class="px-3 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-extrabold shadow-2xs inline-flex items-center gap-1.5 cursor-pointer transition">
+                      <i class="fa-solid fa-eye text-[11px]"></i><span>Đọc Online</span>
+                    </button>
+                  ` : ''}
+                  ${hasPdf && canDownload ? `
+                    <button type="button" onclick="App.downloadHomeworkVariantPdf('${doc.id}', 'primary')"
+                      class="px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition">
+                      <i class="fa-solid fa-download text-[11px]"></i><span>Tải Về</span>
+                    </button>
+                  ` : (hasPdf && !canDownload ? `
+                    <span class="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-500 text-[11px] font-semibold">
+                      <i class="fa-solid fa-lock text-[10px] mr-1"></i>Chỉ đọc online
+                    </span>
+                  ` : '')}
+                </div>
+
+                ${isAdmin ? `
+                  <div class="flex items-center gap-1">
+                    <button type="button" onclick="App.showAddHomeworkModal({ editHwId: '${doc.id}' })"
+                      class="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold cursor-pointer" title="Chỉnh sửa tài liệu tự đọc">
+                      <i class="fa-solid fa-pen"></i>
+                    </button>
+                    <button type="button" onclick="App.toggleHomeworkActive('${doc.id}')"
+                      class="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-bold cursor-pointer" title="${isHidden ? 'Hiện cho học sinh' : 'Tạm ẩn khỏi học sinh'}">
+                      <i class="fa-solid ${isHidden ? 'fa-eye' : 'fa-eye-slash'}"></i>
+                    </button>
+                    <button type="button" onclick="App.deleteHomework('${doc.id}')"
+                      class="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-bold cursor-pointer" title="Xóa tài liệu tự đọc">
+                      <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                  </div>
+                ` : ''}
+              </div>
+            </article>
+          `;
+        }).join('')}
+      </div>
+    `;
+  },
+
+  renderReadingLibrarySectionHtml(scope = 'admin') {
+    const isAdmin = scope === 'admin';
+    const allReadings = this.getReadingDocuments({ scope, user: this.state.currentUser });
+    const gFilter = isAdmin ? (this.state.readingGradeFilter || 'ALL') : (this.state.studentReadingGradeFilter || 'ALL');
+    const cFilter = isAdmin ? (this.state.readingClassFilter || 'ALL') : 'ALL';
+    const tFilter = isAdmin ? (this.state.readingTopicFilter || 'ALL') : (this.state.studentReadingTopicFilter || 'ALL');
+    const q = isAdmin ? (this.state.readingSearchQuery || '') : (this.state.studentReadingSearchQuery || '');
+    const topics = [...new Set([...this.READING_TOPIC_PRESETS, ...allReadings.map(d => d.readingTopic).filter(Boolean)])];
+    const allClasses = this.getClassGroups().map(g => g.name);
+    const gradesPresent = [12, 11, 10, 9, 8, 7, 6];
+
+    return `
+      <section id="${isAdmin ? 'adminReadingLibrarySection' : 'studentReadingLibrarySection'}" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 sm:p-6 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-gradient-to-r from-teal-50/70 via-white to-amber-50/40">
+          <div>
+            <h3 class="text-lg font-bold text-slate-900 flex flex-wrap items-center gap-2">
+              <span><i class="fa-solid fa-book-bookmark text-teal-700 mr-2"></i>Tài Liệu Tự Đọc (${allReadings.length})</span>
+              <span class="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-teal-50 text-teal-800 border border-teal-200">Tách riêng khỏi Chuyên Đề</span>
+            </h3>
+            <p class="text-xs text-slate-500 mt-0.5">
+              ${isAdmin
+                ? 'Nơi Giáo viên gửi thêm sổ tay công thức, tài liệu đọc thêm, bài giảng bổ sung và tài liệu tham khảo PDF / Drive cho từng Khối hoặc Nhóm lớp.'
+                : 'Kho tài liệu tự đọc, sổ tay công thức và bài giảng bổ sung do Thầy Chí gửi thêm dành riêng cho bạn.'}
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            ${isAdmin ? `
+              <button type="button" onclick="App.toggleAdminStudentViewMode(true, { studentMainTab: 'readings' })"
+                class="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer">
+                <i class="fa-solid fa-user-graduate"></i><span>Xem Như HS</span>
+              </button>
+              <button type="button" id="openAddReadingDocBtn" onclick="App.showAddHomeworkModal({ itemKind: 'reading' })"
+                class="px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-extrabold shadow-sm transition inline-flex items-center gap-1.5 cursor-pointer">
+                <i class="fa-solid fa-file-circle-plus"></i><span>Gửi Tài Liệu Tự Đọc</span>
+              </button>
+            ` : `
+              <button type="button" onclick="App.syncFromCloud({ manual: true })"
+                class="ui-btn bg-teal-700 hover:bg-teal-800 text-white shadow-xs shrink-0">
+                <i class="fa-solid fa-arrows-rotate ${this.state.cloudSyncStatus === 'syncing' ? 'fa-spin' : ''}"></i>
+                <span>Cập nhật tài liệu</span>
+              </button>
+            `}
+          </div>
+        </div>
+
+        <div class="p-4 sm:p-5 border-b border-slate-100 bg-slate-50/70 space-y-2.5">
+          <!-- Lọc Khối & Chủ đề tự đọc -->
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button type="button" onclick="App.onReadingFilterInput('${scope}', 'grade', 'ALL')"
+                class="px-2.5 py-1 rounded-full text-xs font-bold transition cursor-pointer ${gFilter === 'ALL' ? 'bg-teal-700 text-white shadow-2xs' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'}">
+                Tất cả Khối (${allReadings.length})
+              </button>
+              ${gradesPresent.map(g => {
+                const cnt = allReadings.filter(d => Number(d.grade || 12) === g).length;
+                if (!isAdmin && cnt === 0) return '';
+                return `
+                  <button type="button" onclick="App.onReadingFilterInput('${scope}', 'grade', '${g}')"
+                    class="px-2.5 py-1 rounded-full text-xs font-bold transition cursor-pointer ${String(gFilter) === String(g) ? 'bg-teal-700 text-white shadow-2xs' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'}">
+                    Khối ${g} (${cnt})
+                  </button>
+                `;
+              }).join('')}
+            </div>
+
+            ${isAdmin ? `
+              <div class="flex items-center bg-white rounded-xl px-3 py-1.5 border border-slate-200 text-xs">
+                <span class="text-slate-400 mr-1.5 font-medium"><i class="fa-solid fa-people-roof mr-1 text-teal-600"></i>Lớp:</span>
+                <select onchange="App.onReadingFilterInput('admin', 'class', this.value)" class="bg-transparent font-bold text-slate-700 outline-none cursor-pointer">
+                  <option value="ALL" ${cFilter === 'ALL' ? 'selected' : ''}>Tất cả nhóm lớp</option>
+                  ${allClasses.map(c => `<option value="${this.escapeHtmlAttr(c)}" ${this.isSameClassName(cFilter, c) ? 'selected' : ''}>Lớp ${c}</option>`).join('')}
+                </select>
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button type="button" onclick="App.onReadingFilterInput('${scope}', 'topic', 'ALL')"
+              class="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${tFilter === 'ALL' ? 'bg-[#650f12] text-[#ffe27d] border-[#650f12]' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}">
+              Mọi chủ đề
+            </button>
+            ${topics.map(tp => `
+              <button type="button" onclick="App.onReadingFilterInput('${scope}', 'topic', '${this.escapeHtmlAttr(tp)}')"
+                class="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${String(tFilter).toLowerCase() === String(tp).toLowerCase() ? 'bg-[#650f12] text-[#ffe27d] border-[#650f12]' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}">
+                ${this.escapeHtmlAttr(tp)}
+              </button>
+            `).join('')}
+          </div>
+
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+            <div class="flex-1 relative">
+              <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-2.5 text-slate-400 text-xs"></i>
+              <input id="${isAdmin ? 'adminReadingSearchInput' : 'studentReadingSearchInput'}" type="text"
+                oninput="App.onReadingFilterInput('${scope}', 'query', this.value)"
+                placeholder="Tìm tên tài liệu tự đọc, sổ tay công thức, chủ đề, tên file PDF..."
+                value="${this.escapeHtmlAttr(q)}"
+                class="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:border-teal-600 outline-none transition" />
+            </div>
+            <button type="button" onclick="App.resetReadingFilter('${scope}')"
+              class="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition inline-flex items-center justify-center gap-1.5 cursor-pointer shrink-0">
+              <i class="fa-solid fa-rotate-left"></i><span>Đặt lại</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="${isAdmin ? 'adminReadingListContainer' : 'studentReadingListContainer'}" class="p-4 sm:p-6">
+          ${this.renderReadingCardsHtml(scope)}
+        </div>
+      </section>
+    `;
   },
 
   launchWorksheetDirectPractice(hwId) {
@@ -7782,6 +8122,7 @@ const App = {
     const allowedExams = this.state.exams.filter(e => this.isStudentAllowedExam(e, u));
     const allowedHomeworks = this.getMergedWorksheets({ includeEmptySlots: false }).filter(h => this.isStudentAllowedHomework(h, u));
     const allRoadmapHomeworks = this.getMergedWorksheets({ includeEmptySlots: true }).filter(h => this.isStudentAllowedHomework(h, u));
+    const allowedReadings = this.getReadingDocuments({ scope: 'student', user: u });
     const mySubmissions = this.state.submissions.filter(s => s.studentId === u.studentId);
     const myExamSubmissions = mySubmissions.filter(s => !this.isHomeworkSubmission(s));
     const myHwSubmissions = mySubmissions.filter(s => this.isHomeworkSubmission(s));
@@ -7961,12 +8302,27 @@ const App = {
                   onclick="App.setStudentMainTab('homeworks')"
                   class="ui-btn min-h-[40px] px-1.5 xs:px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-book-open-reader shrink-0"></i>
-                  <span class="xs:hidden">BTVN</span>
-                  <span class="hidden xs:inline sm:hidden">BTVN &amp; TL</span>
-                  <span class="hidden sm:inline">Bài Tập &amp; Tài Liệu</span>
+                  <i class="fa-solid fa-layer-group shrink-0"></i>
+                  <span class="xs:hidden">Chuyên Đề</span>
+                  <span class="hidden xs:inline sm:hidden">BTVN &amp; CĐ</span>
+                  <span class="hidden sm:inline">BTVN &amp; Chuyên Đề</span>
                   <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${pendingBtvn.length > 0 ? 'bg-rose-600 text-white font-extrabold' : (this.state.studentMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs')}">
                     ${pendingBtvn.length > 0 ? `${pendingBtvn.length} mới` : allowedHomeworks.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  id="studentTabReadingsBtn"
+                  onclick="App.setStudentMainTab('readings')"
+                  class="ui-btn min-h-[40px] px-1.5 xs:px-2 sm:px-3.5 min-w-0 ${this.state.studentMainTab === 'readings' ? 'bg-teal-700 text-white shadow-md shadow-teal-200 ring-2 ring-teal-500/25' : 'bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-200'}"
+                  title="Tài liệu tự đọc, sổ tay công thức & bài giảng đọc thêm Thầy Chí gửi riêng"
+                >
+                  <i class="fa-solid fa-book-bookmark shrink-0"></i>
+                  <span class="sm:hidden">Tài Liệu</span>
+                  <span class="hidden sm:inline">Tài Liệu Tự Đọc</span>
+                  <span class="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.studentMainTab === 'readings' ? 'bg-teal-900 text-white' : 'bg-white text-teal-800 shadow-2xs'}">
+                    ${allowedReadings.length}
                   </span>
                 </button>
 
@@ -8018,7 +8374,8 @@ const App = {
                 <i class="fa-solid fa-circle-info text-indigo-500 text-xs"></i>
                 <span>
                   ${this.state.studentMainTab === 'exams' ? 'Chọn đề thi theo Khối 6 – 12 và phân loại (GK1, CK1, GK2, CK2, Đề thi vào 10, Thi thử THPT QG) để vào làm bài trực tuyến.' : ''}
-                  ${this.state.studentMainTab === 'homeworks' ? 'Nhận Bài Tập Về Nhà theo nhóm lớp (nộp ảnh vở tự luận hoặc điền đáp án trực tuyến) và tải tài liệu PDF chuyên đề.' : ''}
+                  ${this.state.studentMainTab === 'homeworks' ? 'Nhận Bài Tập Về Nhà theo nhóm lớp và làm các Phiếu Bài Tập Chuyên Đề theo lộ trình Chương / Bài học (Bảng Sheet & Cây Thư Mục).' : ''}
+                  ${this.state.studentMainTab === 'readings' ? 'Thư viện Tài Liệu Tự Đọc tách riêng: đọc online & tải về sổ tay công thức, tài liệu tham khảo và bài giảng đọc thêm Thầy Chí gửi.' : ''}
                   ${this.state.studentMainTab === 'grades' ? 'Tra cứu kết quả các lượt nộp bài, đối chiếu đáp án chi tiết và xem vị trí trên bảng xếp hạng lớp.' : ''}
                   ${this.state.studentMainTab === 'rewards' ? 'Tích lũy điểm sao qua từng đề thi đạt kết quả tốt và đổi các phần thưởng khuyến khích từ Giáo viên.' : ''}
                 </span>
@@ -8105,23 +8462,29 @@ const App = {
             ` : ''}
 
             ${this.state.studentMainTab === 'homeworks' ? `
-            <!-- 2. Bài Tập Về Nhà & Tài Liệu Chuyên Đề -->
+            <!-- 2. Bài Tập Về Nhà & Chuyên Đề Lộ Trình -->
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div class="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
                 <div>
                   <h3 class="text-lg font-bold text-slate-900 flex items-center flex-wrap gap-2">
-                    <span><i class="fa-solid fa-book-open-reader text-indigo-600 mr-2"></i>Bài Tập Về Nhà &amp; Tài Liệu (${allowedHomeworks.length})</span>
+                    <span><i class="fa-solid fa-layer-group text-indigo-600 mr-2"></i>Bài Tập Về Nhà &amp; Chuyên Đề (${allowedHomeworks.length})</span>
                     <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">Lớp ${u.className || ('Khối ' + this.getStudentGrade(u))}</span>
                   </h3>
-                  <p class="text-xs text-slate-500 mt-0.5">Bài tập về nhà giao riêng cho nhóm lớp của bạn (${assignedBtvn.length} BTVN • ${pendingBtvn.length} chưa nộp) và tài liệu chuyên đề PDF</p>
+                  <p class="text-xs text-slate-500 mt-0.5">Bài tập về nhà giao riêng cho lớp (${assignedBtvn.length} BTVN • ${pendingBtvn.length} chưa nộp) và kho Chuyên Đề / Phiếu Bài Tập theo lộ trình</p>
                 </div>
-                <button type="button" onclick="App.syncFromCloud({ manual: true })" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs shrink-0 self-start sm:self-auto">
-                  <i class="fa-solid fa-arrows-rotate ${this.state.cloudSyncStatus === 'syncing' ? 'fa-spin' : ''}"></i>
-                  <span>Cập nhật BTVN mới</span>
-                </button>
+                <div class="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                  <button type="button" onclick="App.setStudentMainTab('readings')" class="ui-btn bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 shadow-2xs shrink-0">
+                    <i class="fa-solid fa-book-bookmark"></i>
+                    <span>Tài Liệu Tự Đọc (${allowedReadings.length})</span>
+                  </button>
+                  <button type="button" onclick="App.syncFromCloud({ manual: true })" class="ui-btn bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs shrink-0">
+                    <i class="fa-solid fa-arrows-rotate ${this.state.cloudSyncStatus === 'syncing' ? 'fa-spin' : ''}"></i>
+                    <span>Cập nhật mới</span>
+                  </button>
+                </div>
               </div>
 
-              <!-- Thanh Phân Loại (BTVN / Tài liệu) + Khối 6 – 12 & Tìm Kiếm -->
+              <!-- Thanh Phân Loại (BTVN / Chuyên đề) + Khối 6 – 12 & Tìm Kiếm -->
               <div class="p-5 sm:p-6 pt-4 pb-3 border-b border-slate-100 bg-slate-50/60 space-y-2.5">
                 <div class="flex flex-wrap items-center gap-1.5">
                   <button type="button" onclick="App.onStudentHwFilterInput('kind', 'ALL')" class="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${(!this.state.studentHwKindFilter || this.state.studentHwKindFilter === 'ALL') ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}">
@@ -8132,7 +8495,7 @@ const App = {
                     ${pendingBtvn.length > 0 ? `<span class="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${this.state.studentHwKindFilter === 'homework' ? 'bg-amber-300 text-[#650f12]' : 'bg-rose-600 text-white'}">${pendingBtvn.length} cần nộp</span>` : ''}
                   </button>
                   <button type="button" onclick="App.onStudentHwFilterInput('kind', 'document')" class="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer inline-flex items-center gap-1.5 ${this.state.studentHwKindFilter === 'document' ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'}">
-                    <i class="fa-solid fa-file-pdf text-red-500"></i><span>Tài Liệu &amp; Chuyên Đề (${allowedHomeworks.length - assignedBtvn.length})</span>
+                    <i class="fa-solid fa-folder-tree text-emerald-700"></i><span>Chuyên Đề &amp; Phiếu Bài Tập (${allowedHomeworks.length - assignedBtvn.length})</span>
                   </button>
                 </div>
 
@@ -8161,6 +8524,8 @@ const App = {
               </div>
             </section>
             ` : ''}
+
+            ${this.state.studentMainTab === 'readings' ? this.renderReadingLibrarySectionHtml('student') : ''}
 
             ${this.state.studentMainTab === 'grades' ? `
             <!-- 3. Kết Quả & So Sánh Lớp / Khối -->
@@ -13349,7 +13714,9 @@ const App = {
     const classGroupObjs = this.getClassGroups();
     const allClasses = classGroupObjs.map(g => g.name);
     const hwOnlyCount = (this.state.homeworks || []).filter(h => h.itemKind === 'homework').length;
-    const docOnlyCount = Math.max(0, (this.state.homeworks || []).length - hwOnlyCount);
+    const adminReadings = this.getReadingDocuments({ scope: 'admin' });
+    const nonReadingCount = (this.state.homeworks || []).filter(h => h.itemKind !== 'reading').length;
+    const docOnlyCount = Math.max(0, nonReadingCount - hwOnlyCount);
     const pendingHwGradeCount = (this.state.submissions || []).filter(s => this.isHomeworkSubmission(s) && s.pendingManualGrade).length;
     const activeStudentGrades = [...new Set(this.state.students.map(s => this.getStudentGrade(s)))].sort((a, b) => a - b);
     const filteredStudents = this.getFilteredGradebookStudents();
@@ -13483,18 +13850,32 @@ const App = {
                   type="button"
                   id="adminTabHomeworksBtn"
                   onclick="App.setAdminMainTab('homeworks')"
-                  class="ui-btn h-10 px-2 2xl:px-3 min-w-0 xl:flex-1 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
+                  class="ui-btn h-10 px-2 2xl:px-2.5 min-w-0 xl:flex-1 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-500/25' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}"
                 >
-                  <i class="fa-solid fa-house-laptop shrink-0"></i>
-                  <span class="truncate"><span class="hidden 2xl:inline">Giao </span>BTVN &amp; TL</span>
+                  <i class="fa-solid fa-layer-group shrink-0"></i>
+                  <span class="truncate">BTVN &amp; CĐ</span>
                   <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'homeworks' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700 shadow-2xs'}">
-                    ${this.state.homeworks.length}
+                    ${nonReadingCount}
                   </span>
                   ${pendingHwGradeCount > 0 ? `
                     <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono font-extrabold shrink-0 bg-amber-500 text-white" title="${pendingHwGradeCount} bài tập về nhà chờ chấm">
                       ${pendingHwGradeCount}
                     </span>
                   ` : ''}
+                </button>
+
+                <button
+                  type="button"
+                  id="adminTabReadingsBtn"
+                  onclick="App.setAdminMainTab('readings')"
+                  class="ui-btn h-10 px-2 2xl:px-2.5 min-w-0 xl:flex-1 ${this.state.adminMainTab === 'readings' ? 'bg-teal-700 text-white shadow-md shadow-teal-200 ring-2 ring-teal-500/25' : 'bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-200'}"
+                  title="Tài liệu tự đọc tách riêng khỏi Chuyên đề (nơi Giáo viên gửi thêm tài liệu đọc thêm cho HS)"
+                >
+                  <i class="fa-solid fa-book-bookmark shrink-0"></i>
+                  <span class="truncate">Tài Liệu</span>
+                  <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono shrink-0 ${this.state.adminMainTab === 'readings' ? 'bg-teal-900 text-white' : 'bg-white text-teal-800 shadow-2xs'}">
+                    ${adminReadings.length}
+                  </span>
                 </button>
 
                 <button
@@ -13542,7 +13923,8 @@ const App = {
                   ${this.state.adminMainTab === 'main' ? 'Theo dõi thống kê toàn hệ thống, sổ điểm tổng hợp qua các đợt kiểm tra và nhật ký nộp bài chi tiết.' : ''}
                   ${this.state.adminMainTab === 'students' ? 'Quản lý hồ sơ học sinh, nhóm lớp (12A 2K9, 11A 2K10...), xếp khối (Khối 6 – 12), cấp tài khoản mới và đồng bộ mật khẩu.' : ''}
                   ${this.state.adminMainTab === 'exams' ? 'Quản lý đề thi theo Khối 6 – 12 và theo từng nhóm lớp, tải lên file PDF đề thi, đáp án và phân quyền dự thi.' : ''}
-                  ${this.state.adminMainTab === 'homeworks' ? 'Giao bài tập về nhà theo từng nhóm lớp (chụp ảnh vở hoặc điền đáp án trên PDF), kiểm tra hạn nộp, chấm điểm nhận xét và quản lý tài liệu.' : ''}
+                  ${this.state.adminMainTab === 'homeworks' ? 'Giao Bài Tập Về Nhà theo nhóm lớp và quản lý kho Chuyên Đề / Phiếu Bài Tập theo lộ trình (Bảng Sheet & Cây Thư Mục).' : ''}
+                  ${this.state.adminMainTab === 'readings' ? 'Thư viện Tài Liệu Tự Đọc tách riêng: nơi Giáo viên gửi thêm sổ tay công thức, tài liệu đọc thêm và bài giảng bổ sung cho học sinh.' : ''}
                   ${this.state.adminMainTab === 'rewards' ? 'Duyệt trao phần thưởng, quản lý kho quà đổi điểm và cộng điểm khuyến khích cho học sinh.' : ''}
                   ${this.state.adminMainTab === 'settings' ? 'Cập nhật hồ sơ & mật khẩu Giáo viên, khôi phục qua email, phân quyền xem điểm và quản trị dữ liệu.' : ''}
                 </span>
@@ -13554,6 +13936,7 @@ const App = {
           </div>
 
           ${this.state.adminMainTab === 'rewards' ? this.renderAdminRewardsSectionHtml() : ''}
+          ${this.state.adminMainTab === 'readings' ? this.renderReadingLibrarySectionHtml('admin') : ''}
 
           ${this.state.adminMainTab === 'students' ? `
           <!-- Section 1: Quản Lý Học Sinh -->
@@ -13745,10 +14128,10 @@ const App = {
             <div class="p-5 sm:p-6 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
               <div>
                 <h3 class="text-lg font-bold text-slate-900 flex flex-wrap items-center gap-2">
-                  <span><i class="fa-solid fa-house-laptop text-indigo-600 mr-2"></i>Giao Bài Tập Về Nhà &amp; Kho Phiếu (${this.getMergedWorksheets({ includeEmptySlots: false }).length} sẵn sàng / ${this.getMergedWorksheets({ includeEmptySlots: true }).length} mục)</span>
+                  <span><i class="fa-solid fa-layer-group text-indigo-600 mr-2"></i>Bài Tập Về Nhà &amp; Chuyên Đề (${this.getMergedWorksheets({ includeEmptySlots: false }).length} sẵn sàng / ${this.getMergedWorksheets({ includeEmptySlots: true }).length} mục)</span>
                   ${pendingHwGradeCount > 0 ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800 border border-amber-200">${pendingHwGradeCount} bài chờ chấm</span>` : ''}
                 </h3>
-                <p class="text-xs text-slate-500 mt-0.5">Xem theo Bảng Google Sheet hoặc Cây Thư Mục, tải lên hàng loạt phiếu PDF, đồng bộ từ Google Sheet và giao BTVN theo nhóm lớp</p>
+                <p class="text-xs text-slate-500 mt-0.5">Xem theo Bảng Google Sheet hoặc Cây Thư Mục, tải lên hàng loạt phiếu Chuyên đề PDF, đồng bộ GG Sheet và giao BTVN theo nhóm lớp</p>
               </div>
               <div class="flex flex-wrap items-center gap-2">
                 <button type="button" onclick="App.showClassGroupsModal()" class="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer">
@@ -13761,7 +14144,10 @@ const App = {
                   <i class="fa-solid fa-layer-group"></i><span>Tải Hàng Loạt Phiếu</span>
                 </button>
                 <button type="button" onclick="App.showAddHomeworkModal({ itemKind: 'document' })" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer">
-                  <i class="fa-solid fa-file-circle-plus text-indigo-600"></i><span>Thêm Tài Liệu</span>
+                  <i class="fa-solid fa-folder-plus text-indigo-600"></i><span>Thêm Chuyên Đề</span>
+                </button>
+                <button type="button" onclick="App.setAdminMainTab('readings')" class="px-3 py-2 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer">
+                  <i class="fa-solid fa-book-bookmark text-teal-700"></i><span>Tài Liệu Tự Đọc (${adminReadings.length})</span>
                 </button>
                 <button type="button" id="openAssignHwModalBtn" onclick="App.showAddHomeworkModal({ itemKind: 'homework' })" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition inline-flex items-center gap-1.5 cursor-pointer">
                   <i class="fa-solid fa-paper-plane"></i><span>Giao BTVN</span>
@@ -13769,7 +14155,7 @@ const App = {
               </div>
             </div>
 
-            <!-- Thanh Phân Khối 6 – 12, Lọc Loại (BTVN / Tài liệu), Lọc Nhóm Lớp & Tìm Kiếm -->
+            <!-- Thanh Phân Khối 6 – 12, Lọc Loại (BTVN / Chuyên đề), Lọc Nhóm Lớp & Tìm Kiếm -->
             <div class="p-5 sm:p-6 pt-4 pb-4 border-b border-slate-100 bg-slate-50/70 space-y-2.5">
               ${this.renderCurriculumGradeAccessBarHtml('admin')}
 
@@ -13782,7 +14168,7 @@ const App = {
                     <i class="fa-solid fa-pen-to-square"></i><span>Bài tập về nhà (${hwOnlyCount})</span>
                   </button>
                   <button type="button" onclick="App.onHwFilterInput('kind', 'document')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${this.state.hwKindFilter === 'document' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-blue-800 border border-blue-200 hover:bg-blue-50'}">
-                    <i class="fa-solid fa-book-open"></i><span>Tài liệu &amp; Lộ trình PDF (${this.getMergedWorksheets({ includeEmptySlots: true }).length - hwOnlyCount})</span>
+                    <i class="fa-solid fa-folder-tree"></i><span>Chuyên đề &amp; Lộ trình PDF (${this.getMergedWorksheets({ includeEmptySlots: true }).length - hwOnlyCount})</span>
                   </button>
                 </div>
 
@@ -18359,8 +18745,14 @@ const App = {
     this._editingHomeworkId = existingHw ? existingHw.id : null;
 
     const initKind = existingHw
-      ? (existingHw.itemKind === 'homework' ? 'homework' : 'document')
-      : (opts && opts.itemKind === 'homework' ? 'homework' : (opts && opts.itemKind === 'document' ? 'document' : (this.state.hwKindFilter === 'homework' ? 'homework' : 'document')));
+      ? (existingHw.itemKind === 'homework' ? 'homework' : (existingHw.itemKind === 'reading' ? 'reading' : 'document'))
+      : (opts && opts.itemKind === 'homework'
+        ? 'homework'
+        : (opts && opts.itemKind === 'reading'
+          ? 'reading'
+          : (opts && opts.itemKind === 'document'
+            ? 'document'
+            : (this.state.adminMainTab === 'readings' ? 'reading' : (this.state.hwKindFilter === 'homework' ? 'homework' : 'document')))));
     const initHwMode = existingHw && existingHw.hwMode === 'interactive'
       ? 'interactive'
       : (opts && opts.hwMode === 'interactive' ? 'interactive' : 'photo');
@@ -18408,9 +18800,10 @@ const App = {
     const initCode = existingHw ? (existingHw.code || '') : (opts && opts.code ? String(opts.code) : '');
     const initChapterCode = existingHw ? (existingHw.chapterCode || '') : (opts && opts.chapterCode ? String(opts.chapterCode) : '');
     const initLessonTitle = existingHw ? (existingHw.lessonTitle || '') : (opts && opts.lessonTitle ? String(opts.lessonTitle) : '');
+    const initReadingTopic = existingHw ? (existingHw.readingTopic || 'Tài liệu tự đọc') : (opts && opts.readingTopic ? String(opts.readingTopic) : 'Tài liệu tự đọc');
     const initAllowOnlineView = existingHw ? existingHw.allowOnlineView !== false : true;
     const initAllowDownload = existingHw ? existingHw.allowDownload !== false : true;
-    const initAllowDirectPractice = existingHw ? existingHw.allowDirectPractice !== false : true;
+    const initAllowDirectPractice = existingHw ? existingHw.allowDirectPractice !== false : (initKind !== 'reading');
     const cat = this.getCurriculumCatalog();
     const chapDatalistOpts = [...new Set([...(cat.chapters || []).map(c => c.chapterCode), ...this.getMergedWorksheets().map(x => x.chapterCode)])].filter(Boolean);
     const lessonDatalistOpts = [...new Set(this.getMergedWorksheets().map(x => x.lessonTitle))].filter(Boolean);
@@ -18430,28 +18823,57 @@ const App = {
             </div>
             <div class="min-w-0">
               <h3 id="addHwModalHeaderTitle" class="font-extrabold text-slate-900 text-sm sm:text-base">
-                ${existingHw ? `Cập nhật / Up PDF: ${this.escapeHtmlAttr(existingHw.code ? `[${existingHw.code}] ` : '')}${this.escapeHtmlAttr(existingHw.title)}` : (initKind === 'homework' ? 'Giao Bài Tập Về Nhà Theo Nhóm Lớp' : 'Thêm Phiếu Bài Tập &amp; Tài Liệu PDF')}
+                ${existingHw ? `Cập nhật / Up PDF: ${this.escapeHtmlAttr(existingHw.code ? `[${existingHw.code}] ` : '')}${this.escapeHtmlAttr(existingHw.title)}` : (initKind === 'homework' ? 'Giao Bài Tập Về Nhà Theo Nhóm Lớp' : (initKind === 'reading' ? 'Gửi Tài Liệu Tự Đọc Cho Học Sinh' : 'Thêm Phiếu Bài Tập &amp; Chuyên Đề PDF'))}
               </h3>
-              <p class="text-xs text-slate-500 mt-0.5">Xếp đúng Chương / Bài học trong Cây Thư Mục &amp; Bảng Sheet, tùy chỉnh Xem online / Tải in / Làm trực tiếp</p>
+              <p class="text-xs text-slate-500 mt-0.5">Phân tách rõ: Bài Tập Về Nhà · Chuyên Đề Lộ Trình (Sheet/Cây Thư Mục) · Tài Liệu Tự Đọc (gửi thêm)</p>
             </div>
           </div>
           <button type="button" onclick="App.cleanupUnusedHwPreupload(); document.getElementById('addHomeworkModal')?.remove()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition shrink-0"><i class="fa-solid fa-xmark text-base"></i></button>
         </div>
 
         <form id="addHomeworkForm" onsubmit="event.preventDefault(); App.handleAddHomeworkSubmit();" class="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1">
-          <!-- Chọn phân mục: Bài Tập Về Nhà vs Tài Liệu / Phiếu PDF -->
+          <!-- Chọn phân mục tách biệt 3 loại: Bài Tập Về Nhà | Chuyên Đề / Phiếu | Tài Liệu Tự Đọc -->
           <input type="hidden" id="newHwItemKind" value="${initKind}">
-          <div class="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-2xl border border-slate-200">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200">
             <button type="button" id="hwKindBtn_homework" onclick="App.onHwFormKindOrModeChange('homework', null)" class="py-2.5 px-3 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${initKind === 'homework' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
-              <i class="fa-solid fa-paper-plane"></i><span>Bài Tập Về Nhà (Có hạn nộp)</span>
+              <i class="fa-solid fa-paper-plane"></i><span>Bài Tập Về Nhà</span>
             </button>
             <button type="button" id="hwKindBtn_document" onclick="App.onHwFormKindOrModeChange('document', null)" class="py-2.5 px-3 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${initKind === 'document' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
-              <i class="fa-solid fa-book-open"></i><span>Phiếu Bài Tập / Chuyên Đề PDF</span>
+              <i class="fa-solid fa-folder-tree"></i><span>Chuyên Đề / Phiếu</span>
+            </button>
+            <button type="button" id="hwKindBtn_reading" onclick="App.onHwFormKindOrModeChange('reading', null)" class="py-2.5 px-3 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${initKind === 'reading' ? 'bg-teal-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}">
+              <i class="fa-solid fa-book-bookmark"></i><span>Tài Liệu Tự Đọc</span>
             </button>
           </div>
 
-          <!-- Phân vị Lộ trình (STT/Mã - Chương - Bài Học) -->
-          <div class="p-3.5 rounded-2xl bg-[#fbf7ef] border border-[#e6dbcd] space-y-2.5">
+          <!-- Phân loại riêng cho Tài Liệu Tự Đọc -->
+          <div id="newHwReadingTopicBox" class="${initKind === 'reading' ? '' : 'hidden'} p-3.5 rounded-2xl bg-teal-50/70 border border-teal-200 space-y-2.5">
+            <div class="text-[11px] font-extrabold uppercase tracking-wider text-teal-900 flex items-center gap-1.5">
+              <i class="fa-solid fa-book-bookmark"></i><span>Thư Mục Tài Liệu Tự Đọc (Tách riêng khỏi Bảng Chuyên Đề)</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+              <div class="sm:col-span-6">
+                <label class="block font-bold text-slate-700 mb-1">Chủ đề / Nhóm tài liệu tự đọc</label>
+                <input type="text" id="newHwReadingTopic" list="hwReadingTopicDatalist" value="${this.escapeHtmlAttr(initReadingTopic)}" placeholder="VD: Sổ tay công thức, Bài giảng đọc thêm..." class="w-full px-3 py-2 rounded-xl border border-teal-300 bg-white font-semibold text-slate-800 focus:border-teal-700 outline-none">
+                <datalist id="hwReadingTopicDatalist">
+                  ${this.READING_TOPIC_PRESETS.map(tp => `<option value="${this.escapeHtmlAttr(tp)}">`).join('')}
+                </datalist>
+              </div>
+              <div class="sm:col-span-6 flex flex-wrap items-center gap-x-4 gap-y-2 pb-1">
+                <label class="inline-flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                  <input type="checkbox" id="newHwReadingAllowOnline" ${initAllowOnlineView ? 'checked' : ''} onchange="const c=document.getElementById('newHwAllowOnlineView'); if(c) c.checked=this.checked;" class="rounded text-teal-700">
+                  <span><i class="fa-solid fa-eye text-teal-700 mr-1"></i>Đọc trực tuyến</span>
+                </label>
+                <label class="inline-flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                  <input type="checkbox" id="newHwReadingAllowDownload" ${initAllowDownload ? 'checked' : ''} onchange="const c=document.getElementById('newHwAllowDownload'); if(c) c.checked=this.checked;" class="rounded text-emerald-600">
+                  <span><i class="fa-solid fa-download text-emerald-600 mr-1"></i>Cho tải PDF về đọc</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Phân vị Lộ trình Chuyên đề (STT/Mã - Chương - Bài Học) -->
+          <div id="newHwCurriculumPosBox" class="${initKind === 'reading' ? 'hidden' : ''} p-3.5 rounded-2xl bg-[#fbf7ef] border border-[#e6dbcd] space-y-2.5">
             <div class="text-[11px] font-extrabold uppercase tracking-wider text-[#650f12] flex items-center gap-1.5">
               <i class="fa-solid fa-folder-tree"></i><span>Vị Trí Trong Cây Thư Mục &amp; Bảng Sheet</span>
             </div>
@@ -18606,20 +19028,20 @@ const App = {
           </div>
 
           <div>
-            <label id="newHwTitleLabel" class="block font-bold text-slate-700 mb-1">${initKind === 'homework' ? 'Tiêu đề bài tập về nhà *' : 'Tên phân dạng / phiếu bài tập *'}</label>
-            <input type="text" id="newHwTitle" required value="${this.escapeHtmlAttr(existingHw ? existingHw.title : '')}" placeholder="${initKind === 'homework' ? 'VD: BTVN Tuần 8 — Khảo sát hàm số & Bài toán thực tế' : 'VD: Dạng 2. Tìm tham số m để hàm số đơn điệu — [Phiếu 1]'}" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold focus:border-indigo-600 outline-none">
+            <label id="newHwTitleLabel" class="block font-bold text-slate-700 mb-1">${initKind === 'homework' ? 'Tiêu đề bài tập về nhà *' : (initKind === 'reading' ? 'Tên tài liệu tự đọc *' : 'Tên phân dạng / phiếu chuyên đề *')}</label>
+            <input type="text" id="newHwTitle" required value="${this.escapeHtmlAttr(existingHw ? existingHw.title : '')}" placeholder="${initKind === 'homework' ? 'VD: BTVN Tuần 8 — Khảo sát hàm số & Bài toán thực tế' : (initKind === 'reading' ? 'VD: Sổ tay công thức Nguyên hàm – Tích phân & Hình học Oxyz' : 'VD: Dạng 2. Tìm tham số m để hàm số đơn điệu — [Phiếu 1]')}" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold focus:border-indigo-600 outline-none">
           </div>
 
           <div>
-            <label id="newHwDescLabel" class="block font-bold text-slate-700 mb-1">${initKind === 'homework' ? 'Yêu cầu / Dặn dò làm bài (hiện trực tiếp cho học sinh)' : 'Mô tả tóm tắt'}</label>
-            <textarea id="newHwDesc" rows="2" placeholder="${initKind === 'homework' ? 'VD: Làm chi tiết tự luận từ Câu 1 đến Câu 10 vào vở, chụp rõ nét các trang vở và nộp trước 21h00 Chủ nhật...' : 'Tóm tắt lý thuyết, dạng bài và câu hỏi rèn luyện...'}" class="w-full px-3.5 py-2 border border-slate-300 rounded-xl text-xs focus:border-indigo-600 outline-none">${existingHw ? (existingHw.description || '') : ''}</textarea>
+            <label id="newHwDescLabel" class="block font-bold text-slate-700 mb-1">${initKind === 'homework' ? 'Yêu cầu / Dặn dò làm bài (hiện trực tiếp cho học sinh)' : (initKind === 'reading' ? 'Ghi chú hướng dẫn tự đọc (hiện cho học sinh)' : 'Mô tả tóm tắt')}</label>
+            <textarea id="newHwDesc" rows="2" placeholder="${initKind === 'homework' ? 'VD: Làm chi tiết tự luận từ Câu 1 đến Câu 10 vào vở, chụp rõ nét các trang vở và nộp trước 21h00 Chủ nhật...' : (initKind === 'reading' ? 'VD: Các em đọc kỹ phần chứng minh định lí trang 1–5 và ghi nhớ bảng công thức cuối tài liệu...' : 'Tóm tắt lý thuyết, dạng bài và câu hỏi rèn luyện...')}" class="w-full px-3.5 py-2 border border-slate-300 rounded-xl text-xs focus:border-indigo-600 outline-none">${existingHw ? (existingHw.description || '') : ''}</textarea>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="newHwFilesGrid">
+          <div class="grid grid-cols-1 ${initKind === 'reading' ? '' : 'sm:grid-cols-2'} gap-3" id="newHwFilesGrid">
             <!-- File PDF Đề bài / Các bản HS + File .tex -->
             <div class="space-y-2">
               <label id="newHwFileLabel" class="block font-bold text-slate-700">
-                <i class="fa-solid fa-file-pdf text-red-500 mr-1"></i>${initKind === 'homework' ? (initHwMode === 'photo' ? 'File PDF Đề bài (Tùy chọn)' : 'File PDF Đề BTVN &amp; File .tex *') : 'Các Bản PDF Học Sinh &amp; File .tex (Chọn nhiều file)'}
+                <i class="fa-solid fa-file-pdf text-red-500 mr-1"></i>${initKind === 'homework' ? (initHwMode === 'photo' ? 'File PDF Đề bài (Tùy chọn)' : 'File PDF Đề BTVN &amp; File .tex *') : (initKind === 'reading' ? 'File PDF Tài Liệu Tự Đọc (Hoặc Dán Link Google Drive)' : 'Các Bản PDF Học Sinh &amp; File .tex (Chọn nhiều file)')}
               </label>
               <div id="newHwDropZone" data-drop-target="newHwFileInput" class="border-2 border-dashed border-indigo-200 rounded-xl p-3.5 text-center bg-indigo-50/40 hover:bg-indigo-50/80 transition cursor-pointer">
                 <input type="file" id="newHwFileInput" multiple accept=".pdf,.tex,application/pdf,text/plain,application/x-tex" class="hidden" onchange="App.handleHwFileSelect(event)">
@@ -18633,7 +19055,7 @@ const App = {
             </div>
 
             <!-- File PDF Đáp án / Lời giải -->
-            <div id="newHwSolDropWrap" class="space-y-2">
+            <div id="newHwSolDropWrap" class="${initKind === 'reading' ? 'hidden' : ''} space-y-2">
               <label class="block font-bold text-slate-700">
                 <i class="fa-solid fa-file-circle-check text-emerald-600 mr-1"></i>File PDF GV Đáp Án / Lời Giải (Tùy chọn)
               </label>
@@ -18660,8 +19082,8 @@ const App = {
         <div class="px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2.5 shrink-0">
           <button type="button" onclick="App.cleanupUnusedHwPreupload(); document.getElementById('addHomeworkModal')?.remove()" class="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl text-xs font-semibold text-slate-700 cursor-pointer transition">Hủy</button>
           <button type="submit" form="addHomeworkForm" id="addHomeworkSubmitBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition inline-flex items-center gap-1.5 cursor-pointer">
-            <i class="fa-solid ${initKind === 'homework' ? 'fa-paper-plane' : 'fa-file-circle-plus'}"></i>
-            <span id="addHwSubmitBtnText">${existingHw ? 'Lưu Cập Nhật' : (initKind === 'homework' ? 'Giao Bài Tập Ngay' : 'Tải Lên Phiếu')}</span>
+            <i class="fa-solid ${initKind === 'homework' ? 'fa-paper-plane' : (initKind === 'reading' ? 'fa-book-bookmark' : 'fa-file-circle-plus')}"></i>
+            <span id="addHwSubmitBtnText">${existingHw ? 'Lưu Cập Nhật' : (initKind === 'homework' ? 'Giao Bài Tập Ngay' : (initKind === 'reading' ? 'Gửi Tài Liệu Tự Đọc' : 'Tải Lên Phiếu Chuyên Đề'))}</span>
           </button>
         </div>
       </div>
@@ -18676,34 +19098,51 @@ const App = {
     if (nextMode && modeInp) modeInp.value = nextMode;
     const kind = kindInp ? kindInp.value : 'homework';
     const hwMode = modeInp ? modeInp.value : 'photo';
+    const isReading = kind === 'reading';
 
     const btnHw = document.getElementById('hwKindBtn_homework');
     const btnDoc = document.getElementById('hwKindBtn_document');
+    const btnRead = document.getElementById('hwKindBtn_reading');
     if (btnHw) btnHw.className = 'py-2.5 px-3 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ' + (kind === 'homework' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900');
     if (btnDoc) btnDoc.className = 'py-2.5 px-3 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ' + (kind === 'document' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900');
+    if (btnRead) btnRead.className = 'py-2.5 px-3 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ' + (isReading ? 'bg-teal-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900');
 
     const mPhoto = document.getElementById('hwModeBtn_photo');
     const mInter = document.getElementById('hwModeBtn_interactive');
     if (mPhoto) mPhoto.className = 'p-3 rounded-xl border text-left transition cursor-pointer ' + (hwMode === 'photo' ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20' : 'border-emerald-200/80 bg-white/60 hover:bg-white');
     if (mInter) mInter.className = 'p-3 rounded-xl border text-left transition cursor-pointer ' + (hwMode === 'interactive' ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20' : 'border-emerald-200/80 bg-white/60 hover:bg-white');
 
+    document.getElementById('newHwReadingTopicBox')?.classList.toggle('hidden', !isReading);
+    document.getElementById('newHwCurriculumPosBox')?.classList.toggle('hidden', isReading);
     document.getElementById('newHwAssignmentConfigBox')?.classList.toggle('hidden', kind !== 'homework');
     document.getElementById('newHwMaxScoreWrap')?.classList.toggle('hidden', hwMode !== 'photo');
     document.getElementById('newHwTimeMinutesWrap')?.classList.toggle('hidden', hwMode !== 'interactive');
-    document.getElementById('newHwSolDropWrap')?.classList.remove('hidden');
+    document.getElementById('newHwSolDropWrap')?.classList.toggle('hidden', isReading);
     document.getElementById('newHwInteractiveKeyWrap')?.classList.toggle('hidden', !(kind === 'document' || (kind === 'homework' && hwMode === 'interactive')));
 
     const filesGrid = document.getElementById('newHwFilesGrid');
     if (filesGrid) {
-      filesGrid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-3';
+      filesGrid.className = isReading ? 'grid grid-cols-1 gap-3' : 'grid grid-cols-1 sm:grid-cols-2 gap-3';
+    }
+    const titleLbl = document.getElementById('newHwTitleLabel');
+    if (titleLbl) {
+      titleLbl.textContent = kind === 'homework' ? 'Tiêu đề bài tập về nhà *' : (isReading ? 'Tên tài liệu tự đọc *' : 'Tên phân dạng / phiếu chuyên đề *');
+    }
+    const descLbl = document.getElementById('newHwDescLabel');
+    if (descLbl) {
+      descLbl.textContent = kind === 'homework' ? 'Yêu cầu / Dặn dò làm bài (hiện trực tiếp cho học sinh)' : (isReading ? 'Ghi chú hướng dẫn tự đọc (hiện cho học sinh)' : 'Mô tả tóm tắt');
     }
     const fileLbl = document.getElementById('newHwFileLabel');
     if (fileLbl) {
-      fileLbl.innerHTML = `<i class="fa-solid fa-file-pdf text-red-500 mr-1"></i>${kind === 'homework' ? (hwMode === 'photo' ? 'File PDF Đề bài (Tùy chọn)' : 'File PDF Đề BTVN &amp; File .tex *') : 'Các Bản PDF Học Sinh &amp; File .tex (Chọn nhiều file)'}`;
+      fileLbl.innerHTML = `<i class="fa-solid fa-file-pdf text-red-500 mr-1"></i>${kind === 'homework' ? (hwMode === 'photo' ? 'File PDF Đề bài (Tùy chọn)' : 'File PDF Đề BTVN &amp; File .tex *') : (isReading ? 'File PDF Tài Liệu Tự Đọc (Hoặc Dán Link Google Drive)' : 'Các Bản PDF Học Sinh &amp; File .tex (Chọn nhiều file)')}`;
     }
     const submitTxt = document.getElementById('addHwSubmitBtnText');
     if (submitTxt && !this._editingHomeworkId) {
-      submitTxt.textContent = kind === 'homework' ? 'Giao Bài Tập Ngay' : 'Tải Lên Phiếu';
+      submitTxt.textContent = kind === 'homework' ? 'Giao Bài Tập Ngay' : (isReading ? 'Gửi Tài Liệu Tự Đọc' : 'Tải Lên Phiếu Chuyên Đề');
+    }
+    const hdrTxt = document.getElementById('addHwModalHeaderTitle');
+    if (hdrTxt && !this._editingHomeworkId) {
+      hdrTxt.textContent = kind === 'homework' ? 'Giao Bài Tập Về Nhà Theo Nhóm Lớp' : (isReading ? 'Gửi Tài Liệu Tự Đọc Cho Học Sinh' : 'Thêm Phiếu Bài Tập & Chuyên Đề PDF');
     }
     if (nextKind === 'homework' && !this._editingHomeworkId) {
       const accSel = document.getElementById('newHwAccess');
@@ -19169,14 +19608,22 @@ const App = {
     if (this._addingHwInProgress) return;
     const existingHw = this._editingHomeworkId ? this.findHomeworkById(this._editingHomeworkId) : null;
 
-    const itemKind = document.getElementById('newHwItemKind')?.value === 'homework' ? 'homework' : 'document';
+    const rawItemKind = document.getElementById('newHwItemKind')?.value;
+    const itemKind = rawItemKind === 'homework' ? 'homework' : (rawItemKind === 'reading' ? 'reading' : 'document');
     const hwMode = document.getElementById('newHwMode')?.value === 'interactive' ? 'interactive' : 'photo';
     const code = (document.getElementById('newHwCode')?.value || '').trim();
-    const chapterCode = (document.getElementById('newHwChapterCode')?.value || '').trim();
-    const lessonTitle = (document.getElementById('newHwLessonTitle')?.value || '').trim();
-    const allowOnlineView = document.getElementById('newHwAllowOnlineView') ? document.getElementById('newHwAllowOnlineView').checked : true;
-    const allowDownload = document.getElementById('newHwAllowDownload') ? document.getElementById('newHwAllowDownload').checked : true;
-    const allowDirectPractice = document.getElementById('newHwAllowDirectPractice') ? document.getElementById('newHwAllowDirectPractice').checked : true;
+    const readingTopic = (document.getElementById('newHwReadingTopic')?.value || '').trim() || 'Tài liệu tự đọc';
+    const chapterCode = itemKind === 'reading' ? readingTopic : (document.getElementById('newHwChapterCode')?.value || '').trim();
+    const lessonTitle = itemKind === 'reading' ? '' : (document.getElementById('newHwLessonTitle')?.value || '').trim();
+    const allowOnlineView = itemKind === 'reading'
+      ? (document.getElementById('newHwReadingAllowOnline') ? document.getElementById('newHwReadingAllowOnline').checked : true)
+      : (document.getElementById('newHwAllowOnlineView') ? document.getElementById('newHwAllowOnlineView').checked : true);
+    const allowDownload = itemKind === 'reading'
+      ? (document.getElementById('newHwReadingAllowDownload') ? document.getElementById('newHwReadingAllowDownload').checked : true)
+      : (document.getElementById('newHwAllowDownload') ? document.getElementById('newHwAllowDownload').checked : true);
+    const allowDirectPractice = itemKind === 'reading'
+      ? false
+      : (document.getElementById('newHwAllowDirectPractice') ? document.getElementById('newHwAllowDirectPractice').checked : true);
     const externalPdfUrl = (document.getElementById('newHwExternalPdfUrl')?.value || '').trim();
     const externalSolUrl = (document.getElementById('newHwExternalSolUrl')?.value || '').trim();
     const title = (document.getElementById('newHwTitle')?.value || '').trim();
@@ -19334,12 +19781,13 @@ const App = {
         code,
         chapterCode,
         lessonTitle,
+        readingTopic: itemKind === 'reading' ? readingTopic : '',
         itemKind,
         isCurriculumSlot: itemKind === 'document' ? Boolean(existingHw?.isCurriculumSlot || !pdfUrl) : false,
         hwMode: itemKind === 'homework' ? hwMode : 'none',
         title,
         grade,
-        description: desc || lessonTitle || (itemKind === 'homework' ? 'Hoàn thành bài tập và nộp đúng hạn.' : 'Phiếu bài tập & chuyên đề rèn luyện.'),
+        description: desc || lessonTitle || (itemKind === 'homework' ? 'Hoàn thành bài tập và nộp đúng hạn.' : (itemKind === 'reading' ? 'Tài liệu tự đọc bổ sung do Thầy Chí gửi.' : 'Phiếu bài tập & chuyên đề rèn luyện.')),
         pdfUrl,
         fileName,
         fileSize,
@@ -19402,6 +19850,9 @@ const App = {
       this._preuploadedHwPdfUrl = '';
       this._preuploadedHwSolPdfUrl = '';
       this._editingHomeworkId = null;
+      if (itemKind === 'reading') {
+        this.state.adminMainTab = 'readings';
+      }
       document.getElementById('addHomeworkModal')?.remove();
       this.renderPreservingScroll();
       this.pushAdminStateToCloud({ manual: false });
@@ -19412,9 +19863,11 @@ const App = {
           ? `Đã cập nhật "${title}" ${targetSummary} thành công!`
           : (itemKind === 'homework'
             ? `Đã giao bài tập về nhà "${title}" ${targetSummary} thành công!`
-            : `Đã thêm phiếu "${title}" ${targetSummary} thành công!`),
+            : (itemKind === 'reading'
+              ? `Đã gửi tài liệu tự đọc "${title}" ${targetSummary} thành công!`
+              : `Đã thêm chuyên đề / phiếu "${title}" ${targetSummary} thành công!`)),
         'success',
-        existingHw ? 'Đã lưu cập nhật' : (itemKind === 'homework' ? 'Đã giao BTVN theo lớp' : 'Đã lưu phiếu')
+        existingHw ? 'Đã lưu cập nhật' : (itemKind === 'homework' ? 'Đã giao BTVN theo lớp' : (itemKind === 'reading' ? 'Đã gửi tài liệu tự đọc' : 'Đã lưu chuyên đề'))
       );
     } finally {
       this._addingHwInProgress = false;

@@ -1712,7 +1712,7 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v33"), 'sw.js must bump shell cache to v33');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v34"), 'sw.js must bump shell cache to v34');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
   assert.ok(cssSrc.includes(':where([id$="Modal"].fixed.inset-0:not(#previewPdfModal), #appSystemDialog.fixed.inset-0) > div'), 'app.css must use zero-specificity :where() fallback so desktop .max-w-* classes on modals are never overridden');
   assert.ok(cssSrc.includes('max-height: calc(100dvh'), 'app.css must constrain modal card height within viewport');
@@ -2262,7 +2262,79 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.ok(loginHtml.includes('id="thptCdDays"') && loginHtml.includes('id="thptCdHours"') && loginHtml.includes('id="thptYearSelect"') && loginHtml.includes('Thi THPT QG 2027 (2K9)'), 'Countdown card must display 4-unit timer, cohort switcher, and Thi THPT QG 2027 (2K9)');
 
   console.log('[OK] Test 33 Passed: THPT QG 2027 Calendar & Countdown above login input + Multi-Year Auto-Reference Engine verified 100%.');
-  console.log('[OK] TẤT CẢ 33 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
+
+  // ==========================================
+  // TEST 34: Tách Riêng Phần Tài Liệu Tự Đọc (itemKind: 'reading') và Phần Chuyên Đề / Phiếu Bài Tập Ở Cả Admin & Học Sinh
+  // ==========================================
+  console.log('--- TEST 34: Separated Self-Reading Documents vs Curriculum Topics (Admin & Student Tabs) ---');
+
+  const readingDoc = App.normalizeHomeworkRecord({
+    id: 'READ-TEST-01',
+    itemKind: 'reading',
+    readingTopic: 'Sổ tay công thức',
+    title: 'Sổ Tay Công Thức Tích Phân & Oxyz Tự Đọc',
+    description: 'Tài liệu đọc thêm tổng hợp công thức giải nhanh',
+    grade: 12,
+    accessType: 'grade',
+    allowedGrades: [12],
+    pdfUrl: 'https://example.com/sotay-12.pdf',
+    fileName: 'SoTay_12.pdf',
+    allowOnlineView: true,
+    allowDownload: true
+  });
+  App.state.homeworks.unshift(readingDoc);
+
+  // 34.1 Tài liệu tự đọc không được lẫn vào Bảng Sheet / Cây Thư Mục Chuyên Đề
+  assert.strictEqual(readingDoc.itemKind, 'reading', 'normalizeHomeworkRecord must preserve itemKind === reading');
+  assert.strictEqual(readingDoc.allowDirectPractice, false, 'Self-reading document defaults allowDirectPractice to false');
+  assert.ok(
+    !App.getMergedWorksheets({ includeEmptySlots: true }).some(x => x.id === 'READ-TEST-01'),
+    'getMergedWorksheets (Chuyên đề Sheet/Tree) must exclude self-reading documents'
+  );
+  assert.ok(
+    App.getReadingDocuments({ scope: 'admin' }).some(x => x.id === 'READ-TEST-01'),
+    'getReadingDocuments(admin) must include READ-TEST-01'
+  );
+
+  // 34.2 Kiểm tra phân quyền Khối cho Tài liệu tự đọc ở Cổng Học Sinh
+  const stu12Read = { studentId: 'HS951', fullName: 'Lê Hoàng A', role: 'student', grade: 12, className: '12A 2K9' };
+  const stu10Read = { studentId: 'HS953', fullName: 'Phạm Thu C', role: 'student', grade: 10, className: '10A 2K11' };
+  assert.ok(
+    App.getReadingDocuments({ scope: 'student', user: stu12Read }).some(x => x.id === 'READ-TEST-01'),
+    'Grade 12 student must see Grade 12 self-reading document'
+  );
+  assert.ok(
+    !App.getReadingDocuments({ scope: 'student', user: stu10Read }).some(x => x.id === 'READ-TEST-01'),
+    'Grade 10 student must NOT see Grade 12 self-reading document unless granted access'
+  );
+
+  // 34.3 Kiểm tra giao diện Tab riêng ở Cổng Học Sinh và Cổng Admin
+  App.state.currentUser = stu12Read;
+  App.state.studentMainTab = 'readings';
+  const stuReadingPortal = { innerHTML: '' };
+  App.renderStudentPortal(stuReadingPortal);
+  assert.ok(
+    stuReadingPortal.innerHTML.includes('id="studentTabReadingsBtn"') &&
+    stuReadingPortal.innerHTML.includes('id="studentReadingLibrarySection"') &&
+    stuReadingPortal.innerHTML.includes('Sổ Tay Công Thức Tích Phân &amp; Oxyz Tự Đọc') &&
+    stuReadingPortal.innerHTML.includes('BTVN &amp; Chuyên Đề'),
+    'Student portal must render separate Tài Liệu Tự Đọc tab & library distinct from BTVN & Chuyên Đề'
+  );
+
+  App.state.currentUser = { ...App.state.admin, role: 'admin', fullName: 'Thầy Huỳnh Thanh Chí' };
+  App.state.adminMainTab = 'readings';
+  const admReadingPortal = { innerHTML: '' };
+  App.renderAdminDashboard(admReadingPortal);
+  assert.ok(
+    admReadingPortal.innerHTML.includes('id="adminTabReadingsBtn"') &&
+    admReadingPortal.innerHTML.includes('id="adminReadingLibrarySection"') &&
+    admReadingPortal.innerHTML.includes('id="openAddReadingDocBtn"') &&
+    admReadingPortal.innerHTML.includes('Gửi Tài Liệu Tự Đọc'),
+    'Admin dashboard must render separate Tài Liệu Tự Đọc tab with Gửi Tài Liệu Tự Đọc action'
+  );
+
+  console.log('[OK] Test 34 Passed: Separated Self-Reading Documents vs Curriculum Topics verified 100%.');
+  console.log('[OK] TẤT CẢ 34 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

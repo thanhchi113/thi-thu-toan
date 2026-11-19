@@ -1,4 +1,4 @@
-const CACHE_NAME = 'khao-thi-toan-shell-v33';
+const CACHE_NAME = 'khao-thi-toan-shell-v34';
 const PDF_CACHE_NAME = 'khao-thi-pdfs-v1';
 const SHELL_ASSETS = [
   './',
