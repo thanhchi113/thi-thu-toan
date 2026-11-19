@@ -1712,7 +1712,7 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v32"), 'sw.js must bump shell cache to v32');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v33"), 'sw.js must bump shell cache to v33');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
   assert.ok(cssSrc.includes(':where([id$="Modal"].fixed.inset-0:not(#previewPdfModal), #appSystemDialog.fixed.inset-0) > div'), 'app.css must use zero-specificity :where() fallback so desktop .max-w-* classes on modals are never overridden');
   assert.ok(cssSrc.includes('max-height: calc(100dvh'), 'app.css must constrain modal card height within viewport');
@@ -2248,19 +2248,18 @@ const PDFStorage = require('../js/pdf_storage.js');
   const mathCell = cal2027.cells.find(c => !c.empty && c.day === 11);
   assert.ok(mathCell && mathCell.role === 'day1_math' && mathCell.badge.includes('TOÁN'), 'June 2027 calendar cell 11 must highlight Math exam day');
 
-  // 33.4 Kiểm tra vị trí hiển thị: Bắt buộc nằm BÊN PHẢI ngay sau phần hướng dẫn Tạo App (#loginAndroidPromoCard, #loginIosPromoCard) và KHÔNG nhồi vào trong tờ giấy đăng nhập (.ltac-notebook-sheet)
+  // 33.4 Kiểm tra vị trí hiển thị: Bắt buộc nằm RỜI BÊN DƯỚI ô đăng nhập (.ltac-notebook-sheet) ở cột phải, có bộ đếm 4 ô & chọn khóa gọn gàng
   App.state.thptCountdownYear = 2027;
   const loginBoxTest = { innerHTML: '' };
   App.renderLoginView(loginBoxTest);
   const loginHtml = loginBoxTest.innerHTML;
-  const androidAppPos = loginHtml.indexOf('id="loginAndroidPromoCard"');
-  const iosAppPos = loginHtml.indexOf('id="loginIosPromoCard"');
-  const cdPos = loginHtml.indexOf('id="thptCountdownWidget"');
-  const curriculumBtnPos = loginHtml.indexOf('id="loginOpenCurriculumBtn"');
   const notebookPos = loginHtml.indexOf('class="ltac-notebook-sheet');
+  const adminFormEndPos = loginHtml.indexOf('</form>', loginHtml.indexOf('id="adminLoginForm"'));
+  const cdPos = loginHtml.indexOf('id="thptCountdownWidget"');
+  const statsBannerPos = loginHtml.indexOf('class="ltac-crimson-banner');
   assert.ok(cdPos !== -1, 'Login view must render #thptCountdownWidget');
-  assert.ok(androidAppPos < iosAppPos && iosAppPos < cdPos && cdPos < curriculumBtnPos && cdPos < notebookPos, '#thptCountdownWidget must appear immediately to the right after the Android & iOS App guide cards and outside the login notebook sheet');
-  assert.ok(loginHtml.includes('2308/QĐ-BGDĐT') && loginHtml.includes('Thi THPT QG 2027 (2K9)'), 'Countdown card must display Thi THPT QG 2027 (2K9) and official MOET source reference');
+  assert.ok(notebookPos < adminFormEndPos && adminFormEndPos < cdPos && cdPos < statsBannerPos, '#thptCountdownWidget must appear as a standalone card BELOW the login sheet and ABOVE the stats banner');
+  assert.ok(loginHtml.includes('id="thptCdDays"') && loginHtml.includes('id="thptCdHours"') && loginHtml.includes('id="thptYearSelect"') && loginHtml.includes('Thi THPT QG 2027 (2K9)'), 'Countdown card must display 4-unit timer, cohort switcher, and Thi THPT QG 2027 (2K9)');
 
   console.log('[OK] Test 33 Passed: THPT QG 2027 Calendar & Countdown above login input + Multi-Year Auto-Reference Engine verified 100%.');
   console.log('[OK] TẤT CẢ 33 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
