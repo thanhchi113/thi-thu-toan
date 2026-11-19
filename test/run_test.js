@@ -1712,7 +1712,7 @@ const PDFStorage = require('../js/pdf_storage.js');
   const appJsLatest = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
   assert.ok(/screens\s*:\s*\{\s*xs\s*:\s*['"]375px['"]/.test(indexHtmlSrc), 'index.html must define Tailwind xs: 375px breakpoint');
-  assert.ok(swSrc.includes("khao-thi-toan-shell-v30"), 'sw.js must bump shell cache to v30');
+  assert.ok(swSrc.includes("khao-thi-toan-shell-v31"), 'sw.js must bump shell cache to v31');
   assert.ok(cssSrc.includes('max-width: calc(100vw - 1rem)') && cssSrc.includes('max-width: min(100%, calc(100vw - 1.5rem))'), 'app.css must constrain popovers and modals within mobile viewport');
   assert.ok(cssSrc.includes(':where([id$="Modal"].fixed.inset-0:not(#previewPdfModal), #appSystemDialog.fixed.inset-0) > div'), 'app.css must use zero-specificity :where() fallback so desktop .max-w-* classes on modals are never overridden');
   assert.ok(cssSrc.includes('max-height: calc(100dvh'), 'app.css must constrain modal card height within viewport');
@@ -2203,7 +2203,65 @@ const PDFStorage = require('../js/pdf_storage.js');
   assert.strictEqual(App.state.currentUser.role, 'admin', 'Admin role must be restored immediately without logging in again');
 
   console.log('[OK] Test 32 Passed: Folder Tree rename/upload/add topic & Teacher View-As-Student mode verified 100%.');
-  console.log('[OK] TẤT CẢ 32 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
+
+  // ==========================================
+  // TEST 33: Bộ Lịch & Đếm Ngược Kỳ Thi THPT QG Lớp 2027 (Khóa 2K9) Trên Ô Đăng Nhập + Cơ Chế Tự Tham Chiếu Nguồn Chính Xác Cho Các Năm Khác
+  // ==========================================
+  console.log('--- TEST 33: THPT QG 2027 Calendar & Countdown Above Login Input + Multi-Year Auto-Reference Engine ---');
+
+  // 33.1 Kiểm tra nguồn pháp quy chính thức Kỳ thi THPT QG 2027 (Lớp 12 · 2K9)
+  const sched2027 = App.resolveThptExamSchedule(2027);
+  assert.strictEqual(sched2027.year, 2027, 'Default schedule year must be 2027');
+  assert.strictEqual(sched2027.cohort, '2K9', '2027 cohort must be 2K9');
+  assert.strictEqual(sched2027.procedureDate, '2027-06-10', '2027 procedure date must be 10/06/2027');
+  assert.strictEqual(sched2027.examDay1, '2027-06-11', '2027 exam day 1 (Literature & Math) must be 11/06/2027');
+  assert.strictEqual(sched2027.examDay2, '2027-06-12', '2027 exam day 2 (Electives) must be 12/06/2027');
+  assert.strictEqual(sched2027.backupDate, '2027-06-13', '2027 backup date must be 13/06/2027');
+  assert.ok(sched2027.legalDoc.includes('2308/QĐ-BGDĐT'), '2027 schedule must cite official MOET Decision 2308/QĐ-BGDĐT');
+
+  // 33.2 Kiểm tra cơ chế tự tham chiếu nguồn cho các năm khác (2025, 2026, 2028, 2029, 2030)
+  const sched2026 = App.resolveThptExamSchedule(2026);
+  assert.strictEqual(sched2026.examDay1, '2026-06-11', '2026 official exam day 1 must be 11/06/2026');
+  assert.ok(sched2026.legalDoc.includes('1257/BGDĐT-QLCL'), '2026 schedule must cite official MOET dispatch 1257/BGDĐT-QLCL');
+
+  const sched2028 = App.resolveThptExamSchedule(2028);
+  assert.strictEqual(sched2028.cohort, '2K10', '2028 cohort must be 2K10 (Grade 11)');
+  assert.strictEqual(sched2028.examDay1, '2028-06-08', '2028 auto-referenced Thursday week-2 June exam day 1 must be 08/06/2028');
+  assert.strictEqual(sched2028.examDay2, '2028-06-09', '2028 auto-referenced Friday week-2 June exam day 2 must be 09/06/2028');
+  assert.strictEqual(sched2028.status, 'auto_reference', '2028 schedule must carry auto_reference status before official decision override');
+
+  const sched2029 = App.resolveThptExamSchedule(2029);
+  assert.strictEqual(sched2029.cohort, '2K11', '2029 cohort must be 2K11 (Grade 10)');
+  assert.strictEqual(sched2029.examDay1, '2029-06-14', '2029 auto-referenced exam day 1 must be 14/06/2029');
+
+  // Tự động nhảy năm mục tiêu khi thời gian thực đã qua kỳ thi năm 2027
+  assert.strictEqual(App.getDefaultThptTargetYear(new Date('2026-11-19T12:00:00+07:00')), 2027, 'Before June 2027 exam ends, default target year must be 2027');
+  assert.strictEqual(App.getDefaultThptTargetYear(new Date('2027-06-15T12:00:00+07:00')), 2028, 'After June 2027 exam ends, default target year must auto-advance to 2028');
+
+  // 33.3 Kiểm tra tính toán đếm ngược và ma trận tờ lịch Tháng 06/2027
+  const snap2027 = App.getThptCountdownSnapshot(2027, 'math_exam', new Date('2027-06-10T14:20:00+07:00'));
+  assert.strictEqual(snap2027.phase, 'upcoming', '1 day before Math exam must be upcoming');
+  assert.strictEqual(snap2027.days, 1, 'Exactly 24h before 14:20 11/06/2027 must be 1 day');
+  assert.strictEqual(snap2027.hours, 0, 'Hours remainder must be 0');
+
+  const cal2027 = App.buildThptJuneCalendarMatrix(2027);
+  const mathCell = cal2027.cells.find(c => !c.empty && c.day === 11);
+  assert.ok(mathCell && mathCell.role === 'day1_math' && mathCell.badge.includes('TOÁN'), 'June 2027 calendar cell 11 must highlight Math exam day');
+
+  // 33.4 Kiểm tra vị trí hiển thị: Bắt buộc nằm BÊN TRÊN ô điền tài khoản đăng nhập (#loginStudentId / #loginAdminUser)
+  App.state.thptCountdownYear = 2027;
+  const loginBoxTest = { innerHTML: '' };
+  App.renderLoginView(loginBoxTest);
+  const loginHtml = loginBoxTest.innerHTML;
+  const cdPos = loginHtml.indexOf('id="thptCountdownWidget"');
+  const studentInputPos = loginHtml.indexOf('id="loginStudentId"');
+  const adminInputPos = loginHtml.indexOf('id="loginAdminUser"');
+  assert.ok(cdPos !== -1, 'Login view must render #thptCountdownWidget');
+  assert.ok(cdPos < studentInputPos && cdPos < adminInputPos, '#thptCountdownWidget must appear ABOVE the student and admin login account input fields');
+  assert.ok(loginHtml.includes('2308/QĐ-BGDĐT') && loginHtml.includes('2027 · 2K9'), 'Countdown widget must display 2027 (2K9) and official MOET source badge');
+
+  console.log('[OK] Test 33 Passed: THPT QG 2027 Calendar & Countdown above login input + Multi-Year Auto-Reference Engine verified 100%.');
+  console.log('[OK] TẤT CẢ 33 BỘ TEST ĐÃ HOÀN TẤT VÀ ĐẠT 100%!');
 })().catch((err) => {
   console.error('[FAIL] Test suite failed:', err);
   process.exit(1);

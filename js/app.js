@@ -196,7 +196,11 @@ const App = {
       deletedClassGroups: [],            // Danh sách nhóm lớp mặc định đã xóa
       customCurriculumChapters: [],      // Danh sách Chương tùy chỉnh / đã đổi tên trong Cây Thư Mục
       deletedCurriculumChapterKeys: [],  // Danh sách mã Chương đã xóa khỏi Cây Thư Mục
+      thptExamSchedules: {},             // Lịch thi THPT QG cập nhật theo văn bản Bộ GD&ĐT cho từng năm (đồng bộ Cloud)
     },
+    thptCountdownYear: null,             // Năm mục tiêu đếm ngược THPT QG (null -> tự động chọn 2027 hoặc năm kế tiếp)
+    thptCountdownTargetMode: 'exam_start', // 'exam_start' (07:30 11/06) | 'math_exam' (14:20 11/06 - Môn Toán)
+    thptCalendarExpanded: false,         // Mở rộng tờ lịch Tháng 6 & chi tiết 4 buổi thi ngay trên khung đăng nhập
     violationLogs: [],
     studentScoreTab: 'mine',             // 'mine' (Kết quả cá nhân) | 'classBoard' (So sánh Lớp / Khối)
     studentCompareMode: 'class',         // 'class' (Lớp của mình) | 'grade' (Toàn khối của mình)
@@ -4262,6 +4266,11 @@ const App = {
                   <span class="font-hand text-base sm:text-lg text-indigo-600 shrink-0 -rotate-2">Khối 6 – 12</span>
                 </div>
 
+                <!-- Bộ Lịch & Đếm Ngược Kỳ Thi THPT Quốc Gia (Lớp 2027 · 2K9 & Tự Tham Chiếu Các Năm Khác) -->
+                <div id="thptCountdownMount" class="mb-4">
+                  ${this.renderThptCountdownWidgetHtml()}
+                </div>
+
                 <!-- Chuyển Cổng Học Sinh / Giáo Viên dạng Pill -->
                 <div class="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-full border border-slate-200/90 mb-5">
                   <button type="button" id="tabStudentBtn" onclick="App.switchLoginTab('student')" class="h-10 rounded-full text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer ${activeTab === 'student' ? 'bg-indigo-600 text-white font-extrabold shadow-xs' : 'text-slate-600 hover:text-slate-900 font-semibold'}">
@@ -4413,6 +4422,913 @@ const App = {
         </footer>
       </div>
     `;
+    this.startThptCountdownTicker();
+  },
+
+  // --- HỆ THỐNG BỘ LỊCH & ĐẾM NGƯỢC KỲ THI TỐT NGHIỆP THPT QUỐC GIA (KHÓA 2027 & TỰ THAM CHIẾU NGUỒN BỘ GD&ĐT CHO CÁC NĂM KHÁC) ---
+  OFFICIAL_MOET_THPT_SCHEDULES: {
+    2025: {
+      year: 2025,
+      cohort: '2K7',
+      birthYear: 2007,
+      gradeLabel: 'Khóa 2025 (2K7)',
+      procedureDate: '2025-06-25',
+      examDay1: '2025-06-26',
+      examDay2: '2025-06-27',
+      backupDate: '2025-06-28',
+      resultDate: '2025-07-16',
+      examStartIso: '2025-06-26T07:30:00+07:00',
+      mathStartIso: '2025-06-26T14:20:00+07:00',
+      examEndIso: '2025-06-28T17:00:00+07:00',
+      schoolYearStartIso: '2024-09-05T07:00:00+07:00',
+      status: 'official',
+      badgeText: 'Chính thức Bộ GD&ĐT · CV 1239/BGDĐT-QLCL',
+      legalDoc: 'Quyết định 2045/QĐ-BGDĐT & Công văn 1239/BGDĐT-QLCL của Bộ GD&ĐT',
+      issuedDate: '2025-03-24',
+      issuer: 'Bộ Giáo dục và Đào tạo',
+      sourceUrl: 'https://moet.gov.vn/tintuc/Pages/tin-tong-hop.aspx',
+      govUrl: 'https://baochinhphu.vn',
+      lawUrl: 'https://thuvienphapluat.vn',
+      note: 'Kỳ thi Tốt nghiệp THPT đầu tiên theo Chương trình GDPT 2018 (4 môn: Toán, Ngữ văn + 2 môn tự chọn).'
+    },
+    2026: {
+      year: 2026,
+      cohort: '2K8',
+      birthYear: 2008,
+      gradeLabel: 'Khóa 2026 (2K8)',
+      procedureDate: '2026-06-10',
+      examDay1: '2026-06-11',
+      examDay2: '2026-06-12',
+      backupDate: '2026-06-13',
+      resultDate: '2026-07-01',
+      examStartIso: '2026-06-11T07:30:00+07:00',
+      mathStartIso: '2026-06-11T14:20:00+07:00',
+      examEndIso: '2026-06-13T17:00:00+07:00',
+      schoolYearStartIso: '2025-09-05T07:00:00+07:00',
+      status: 'official',
+      badgeText: 'Chính thức Bộ GD&ĐT · CV 1257/BGDĐT-QLCL',
+      legalDoc: 'Quyết định 2269/QĐ-BGDĐT & Công văn 1257/BGDĐT-QLCL của Bộ GD&ĐT',
+      issuedDate: '2026-03-18',
+      issuer: 'Bộ Giáo dục và Đào tạo',
+      sourceUrl: 'https://moet.gov.vn/tintuc/Pages/tin-tong-hop.aspx',
+      govUrl: 'https://baochinhphu.vn',
+      lawUrl: 'https://thuvienphapluat.vn',
+      note: 'Kỳ thi Tốt nghiệp THPT năm 2026 tổ chức từ 10 – 13/06/2026 (Thi chính thức ngày 11 và 12/06/2026).'
+    },
+    2027: {
+      year: 2027,
+      cohort: '2K9',
+      birthYear: 2009,
+      gradeLabel: 'Lớp 12 · Khóa 2027 (2K9)',
+      procedureDate: '2027-06-10',
+      examDay1: '2027-06-11',
+      examDay2: '2027-06-12',
+      backupDate: '2027-06-13',
+      resultDate: '2027-07-01',
+      examStartIso: '2027-06-11T07:30:00+07:00',
+      mathStartIso: '2027-06-11T14:20:00+07:00',
+      examEndIso: '2027-06-13T17:00:00+07:00',
+      schoolYearStartIso: '2026-09-05T07:00:00+07:00',
+      status: 'official',
+      badgeText: 'Chính thức Bộ GD&ĐT · QĐ 2308/QĐ-BGDĐT',
+      legalDoc: 'Quyết định số 2308/QĐ-BGDĐT ngày 06/08/2026 của Bộ GD&ĐT (Khung kế hoạch thời gian năm học 2026 – 2027)',
+      issuedDate: '2026-08-06',
+      issuer: 'Bộ Giáo dục và Đào tạo',
+      sourceUrl: 'https://moet.gov.vn/van-ban/vbdh/Pages/default.aspx',
+      govUrl: 'https://baochinhphu.vn',
+      lawUrl: 'https://thuvienphapluat.vn',
+      note: 'Theo Quyết định 2308/QĐ-BGDĐT, Kỳ thi Tốt nghiệp THPT năm 2027 diễn ra vào ngày 11 và 12/06/2027 (Làm thủ tục 10/06, dự phòng 13/06; Môn Toán thi chiều 11/06/2027 trong 90 phút theo cấu trúc 3 phần GDPT 2018).'
+    }
+  },
+
+  formatIsoDateVn(isoDateStr, includeWeekday = true) {
+    if (!isoDateStr || typeof isoDateStr !== 'string') return '';
+    const parts = isoDateStr.split('-').map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) return isoDateStr;
+    const [y, m, d] = parts;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    const wdNames = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+    const wdShort = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    const dd = String(d).padStart(2, '0');
+    const mm = String(m).padStart(2, '0');
+    if (includeWeekday === 'short') {
+      return `${wdShort[dt.getUTCDay()]}, ${dd}/${mm}/${y}`;
+    }
+    if (includeWeekday) {
+      return `${wdNames[dt.getUTCDay()]}, ${dd}/${mm}/${y}`;
+    }
+    return `${dd}/${mm}/${y}`;
+  },
+
+  // Tự động nội suy lịch thi chuẩn theo Khung kế hoạch thời gian năm học của Bộ GD&ĐT cho bất kỳ năm nào (2024 – 2040)
+  computeCanonicalMoetScheduleForYear(yearInput) {
+    const y = Math.max(2024, Math.min(2045, parseInt(yearInput, 10) || 2027));
+    const birthYear = y - 18;
+    const cohort = `2K${String(birthYear).slice(-2)}`;
+
+    // Xác định khối lớp tương ứng với năm học hiện hành (2026 - 2027 -> 2027 là Lớp 12)
+    const gradeOffset = 2027 - y;
+    const currentGrade = 12 + gradeOffset;
+    const gradePrefix = currentGrade >= 6 && currentGrade <= 12 ? `Lớp ${currentGrade} · ` : '';
+
+    // Quy tắc cố định theo Khung kế hoạch thời gian năm học của Bộ GD&ĐT (từ QĐ 2269 & 2308/QĐ-BGDĐT):
+    // Kết thúc năm học trước 31/05; Kỳ thi Tốt nghiệp THPT tổ chức vào tuần thứ 2 của tháng 6
+    // (Cặp ngày Thứ Năm - Thứ Sáu trong khoảng 08/06 - 15/06 gần mốc 11/06 nhất).
+    let bestDay1 = 11;
+    let bestDist = 99;
+    for (let d = 8; d <= 15; d++) {
+      const dt = new Date(Date.UTC(y, 5, d));
+      if (dt.getUTCDay() === 4) { // Thứ Năm
+        const dist = Math.abs(d - 11);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestDay1 = d;
+        }
+      }
+    }
+
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const procDay = bestDay1 - 1;
+    const day1 = bestDay1;
+    const day2 = bestDay1 + 1;
+    const backupDay = bestDay1 + 2;
+
+    const procedureDate = `${y}-06-${pad2(procDay)}`;
+    const examDay1 = `${y}-06-${pad2(day1)}`;
+    const examDay2 = `${y}-06-${pad2(day2)}`;
+    const backupDate = `${y}-06-${pad2(backupDay)}`;
+    const resultDate = `${y}-07-01`;
+
+    return {
+      year: y,
+      cohort,
+      birthYear,
+      gradeLabel: `${gradePrefix}Khóa ${y} (${cohort})`,
+      procedureDate,
+      examDay1,
+      examDay2,
+      backupDate,
+      resultDate,
+      examStartIso: `${examDay1}T07:30:00+07:00`,
+      mathStartIso: `${examDay1}T14:20:00+07:00`,
+      examEndIso: `${backupDate}T17:00:00+07:00`,
+      schoolYearStartIso: `${y - 1}-09-05T07:00:00+07:00`,
+      status: 'auto_reference',
+      badgeText: `Tự tham chiếu Khung Bộ GD&ĐT (${pad2(day1)}–${pad2(day2)}/06/${y})`,
+      legalDoc: `Tự động tham chiếu theo Khung kế hoạch thời gian năm học của Bộ GD&ĐT (Tuần 2 tháng 6 — căn cứ quy chuẩn QĐ 2269/QĐ-BGDĐT & QĐ 2308/QĐ-BGDĐT)`,
+      issuedDate: `${y - 1}-08-06`,
+      issuer: 'Hệ thống Tự Tham Chiếu Khung Chuẩn Bộ GD&ĐT',
+      sourceUrl: 'https://moet.gov.vn/van-ban/vbdh/Pages/default.aspx',
+      govUrl: 'https://baochinhphu.vn',
+      lawUrl: 'https://thuvienphapluat.vn',
+      note: `Lịch thi Khóa ${y} (${cohort}) được tự động tham chiếu theo quy chuẩn Khung thời gian năm học của Bộ GD&ĐT (hoàn thành chương trình trước 31/05, thi Tốt nghiệp THPT vào tuần thứ 2 tháng 6: ${pad2(day1)} – ${pad2(day2)}/06/${y}). Khi Bộ GD&ĐT ban hành Quyết định số hiệu mới cho năm học ${y - 1} – ${y}, hệ thống hoặc Giáo viên có thể cập nhật đồng bộ ngay.`
+    };
+  },
+
+  // Hợp nhất 3 tầng dữ liệu: (1) Ghi đè Cloud/Giáo viên -> (2) Văn bản Bộ GD&ĐT chính thức -> (3) Tự tham chiếu Khung Bộ GD&ĐT
+  resolveThptExamSchedule(yearInput) {
+    const y = Math.max(2024, Math.min(2045, parseInt(yearInput, 10) || this.getDefaultThptTargetYear()));
+    const canonical = this.OFFICIAL_MOET_THPT_SCHEDULES[y]
+      ? { ...this.OFFICIAL_MOET_THPT_SCHEDULES[y] }
+      : this.computeCanonicalMoetScheduleForYear(y);
+
+    const customMap = (this.state && this.state.settings && this.state.settings.thptExamSchedules) || {};
+    const custom = customMap[y] || customMap[String(y)];
+    const merged = custom && typeof custom === 'object'
+      ? {
+          ...canonical,
+          ...custom,
+          year: y,
+          status: custom.status || 'official_custom',
+          badgeText: custom.badgeText || `Đã cập nhật nguồn · ${custom.legalDoc || `Khóa ${y}`}`
+        }
+      : canonical;
+
+    // Đảm bảo đồng bộ các trường ISO nếu người dùng chỉ cập nhật examDay1 / examDay2
+    if (merged.examDay1) {
+      merged.examStartIso = merged.examStartIso && merged.examStartIso.startsWith(merged.examDay1)
+        ? merged.examStartIso
+        : `${merged.examDay1}T07:30:00+07:00`;
+      merged.mathStartIso = merged.mathStartIso && merged.mathStartIso.startsWith(merged.examDay1)
+        ? merged.mathStartIso
+        : `${merged.examDay1}T14:20:00+07:00`;
+    }
+    if (merged.backupDate) {
+      merged.examEndIso = `${merged.backupDate}T17:00:00+07:00`;
+    }
+
+    merged.sessions = [
+      {
+        key: 'procedure',
+        date: merged.procedureDate,
+        dateLabel: this.formatIsoDateVn(merged.procedureDate, 'short'),
+        fullDateLabel: this.formatIsoDateVn(merged.procedureDate, true),
+        timeLabel: '14:00',
+        title: 'Làm thủ tục dự thi',
+        detail: 'Nhận thẻ dự thi, đính chính sai sót & nghe phổ biến Quy chế thi',
+        accent: 'teal'
+      },
+      {
+        key: 'day1',
+        date: merged.examDay1,
+        dateLabel: this.formatIsoDateVn(merged.examDay1, 'short'),
+        fullDateLabel: this.formatIsoDateVn(merged.examDay1, true),
+        timeLabel: '07:35 & 14:20',
+        title: 'Thi Ngữ văn & MÔN TOÁN',
+        detail: 'Sáng 07:35: Ngữ văn (120p) · Chiều 14:20: TOÁN (90p · Trắc nghiệm 3 phần)',
+        accent: 'crimson',
+        isMathDay: true
+      },
+      {
+        key: 'day2',
+        date: merged.examDay2,
+        dateLabel: this.formatIsoDateVn(merged.examDay2, 'short'),
+        fullDateLabel: this.formatIsoDateVn(merged.examDay2, true),
+        timeLabel: '07:35',
+        title: 'Bài thi Tự chọn (2 môn)',
+        detail: 'Sáng 07:35: Thi 2 môn tự chọn trong chương trình GDPT 2018 (50p/môn)',
+        accent: 'indigo'
+      },
+      {
+        key: 'backup',
+        date: merged.backupDate,
+        dateLabel: this.formatIsoDateVn(merged.backupDate, 'short'),
+        fullDateLabel: this.formatIsoDateVn(merged.backupDate, true),
+        timeLabel: 'Cả ngày',
+        title: 'Ngày thi dự phòng',
+        detail: `Công bố điểm dự kiến: ${this.formatIsoDateVn(merged.resultDate, false)}`,
+        accent: 'amber'
+      }
+    ];
+
+    return merged;
+  },
+
+  getDefaultThptTargetYear(nowInput) {
+    const now = nowInput instanceof Date ? nowInput : new Date(nowInput || Date.now());
+    const curYear = now.getFullYear();
+    // Mặc định ưu tiên khóa 2027 (Lớp 12 hiện tại) khi chưa qua kỳ thi 2027;
+    // Khi thời gian thực vượt qua kỳ thi của năm hiện hành, tự động nhảy sang năm kế tiếp.
+    const candidateYear = Math.max(2027, curYear);
+    const sched = this.OFFICIAL_MOET_THPT_SCHEDULES[candidateYear] || this.computeCanonicalMoetScheduleForYear(candidateYear);
+    const endMs = Date.parse(sched.examEndIso || `${candidateYear}-06-13T17:00:00+07:00`);
+    if (!isNaN(endMs) && now.getTime() > endMs) {
+      return candidateYear + 1;
+    }
+    return candidateYear;
+  },
+
+  getActiveThptCountdownYear() {
+    const y = parseInt(this.state.thptCountdownYear, 10);
+    if (!isNaN(y) && y >= 2024 && y <= 2045) return y;
+    const defY = this.getDefaultThptTargetYear();
+    this.state.thptCountdownYear = defY;
+    return defY;
+  },
+
+  getThptCountdownSnapshot(yearInput, modeInput, nowInput) {
+    const y = yearInput ? parseInt(yearInput, 10) : this.getActiveThptCountdownYear();
+    const mode = modeInput || this.state.thptCountdownTargetMode || 'exam_start';
+    const now = nowInput instanceof Date ? nowInput : new Date(nowInput || Date.now());
+    const sched = this.resolveThptExamSchedule(y);
+
+    const targetIso = mode === 'math_exam' ? sched.mathStartIso : sched.examStartIso;
+    const targetMs = Date.parse(targetIso);
+    const endMs = Date.parse(sched.examEndIso);
+    const startSchoolMs = Date.parse(sched.schoolYearStartIso);
+    const nowMs = now.getTime();
+
+    const diffMs = targetMs - nowMs;
+    let phase = 'upcoming'; // 'upcoming' | 'in_progress' | 'completed'
+    if (diffMs <= 0) {
+      phase = nowMs <= endMs ? 'in_progress' : 'completed';
+    }
+
+    const absMs = Math.max(0, diffMs);
+    const totalSeconds = Math.floor(absMs / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const weeksLeft = (days / 7).toFixed(1);
+
+    let progressPct = 100;
+    if (targetMs > startSchoolMs) {
+      const rawPct = ((nowMs - startSchoolMs) / (targetMs - startSchoolMs)) * 100;
+      progressPct = Math.max(0, Math.min(100, Math.round(rawPct * 10) / 10));
+    }
+
+    return {
+      year: y,
+      mode,
+      schedule: sched,
+      targetIso,
+      phase,
+      days,
+      hours,
+      minutes,
+      seconds,
+      weeksLeft,
+      progressPct
+    };
+  },
+
+  buildThptJuneCalendarMatrix(yearInput) {
+    const sched = this.resolveThptExamSchedule(yearInput);
+    const y = sched.year;
+    const firstDayUtc = new Date(Date.UTC(y, 5, 1)); // Tháng 6 (month index 5)
+    // Chuyển Chủ Nhật (0) -> 6, Thứ Hai (1) -> 0 ...
+    const leadingBlanks = (firstDayUtc.getUTCDay() + 6) % 7;
+    const daysInJune = 30;
+
+    const procDay = parseInt((sched.procedureDate || '').split('-')[2], 10);
+    const day1 = parseInt((sched.examDay1 || '').split('-')[2], 10);
+    const day2 = parseInt((sched.examDay2 || '').split('-')[2], 10);
+    const backupDay = parseInt((sched.backupDate || '').split('-')[2], 10);
+
+    const cells = [];
+    for (let i = 0; i < leadingBlanks; i++) {
+      cells.push({ empty: true });
+    }
+    for (let d = 1; d <= daysInJune; d++) {
+      let role = 'normal';
+      let badge = '';
+      if (d === procDay) {
+        role = 'procedure';
+        badge = 'Thủ tục';
+      } else if (d === day1) {
+        role = 'day1_math';
+        badge = 'Văn·TOÁN';
+      } else if (d === day2) {
+        role = 'day2';
+        badge = 'Tự chọn';
+      } else if (d === backupDay) {
+        role = 'backup';
+        badge = 'Dự phòng';
+      }
+      cells.push({
+        empty: false,
+        day: d,
+        iso: `${y}-06-${String(d).padStart(2, '0')}`,
+        role,
+        badge
+      });
+    }
+    return { year: y, schedule: sched, cells };
+  },
+
+  renderThptCountdownWidgetHtml() {
+    const snap = this.getThptCountdownSnapshot();
+    const sched = snap.schedule;
+    const y = snap.year;
+    const mode = snap.mode;
+    const expanded = Boolean(this.state.thptCalendarExpanded);
+    const pad2 = (n) => String(n).padStart(2, '0');
+
+    const quickYears = [
+      { year: 2027, label: '2027 · 2K9 (Lớp 12)' },
+      { year: 2028, label: '2028 · 2K10 (Lớp 11)' },
+      { year: 2029, label: '2029 · 2K11 (Lớp 10)' },
+      { year: 2030, label: '2030 · 2K12 (Lớp 9)' },
+      { year: 2026, label: '2026 · 2K8' }
+    ];
+
+    const isOfficial = sched.status === 'official' || sched.status === 'official_custom';
+    const statusBadgeClass = isOfficial
+      ? 'bg-emerald-50 text-[#137333] border-emerald-300'
+      : 'bg-amber-50 text-amber-800 border-amber-300';
+
+    const calMatrix = this.buildThptJuneCalendarMatrix(y);
+
+    return `
+      <div id="thptCountdownWidget" class="rounded-2xl border-2 border-[#650f12]/20 bg-gradient-to-b from-[#fffdf8] to-[#fbf4e8] p-3.5 sm:p-4 shadow-xs">
+        <!-- Dòng Tiêu đề & Huy hiệu Nguồn Bộ GD&ĐT -->
+        <div class="flex flex-wrap items-center justify-between gap-1.5 pb-2.5 border-b border-dashed border-[#650f12]/20">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="w-7 h-7 rounded-lg bg-[#650f12] text-[#ffe27d] inline-flex items-center justify-center text-xs shrink-0 shadow-2xs">
+              <i class="fa-solid fa-hourglass-half"></i>
+            </span>
+            <div class="min-w-0">
+              <div class="text-[11px] font-extrabold uppercase tracking-wider text-[#650f12] leading-tight truncate">
+                Đếm Ngược THPT Quốc Gia ${y}
+              </div>
+              <div class="text-xs font-bold text-slate-900 truncate">
+                ${sched.gradeLabel} · Thi ${this.formatIsoDateVn(sched.examDay1, false).slice(0, 5)} – ${this.formatIsoDateVn(sched.examDay2, false)}
+              </div>
+            </div>
+          </div>
+
+          <button type="button" id="thptSourceModalBtn" onclick="App.showThptScheduleReferenceModal(${y})"
+            class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10.5px] font-extrabold border ${statusBadgeClass} hover:opacity-90 transition cursor-pointer shrink-0"
+            title="Xem văn bản nguồn Bộ GD&ĐT & bảng tự tham chiếu các năm">
+            <i class="fa-solid ${isOfficial ? 'fa-circle-check' : 'fa-compass-drafting'} text-[10px]"></i>
+            <span id="thptSourceBadge">${sched.badgeText}</span>
+          </button>
+        </div>
+
+        <!-- Thanh Chọn Nhanh Khóa / Năm Thi (2027 · 2K9, 2028 · 2K10, 2029 · 2K11, ...) -->
+        <div class="mt-2.5 flex items-center justify-between gap-1.5 flex-wrap">
+          <div class="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5 max-w-full">
+            ${quickYears.map(item => `
+              <button type="button"
+                onclick="App.selectThptCountdownYear(${item.year})"
+                class="px-2.5 py-1 rounded-full text-[11px] font-extrabold whitespace-nowrap transition cursor-pointer ${
+                  y === item.year
+                    ? 'bg-[#650f12] text-[#ffe27d] shadow-2xs'
+                    : 'bg-white text-slate-700 border border-slate-200 hover:border-[#650f12]/40'
+                }">
+                ${item.label}
+              </button>
+            `).join('')}
+          </div>
+
+          <div class="flex items-center gap-1 shrink-0 ml-auto">
+            <label for="thptYearSelect" class="sr-only">Chọn năm thi THPT QG</label>
+            <select id="thptYearSelect" onchange="App.selectThptCountdownYear(this.value)"
+              class="text-[11px] font-bold bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#650f12] cursor-pointer"
+              title="Tự động tham chiếu lịch thi cho bất kỳ năm nào">
+              ${[2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035].map(yr => {
+                const bYr = yr - 18;
+                return `<option value="${yr}" ${yr === y ? 'selected' : ''}>Năm ${yr} (2K${String(bYr).slice(-2)})</option>`;
+              }).join('')}
+            </select>
+          </div>
+        </div>
+
+        <!-- Chuyển Mốc Đếm Ngược: Khai Mạc Kỳ Thi (07:30 11/06) vs Giờ Thi Môn Toán (14:20 11/06) -->
+        <div class="mt-2 grid grid-cols-2 gap-1 p-0.5 bg-white/90 rounded-xl border border-slate-200/90 text-[11px]">
+          <button type="button" id="thptModeExamStartBtn" onclick="App.selectThptCountdownTargetMode('exam_start')"
+            class="py-1 px-2 rounded-lg font-bold transition cursor-pointer truncate ${
+              mode === 'exam_start'
+                ? 'bg-[#3d0709] text-[#ffe27d] shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }">
+            <i class="fa-regular fa-bell mr-1"></i>Khai mạc (07:30 · ${this.formatIsoDateVn(sched.examDay1, false).slice(0, 5)})
+          </button>
+          <button type="button" id="thptModeMathBtn" onclick="App.selectThptCountdownTargetMode('math_exam')"
+            class="py-1 px-2 rounded-lg font-bold transition cursor-pointer truncate ${
+              mode === 'math_exam'
+                ? 'bg-[#137333] text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }">
+            <i class="fa-solid fa-square-root-variable mr-1"></i>Môn Toán (14:20 · ${this.formatIsoDateVn(sched.examDay1, false).slice(0, 5)})
+          </button>
+        </div>
+
+        <!-- 4 Ô Đồng Hồ Đếm Ngược Thời Gian Thực -->
+        ${snap.phase === 'upcoming' ? `
+          <div id="thptCountdownTimer" class="mt-2.5 grid grid-cols-4 gap-1.5 sm:gap-2 text-center">
+            <div class="rounded-xl bg-[#3d0709] text-white py-2 px-1 shadow-xs border border-[#8e2329]">
+              <div id="thptCdDays" class="font-mono font-extrabold text-xl sm:text-2xl text-[#ffe27d] leading-none">${snap.days}</div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-[#f7ebe0] mt-1">Ngày</div>
+            </div>
+            <div class="rounded-xl bg-[#3d0709] text-white py-2 px-1 shadow-xs border border-[#8e2329]">
+              <div id="thptCdHours" class="font-mono font-extrabold text-xl sm:text-2xl text-[#ffe27d] leading-none">${pad2(snap.hours)}</div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-[#f7ebe0] mt-1">Giờ</div>
+            </div>
+            <div class="rounded-xl bg-[#3d0709] text-white py-2 px-1 shadow-xs border border-[#8e2329]">
+              <div id="thptCdMins" class="font-mono font-extrabold text-xl sm:text-2xl text-[#ffe27d] leading-none">${pad2(snap.minutes)}</div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-[#f7ebe0] mt-1">Phút</div>
+            </div>
+            <div class="rounded-xl bg-[#3d0709] text-white py-2 px-1 shadow-xs border border-[#8e2329]">
+              <div id="thptCdSecs" class="font-mono font-extrabold text-xl sm:text-2xl text-emerald-300 leading-none">${pad2(snap.seconds)}</div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-[#f7ebe0] mt-1">Giây</div>
+            </div>
+          </div>
+        ` : snap.phase === 'in_progress' ? `
+          <div id="thptCountdownTimer" class="mt-2.5 rounded-xl bg-emerald-700 text-white p-3 text-center font-bold text-xs sm:text-sm shadow-xs">
+            <i class="fa-solid fa-fire-flame-curved text-amber-300 mr-1.5"></i>
+            Kỳ thi Tốt nghiệp THPT Quốc Gia ${y} đang diễn ra (${this.formatIsoDateVn(sched.examDay1, false)} – ${this.formatIsoDateVn(sched.examDay2, false)})! Chúc sĩ tử ${sched.cohort} bứt phá 9+ Toán!
+          </div>
+        ` : `
+          <div id="thptCountdownTimer" class="mt-2.5 rounded-xl bg-slate-800 text-white p-2.5 text-center text-xs flex items-center justify-between gap-2">
+            <span><i class="fa-solid fa-circle-check text-emerald-400 mr-1.5"></i>Kỳ thi THPT QG ${y} (${sched.cohort}) đã hoàn tất ngày ${this.formatIsoDateVn(sched.examDay2, false)}.</span>
+            <button type="button" onclick="App.selectThptCountdownYear(${this.getDefaultThptTargetYear()})"
+              class="px-2.5 py-1 rounded-lg bg-[#ffe27d] text-[#3d0709] font-extrabold text-[11px] shrink-0 cursor-pointer">
+              Về Khóa ${this.getDefaultThptTargetYear()}
+            </button>
+          </div>
+        `}
+
+        <!-- Thanh Tiến Độ Năm Học & Tóm Tắt Lộ Trình -->
+        <div class="mt-2.5">
+          <div class="flex items-center justify-between text-[11px] font-semibold text-slate-600 mb-1">
+            <span id="thptCdStatusText">
+              ${snap.phase === 'upcoming'
+                ? `Còn <strong class="text-[#650f12]">${snap.days} ngày</strong> (~${snap.weeksLeft} tuần ôn luyện)`
+                : `Mốc thi chính thức: <strong class="text-[#650f12]">${this.formatIsoDateVn(sched.examDay1, false)}</strong>`}
+            </span>
+            <span class="font-mono font-bold text-[#137333]">${snap.progressPct}% năm học</span>
+          </div>
+          <div class="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+            <div id="thptCdProgressBar" class="h-full bg-gradient-to-r from-[#650f12] via-[#b50415] to-[#137333] rounded-full transition-all duration-500" style="width:${snap.progressPct}%"></div>
+          </div>
+        </div>
+
+        <!-- Lịch Tóm Tắt 4 Ngày Thi Chính Thức -->
+        <div class="mt-2.5 grid grid-cols-2 gap-1.5 text-[11px]">
+          ${sched.sessions.map(s => `
+            <div class="rounded-xl px-2.5 py-1.5 border ${
+              s.isMathDay
+                ? 'bg-[#650f12]/5 border-[#650f12]/35 text-slate-900'
+                : 'bg-white/90 border-slate-200/90 text-slate-700'
+            }">
+              <div class="flex items-center justify-between gap-1 font-extrabold ${s.isMathDay ? 'text-[#650f12]' : 'text-slate-800'}">
+                <span class="truncate">${s.dateLabel}</span>
+                <span class="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-mono shrink-0">${s.timeLabel}</span>
+              </div>
+              <div class="font-bold truncate mt-0.5 ${s.isMathDay ? 'text-[#b50415]' : 'text-slate-900'}">${s.title}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <!-- Nút Mở Tờ Lịch Tháng 6 & Hộp Thoại Tự Tham Chiếu Nguồn Chính Xác Các Năm -->
+        <div class="mt-2.5 pt-2 border-t border-dashed border-slate-200 flex items-center justify-between gap-2 text-[11px]">
+          <button type="button" id="thptToggleCalendarBtn" onclick="App.toggleThptCalendarPanel()"
+            class="inline-flex items-center gap-1.5 font-extrabold text-[#650f12] hover:underline cursor-pointer">
+            <i class="fa-regular fa-calendar-days"></i>
+            <span>${expanded ? `Thu gọn Lịch Tháng 06/${y}` : `Xem Tờ Lịch Tháng 06/${y} & Giờ Thi`}</span>
+            <i class="fa-solid ${expanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-[10px]"></i>
+          </button>
+
+          <button type="button" onclick="App.showThptScheduleReferenceModal(${y})"
+            class="inline-flex items-center gap-1 font-bold text-indigo-700 hover:underline cursor-pointer shrink-0">
+            <i class="fa-solid fa-scale-balanced text-[10px]"></i>
+            <span>Nguồn &amp; Các năm</span>
+          </button>
+        </div>
+
+        <!-- Tờ Lịch Lưới Tháng 06/<Năm> & Chi Tiết Giờ Thi (Hiển thị khi bấm Mở Lịch) -->
+        <div id="thptCalendarPanel" class="${expanded ? 'mt-2.5' : 'hidden'} rounded-xl bg-white border border-slate-200 p-2.5 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <div class="font-serif font-extrabold text-xs text-slate-900">
+              <i class="fa-solid fa-calendar-check text-[#650f12] mr-1"></i>Tờ Lịch Tháng 06/${y} — Kỳ Thi THPT Quốc Gia (${sched.cohort})
+            </div>
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">4 môn · GDPT 2018</span>
+          </div>
+
+          <!-- Lưới 7 Cột Thứ Hai -> Chủ Nhật -->
+          <div class="grid grid-cols-7 gap-1 text-center text-[10px]">
+            ${['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map((wd, idx) => `
+              <div class="font-extrabold py-1 rounded ${idx === 6 ? 'text-[#b50415]' : 'text-slate-500'}">${wd}</div>
+            `).join('')}
+            ${calMatrix.cells.map(cell => {
+              if (cell.empty) return `<div class="py-1.5"></div>`;
+              let cls = 'bg-slate-50 text-slate-700 border-slate-100';
+              if (cell.role === 'procedure') cls = 'bg-teal-50 text-teal-900 border-teal-300 font-bold';
+              if (cell.role === 'day1_math') cls = 'bg-[#650f12] text-[#ffe27d] border-[#3d0709] font-extrabold shadow-2xs ring-2 ring-[#ffe27d]/60';
+              if (cell.role === 'day2') cls = 'bg-indigo-600 text-white border-indigo-700 font-extrabold shadow-2xs';
+              if (cell.role === 'backup') cls = 'bg-amber-50 text-amber-900 border-amber-300 font-bold';
+              return `
+                <div class="rounded-lg border py-1 px-0.5 flex flex-col items-center justify-center leading-tight ${cls}" title="${cell.iso}${cell.badge ? ' · ' + cell.badge : ''}">
+                  <span class="text-[11px]">${cell.day}</span>
+                  ${cell.badge ? `<span class="text-[8.5px] leading-none mt-0.5 truncate max-w-full">${cell.badge}</span>` : ''}
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <!-- Bảng Chi Tiết Giờ Thi Từng Buổi & Trích Dẫn Nguồn -->
+          <div class="space-y-1 text-[11px] pt-1 border-t border-dashed border-slate-200">
+            ${sched.sessions.map(s => `
+              <div class="flex items-start justify-between gap-2 py-1 border-b border-slate-100 last:border-b-0">
+                <div class="min-w-0">
+                  <span class="font-extrabold ${s.isMathDay ? 'text-[#650f12]' : 'text-slate-800'}">${s.fullDateLabel}:</span>
+                  <span class="font-semibold text-slate-900"> ${s.title}</span>
+                  <div class="text-[10.5px] text-slate-500">${s.detail}</div>
+                </div>
+                <span class="font-mono font-bold text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 shrink-0">${s.timeLabel}</span>
+              </div>
+            `).join('')}
+          </div>
+
+          <div class="rounded-lg bg-slate-50 border border-slate-200/80 p-2 text-[10.5px] text-slate-600 leading-relaxed">
+            <div><strong class="text-slate-800">Căn cứ pháp lý:</strong> ${sched.legalDoc}.</div>
+            <div class="mt-0.5">${sched.note}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  refreshThptCountdownWidget() {
+    if (typeof document === 'undefined' || !document.getElementById) return;
+    const mount = document.getElementById('thptCountdownMount');
+    if (mount) {
+      mount.innerHTML = this.renderThptCountdownWidgetHtml();
+    }
+  },
+
+  selectThptCountdownYear(yearInput) {
+    const y = Math.max(2024, Math.min(2045, parseInt(yearInput, 10) || 2027));
+    this.state.thptCountdownYear = y;
+    this.refreshThptCountdownWidget();
+  },
+
+  selectThptCountdownTargetMode(modeInput) {
+    this.state.thptCountdownTargetMode = modeInput === 'math_exam' ? 'math_exam' : 'exam_start';
+    this.refreshThptCountdownWidget();
+  },
+
+  toggleThptCalendarPanel() {
+    this.state.thptCalendarExpanded = !this.state.thptCalendarExpanded;
+    this.refreshThptCountdownWidget();
+  },
+
+  startThptCountdownTicker() {
+    if (this._thptCountdownInterval) {
+      clearInterval(this._thptCountdownInterval);
+      this._thptCountdownInterval = null;
+    }
+    if (typeof window === 'undefined' || typeof document === 'undefined' || !document.getElementById) return;
+    if (!document.getElementById('thptCountdownWidget')) return;
+
+    this._thptCountdownInterval = setInterval(() => {
+      const widget = document.getElementById('thptCountdownWidget');
+      if (!widget) {
+        clearInterval(this._thptCountdownInterval);
+        this._thptCountdownInterval = null;
+        return;
+      }
+      const snap = this.getThptCountdownSnapshot();
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const dEl = document.getElementById('thptCdDays');
+      const hEl = document.getElementById('thptCdHours');
+      const mEl = document.getElementById('thptCdMins');
+      const sEl = document.getElementById('thptCdSecs');
+      if (dEl) dEl.textContent = String(snap.days);
+      if (hEl) hEl.textContent = pad2(snap.hours);
+      if (mEl) mEl.textContent = pad2(snap.minutes);
+      if (sEl) sEl.textContent = pad2(snap.seconds);
+    }, 1000);
+
+    if (this._thptCountdownInterval && typeof this._thptCountdownInterval.unref === 'function') {
+      this._thptCountdownInterval.unref();
+    }
+  },
+
+  // Modal Tra Cứu Nguồn Chính Thức Bộ GD&ĐT & Cơ Chế Tự Tham Chiếu Cho Các Năm Khác (2025 – 2035)
+  showThptScheduleReferenceModal(focusYearInput) {
+    if (typeof document === 'undefined' || !document.createElement) return;
+    const focusYear = parseInt(focusYearInput, 10) || this.getActiveThptCountdownYear();
+    const focusSched = this.resolveThptExamSchedule(focusYear);
+    const compareYears = [2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032];
+    if (!compareYears.includes(focusYear)) compareYears.push(focusYear);
+    compareYears.sort((a, b) => a - b);
+
+    const existing = document.getElementById('thptScheduleRefModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'thptScheduleRefModal';
+    modal.className = 'fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto';
+    modal.innerHTML = `
+      <div class="bg-[#fffdf8] border-2 border-[#650f12]/25 rounded-2xl max-w-3xl w-full shadow-2xl overflow-hidden my-auto">
+        <!-- Header Đỏ Đô Học Thuật -->
+        <div class="bg-[#3d0709] text-white px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="w-10 h-10 rounded-xl bg-[#650f12] text-[#ffe27d] border border-[#ffe27d]/30 flex items-center justify-center shrink-0">
+              <i class="fa-solid fa-scale-balanced text-lg"></i>
+            </span>
+            <div class="min-w-0">
+              <h3 class="font-serif font-extrabold text-base sm:text-lg text-[#ffe27d] truncate">
+                Nguồn Lịch Thi THPT Quốc Gia &amp; Cơ Chế Tự Tham Chiếu Đa Năm
+              </h3>
+              <p class="text-xs text-[#f7ebe0]/90 truncate">
+                Căn cứ văn bản pháp quy Bộ GD&amp;ĐT (QĐ 2308/QĐ-BGDĐT) &amp; Khung kế hoạch thời gian năm học toàn quốc
+              </p>
+            </div>
+          </div>
+          <button type="button" onclick="document.getElementById('thptScheduleRefModal')?.remove()"
+            class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center shrink-0 cursor-pointer">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <div class="p-4 sm:p-6 space-y-5 max-h-[80dvh] overflow-y-auto text-xs sm:text-sm text-slate-700">
+          <!-- Khối 1: Chi tiết Nguồn Pháp Quy của Năm Đang Chọn -->
+          <div class="rounded-2xl border-2 border-[#650f12]/25 bg-white p-4 space-y-2.5 shadow-2xs">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="font-serif font-extrabold text-sm sm:text-base text-[#650f12]">
+                <i class="fa-solid fa-landmark mr-1.5"></i>Kỳ Thi Tốt Nghiệp THPT Quốc Gia Năm ${focusYear} (${focusSched.gradeLabel})
+              </div>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-extrabold ${
+                focusSched.status === 'official' || focusSched.status === 'official_custom'
+                  ? 'bg-emerald-50 text-[#137333] border border-emerald-300'
+                  : 'bg-amber-50 text-amber-800 border border-amber-300'
+              }">
+                ${focusSched.badgeText}
+              </span>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                <div class="text-slate-500 font-semibold">Ngày thi chính thức (2 ngày):</div>
+                <div class="font-extrabold text-slate-900 text-sm mt-0.5">
+                  ${this.formatIsoDateVn(focusSched.examDay1, true)} &amp; ${this.formatIsoDateVn(focusSched.examDay2, true)}
+                </div>
+              </div>
+              <div class="p-2.5 rounded-xl bg-[#650f12]/5 border border-[#650f12]/25">
+                <div class="text-[#650f12] font-semibold">Buổi thi Môn Toán (Bắt buộc):</div>
+                <div class="font-extrabold text-[#b50415] text-sm mt-0.5">
+                  14:20 Chiều ${this.formatIsoDateVn(focusSched.examDay1, true)} (90 phút)
+                </div>
+              </div>
+            </div>
+
+            <div class="text-xs space-y-1 text-slate-600">
+              <div><strong class="text-slate-900">Văn bản căn cứ:</strong> ${focusSched.legalDoc}</div>
+              <div><strong class="text-slate-900">Ghi chú chuyên môn:</strong> ${focusSched.note}</div>
+            </div>
+
+            <!-- Liên kết xác thực trực tiếp cổng thông tin chính phủ & Bộ GD&ĐT -->
+            <div class="pt-2 flex flex-wrap items-center gap-2">
+              <a href="${focusSched.sourceUrl}" target="_blank" rel="noopener noreferrer"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#650f12] text-[#ffe27d] font-bold text-xs hover:opacity-95">
+                <i class="fa-solid fa-up-right-from-square text-[10px]"></i>
+                <span>Cổng TTĐT Bộ GD&amp;ĐT (moet.gov.vn)</span>
+              </a>
+              <a href="${focusSched.govUrl}" target="_blank" rel="noopener noreferrer"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-300 text-slate-800 font-bold text-xs hover:bg-slate-50">
+                <i class="fa-solid fa-building-columns text-[#650f12] text-[10px]"></i>
+                <span>Báo Chính phủ (chinhphu.vn)</span>
+              </a>
+              <a href="${focusSched.lawUrl}" target="_blank" rel="noopener noreferrer"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-300 text-slate-800 font-bold text-xs hover:bg-slate-50">
+                <i class="fa-solid fa-file-contract text-indigo-600 text-[10px]"></i>
+                <span>Tra cứu Quyết định 2308/QĐ-BGDĐT</span>
+              </a>
+            </div>
+          </div>
+
+          <!-- Khối 2: Bảng Tự Tham Chiếu Lịch Thi Các Năm (2025 – 2032) -->
+          <div class="space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h4 class="font-serif font-extrabold text-sm sm:text-base text-slate-900">
+                <i class="fa-solid fa-table-list text-[#137333] mr-1.5"></i>Bảng Lịch Thi &amp; Tự Tham Chiếu Các Khóa (2025 – 2032)
+              </h4>
+              <span class="text-[11px] text-slate-500">Bấm "Chọn khóa này" để đổi đồng hồ đếm ngược</span>
+            </div>
+
+            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr class="bg-slate-100 text-slate-700 border-b border-slate-200 font-extrabold">
+                    <th class="py-2.5 px-3">Năm / Khóa</th>
+                    <th class="py-2.5 px-3">Làm thủ tục</th>
+                    <th class="py-2.5 px-3">Ngày thi chính thức (Văn &amp; Toán / Tự chọn)</th>
+                    <th class="py-2.5 px-3">Nguồn tham chiếu</th>
+                    <th class="py-2.5 px-3 text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200/80">
+                  ${compareYears.map(yr => {
+                    const sc = this.resolveThptExamSchedule(yr);
+                    const isCur = yr === this.getActiveThptCountdownYear();
+                    const isOff = sc.status === 'official' || sc.status === 'official_custom';
+                    return `
+                      <tr class="${isCur ? 'bg-[#650f12]/5 font-semibold' : 'hover:bg-slate-50'}">
+                        <td class="py-2 px-3 whitespace-nowrap">
+                          <div class="font-extrabold text-slate-900">Năm ${yr} (${sc.cohort})</div>
+                          <div class="text-[10.5px] text-slate-500">${sc.gradeLabel}</div>
+                        </td>
+                        <td class="py-2 px-3 whitespace-nowrap font-mono text-[11px]">
+                          ${this.formatIsoDateVn(sc.procedureDate, 'short')}
+                        </td>
+                        <td class="py-2 px-3">
+                          <div class="font-extrabold text-[#650f12]">
+                            ${this.formatIsoDateVn(sc.examDay1, 'short')} &amp; ${this.formatIsoDateVn(sc.examDay2, 'short')}
+                          </div>
+                          <div class="text-[10.5px] text-slate-500">Toán: 14:20 chiều ${this.formatIsoDateVn(sc.examDay1, false)} · Dự phòng: ${this.formatIsoDateVn(sc.backupDate, false)}</div>
+                        </td>
+                        <td class="py-2 px-3">
+                          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                            isOff ? 'bg-emerald-50 text-[#137333] border border-emerald-200' : 'bg-amber-50 text-amber-800 border border-amber-200'
+                          }">
+                            ${isOff ? 'Văn bản Bộ GD&ĐT' : 'Tự tham chiếu Khung Bộ GD&ĐT'}
+                          </span>
+                          <div class="text-[10.5px] text-slate-500 mt-0.5 line-clamp-1">${sc.legalDoc}</div>
+                        </td>
+                        <td class="py-2 px-3 text-right whitespace-nowrap">
+                          <button type="button"
+                            onclick="App.selectThptCountdownYear(${yr}); document.getElementById('thptScheduleRefModal')?.remove();"
+                            class="px-2.5 py-1 rounded-lg text-[11px] font-extrabold cursor-pointer ${
+                              isCur
+                                ? 'bg-[#137333] text-white'
+                                : 'bg-[#650f12] text-[#ffe27d] hover:opacity-90'
+                            }">
+                            ${isCur ? 'Đang chọn' : 'Chọn khóa này'}
+                          </button>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Khối 3: Giải Thích Cơ Chế Tự Tham Chiếu 3 Tầng & Cập Nhật Văn Bản Mới Cho Năm Bất Kỳ -->
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+            <div class="font-serif font-extrabold text-xs sm:text-sm text-slate-900">
+              <i class="fa-solid fa-gears text-indigo-600 mr-1.5"></i>Cơ Chế Tự Tham Chiếu Nguồn Chính Xác 3 Tầng &amp; Cập Nhật Văn Bản Bộ GD&amp;ĐT
+            </div>
+            <ul class="text-xs text-slate-600 space-y-1 list-disc pl-4">
+              <li><strong>Tầng 1 (Văn bản pháp quy Bộ GD&amp;ĐT đã ban hành):</strong> Tích hợp trực tiếp Quyết định số <code>2308/QĐ-BGDĐT</code> (Khóa 2027 · 2K9: thi <strong>11 – 12/06/2027</strong>), Công văn <code>1257/BGDĐT-QLCL</code> (Khóa 2026 · 2K8: thi <strong>11 – 12/06/2026</strong>) và Công văn <code>1239/BGDĐT-QLCL</code> (Khóa 2025 · 2K7: thi <strong>26 – 27/06/2025</strong>).</li>
+              <li><strong>Tầng 2 (Thuật toán Tự tham chiếu Khung thời gian năm học Bộ GD&amp;ĐT cho các năm 2028 – 2040):</strong> Tự động xác định cặp ngày Thứ Năm &amp; Thứ Sáu tuần thứ 2 của tháng 6 (ngay sau mốc hoàn thành chương trình năm học 31/05 theo quy định cố định của Bộ GD&amp;ĐT), đồng thời tự động chuyển khóa mặc định sang năm kế tiếp ngay khi kỳ thi năm hiện hành kết thúc.</li>
+              <li><strong>Tầng 3 (Đồng bộ Cloud khi Bộ GD&amp;ĐT ban hành Công văn / Quyết định mới):</strong> Cho phép cập nhật số hiệu Quyết định và ngày thi chính thức cho bất kỳ năm nào bên dưới.</li>
+            </ul>
+
+            <div class="pt-2 border-t border-dashed border-slate-300 grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+              <div class="sm:col-span-2">
+                <label class="block text-[10.5px] font-bold text-slate-700 mb-1">Năm thi</label>
+                <input type="number" id="customThptYearInput" min="2025" max="2045" value="${focusYear}"
+                  class="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-mono font-bold">
+              </div>
+              <div class="sm:col-span-3">
+                <label class="block text-[10.5px] font-bold text-slate-700 mb-1">Ngày thi 1 (Văn &amp; Toán)</label>
+                <input type="date" id="customThptDay1Input" value="${focusSched.examDay1}"
+                  class="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-mono font-bold">
+              </div>
+              <div class="sm:col-span-4">
+                <label class="block text-[10.5px] font-bold text-slate-700 mb-1">Số hiệu Quyết định / Công văn Bộ GD&amp;ĐT</label>
+                <input type="text" id="customThptLegalInput" value="${focusSched.legalDoc}" placeholder="VD: Quyết định 2308/QĐ-BGDĐT"
+                  class="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-medium">
+              </div>
+              <div class="sm:col-span-3 flex items-center gap-1.5">
+                <button type="button" onclick="App.saveCustomThptExamScheduleFromModal()"
+                  class="flex-1 py-1.5 px-2.5 rounded-lg bg-[#137333] hover:bg-emerald-800 text-white font-extrabold text-xs cursor-pointer">
+                  Lưu nguồn
+                </button>
+                <button type="button" onclick="App.resetCustomThptExamSchedule(document.getElementById('customThptYearInput')?.value)"
+                  class="py-1.5 px-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs cursor-pointer"
+                  title="Khôi phục về nguồn mặc định của Bộ GD&ĐT">
+                  Mặc định
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  },
+
+  saveCustomThptExamScheduleFromModal() {
+    const yEl = document.getElementById('customThptYearInput');
+    const d1El = document.getElementById('customThptDay1Input');
+    const legalEl = document.getElementById('customThptLegalInput');
+    const y = Math.max(2024, Math.min(2045, parseInt(yEl && yEl.value, 10) || 2027));
+    const d1Str = (d1El && d1El.value ? d1El.value.trim() : '');
+    const legalDoc = (legalEl && legalEl.value ? legalEl.value.trim() : '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d1Str)) return false;
+
+    const [yr, mo, dy] = d1Str.split('-').map(Number);
+    const dt1 = new Date(Date.UTC(yr, mo - 1, dy));
+    const fmt = (offsetDays) => {
+      const dt = new Date(dt1.getTime() + offsetDays * 86400000);
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+    };
+
+    if (!this.state.settings || typeof this.state.settings !== 'object') {
+      this.state.settings = {};
+    }
+    if (!this.state.settings.thptExamSchedules || typeof this.state.settings.thptExamSchedules !== 'object') {
+      this.state.settings.thptExamSchedules = {};
+    }
+
+    this.state.settings.thptExamSchedules[y] = {
+      year: y,
+      procedureDate: fmt(-1),
+      examDay1: fmt(0),
+      examDay2: fmt(1),
+      backupDate: fmt(2),
+      legalDoc: legalDoc || `Văn bản Bộ GD&ĐT cập nhật cho kỳ thi năm ${y}`,
+      badgeText: `Chính thức Bộ GD&ĐT · Khóa ${y}`,
+      status: 'official_custom',
+      updatedAt: Date.now()
+    };
+
+    this.state.thptCountdownYear = y;
+    this.saveData();
+    this.refreshThptCountdownWidget();
+    const modal = document.getElementById('thptScheduleRefModal');
+    if (modal) modal.remove();
+    return true;
+  },
+
+  resetCustomThptExamSchedule(yearInput) {
+    const y = parseInt(yearInput, 10) || this.getActiveThptCountdownYear();
+    if (this.state.settings && this.state.settings.thptExamSchedules) {
+      delete this.state.settings.thptExamSchedules[y];
+      delete this.state.settings.thptExamSchedules[String(y)];
+      this.saveData();
+    }
+    this.state.thptCountdownYear = y;
+    this.refreshThptCountdownWidget();
+    const modal = document.getElementById('thptScheduleRefModal');
+    if (modal) modal.remove();
+    return true;
   },
 
   switchLoginTab(tab) {
